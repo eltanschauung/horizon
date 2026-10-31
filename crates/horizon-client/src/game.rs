@@ -18270,6 +18270,9 @@ fn start_game<'a>(
         settings.render_distance = d;
     }
     let mut game = Game::new(res, pack, gui, options, settings, audio, prepared)?;
+    // Account textures are decoded during startup. Register their atlas patches
+    // before a world, player model or inventory preview can draw.
+    game.flush_skin_slots();
     game.rest_loader = rest_loader;
     game.ui.vanilla_root = vanilla_root;
     if let Some(error) = pack_error {

@@ -488,7 +488,6 @@ pub(super) struct Remote {
     tab_players: HashMap<u128, horizon_client::tab_list::TabPlayer>,
     /// Each listed profile's unpacked `textures` property.
     skin_textures: HashMap<u128, horizon_client::skins::Textures>,
-    /// Active skin and cape from the services profile when the server sent none.
     /// The skin texture each profile's players show, once its download is ready.
     skins: HashMap<u128, String>,
     listed: std::collections::HashSet<u128>,

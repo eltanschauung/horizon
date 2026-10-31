@@ -194,13 +194,20 @@ a local mock.
 
 ## Skins and capes (part b)
 
+**This fork:** the signed-in account's profile and textures are prepared once at application startup,
+before opening any world. Valid disk-cached images are reused and corrupt images are fetched again.
+Decoded account textures are registered in the game's atlas before the first world frame, and reused
+across world connections. This moves the initial network wait to startup; it does not make a first
+download instantaneous. Offline players, missing textures and failed service requests use classic
+Steve as the fallback, regardless of UUID. Other players' skins still download asynchronously.
+
 Profile properties (`textures`, base64 JSON) arrive in `ClientboundPlayerInfoUpdatePacket` for every
 player and in the login profile for ourselves. Like authlib's `unpackTextures`, only URLs under the
 discovery document's `profiles/getTexture` `validUris` (textures.minecraft.net) are fetched; skins
 (classic/slim from the `metadata.model`), capes and elytra textures are downloaded over HTTPS on a
 worker thread, cached on disk by texture hash (`assets/skins/xx/hash`, like vanilla's
 `SkinManager`), converted from legacy 64×32 the way `SkinTextureDownloader` does and given to the
-player renderer. Until a skin arrives the default skin for the UUID shows (as today).
+player renderer. Until a skin arrives classic Steve shows in this fork.
 
 ## Chat signing (part d)
 

@@ -716,10 +716,14 @@ pub fn process_legacy_skin(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u
 
 /// The signed-in player's textures, resolved once during application startup.
 /// World connections reuse this result instead of fetching the profile again.
-static OWN_TEXTURES: std::sync::OnceLock<Option<Textures>> = std::sync::OnceLock::new();
+struct PreparedOwn {
+    textures: Textures,
+    images: Vec<(Kind, String, Vec<u8>)>,
+}
+static OWN_TEXTURES: std::sync::OnceLock<Option<PreparedOwn>> = std::sync::OnceLock::new();
 
 pub fn own_textures() -> Option<Textures> {
-    OWN_TEXTURES.get().cloned().flatten()
+    Some(OWN_TEXTURES.get()?.as_ref()?.textures.clone())
 }
 
 /// Resolve and warm the account's disk cache before any world can open.
@@ -727,17 +731,23 @@ pub fn own_textures() -> Option<Textures> {
 pub fn prepare_own(root: &std::path::Path) {
     OWN_TEXTURES.get_or_init(|| {
         let session = crate::auth::current()?;
-        let textures = crate::auth::own_textures(&session)?;
+        let mut textures = crate::auth::own_textures(&session)?;
+        let mut images = Vec::new();
         for (kind, url) in [
-            (Kind::Skin, &textures.skin),
-            (Kind::Cape, &textures.cape),
-            (Kind::Elytra, &textures.elytra),
+            (Kind::Skin, &mut textures.skin),
+            (Kind::Cape, &mut textures.cape),
+            (Kind::Elytra, &mut textures.elytra),
         ] {
-            if let Some(url) = url {
-                let _ = load_texture(root, kind, url);
+            let Some(source) = url.as_ref() else { continue };
+            if let Some(rgba) = load_texture(root, kind, source) {
+                images.push((kind, source.clone(), rgba));
+            } else {
+                // An unavailable cape must not hold a ready skin behind a
+                // second download when entering a world.
+                *url = None;
             }
         }
-        Some(textures)
+        Some(PreparedOwn { textures, images })
     });
 }
 
@@ -789,7 +799,7 @@ const MAX_SKIN_IMAGES: usize = 1024;
 impl Downloader {
     pub fn new(root: std::path::PathBuf) -> Self {
         let (send, done) = std::sync::mpsc::channel();
-        Self {
+        let mut downloads = Self {
             root,
             states: Default::default(),
             done,
@@ -799,7 +809,26 @@ impl Downloader {
             images: Default::default(),
             image_order: Default::default(),
             drawn: Default::default(),
+        };
+        if let Some(Some(own)) = OWN_TEXTURES.get() {
+            for (kind, url, rgba) in &own.images {
+                downloads.install(*kind, url, rgba.clone());
+            }
         }
+        downloads
+    }
+
+    /// Register an already decoded texture before the first world frame.
+    fn install(&mut self, kind: Kind, url: &str, rgba: Vec<u8>) {
+        let Some(hash) = texture_hash(url) else {
+            return;
+        };
+        match kind {
+            Kind::Skin => self.queue(skin_location(&hash), rgba),
+            Kind::Cape => self.queue(cape_location(&hash), rgba),
+            Kind::Elytra => {}
+        }
+        self.states.insert((kind, hash), Download::Ready);
     }
     /// How the download of `url` stands, starting it the first time.
     pub fn state(&mut self, kind: Kind, url: &str) -> Download {
@@ -1253,6 +1282,46 @@ mod tests {
         // Stored this frame, kept through it.
         assert_eq!(slots.place("skins/d".into()), None);
         assert!(slots.contains("skins/b") && slots.contains("skins/c"));
+    }
+
+    /// A warmed disk cache can be decoded and registered without a worker or
+    /// a reachable texture service; the first lookup already has the image.
+    #[test]
+    fn warmed_skin_is_ready_for_the_first_lookup() {
+        let root = std::env::temp_dir().join(format!("horizon-warmed-skin-{}", std::process::id()));
+        let url = "http://127.0.0.1:1/texture/startup-test";
+        let location = super::skin_location("startup-test");
+        let digest = location.strip_prefix("skins/").unwrap();
+        let file = root.join(&digest[..2]).join(digest);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut bytes, 64, 64);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder
+                .write_header()
+                .unwrap()
+                .write_image_data(&vec![255; 64 * 64 * 4])
+                .unwrap();
+        }
+        std::fs::write(&file, bytes).unwrap();
+        let rgba = super::load_texture(&root, super::Kind::Skin, url).unwrap();
+        assert_eq!(rgba.len(), 64 * 64 * 4);
+        let mut downloads = super::Downloader::new(root.clone());
+        downloads.install(super::Kind::Skin, url, rgba.clone());
+        let textures = super::Textures {
+            skin: Some(url.into()),
+            slim: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            super::lookup(&textures, false, |kind, url| downloads.state(kind, url)),
+            Some(location.clone())
+        );
+        assert_eq!(downloads.take_ready(), vec![(location, rgba)]);
+        assert!(downloads.take_ready().is_empty());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// A skin evicted from the atlas re-uploads (`again`), once per ask.
