@@ -142,7 +142,7 @@ pub use interact::{InteractionResult, PlayerContext, PlayerEffect, UseBranch, hi
 pub use pistons::{BlockEventData, MovingPiston};
 pub use place::{PlaceContext, PlaceOutcome};
 pub use states::{BlockId, PropKey, StateTable};
-pub use tick::{Precipitation, PrecipitationKind};
+pub use tick::{Precipitation, PrecipitationKind, RandomTickMask};
 pub use ticks::Ticks;
 
 /// `Block.UPDATE_*` flags accepted by [`Behaviours::set_block`].

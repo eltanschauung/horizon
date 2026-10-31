@@ -4098,23 +4098,30 @@ impl Game<'_> {
         self.process_level_events()?;
         self.tick_scheduled()?;
         self.with_level(|b, level, ticks| {
+            // Each chunk's ticking sections and their masks, read again only
+            // after a block changed.
+            let mut sections = Vec::new();
             for (x, z) in ticking {
-                // The sections are read again only after a block changed.
                 let mut read = None;
-                let mut sections = Default::default();
                 let pos = horizon_core::position::ChunkPos::new(x, z);
-                b.tick_chunk_random(level, ticks, pos, |level, from| {
+                b.tick_chunk_random_masked(level, ticks, pos, |level, from| {
                     if read != Some(level.world.revision) {
                         read = Some(level.world.revision);
-                        sections = level
-                            .world
-                            .chunks
-                            .get(&(x, z))
-                            .map_or_else(Default::default, |chunk| {
-                                level.random_tick_sections.get((x, z), chunk, level.facts)
-                            });
+                        sections.clear();
+                        if let Some(chunk) = level.world.chunks.get(&(x, z)) {
+                            level.random_tick_sections.masked(
+                                (x, z),
+                                chunk,
+                                level.facts,
+                                |id| b.random_tick_candidate(BlockStateId(id)),
+                                &mut sections,
+                            );
+                        }
                     }
-                    sections.from(from)
+                    sections
+                        .iter()
+                        .find(|(y, _)| *y >= from)
+                        .map(|(y, mask)| (*y, Some(mask.clone())))
                 });
             }
             b.run_block_events(level, ticks);
