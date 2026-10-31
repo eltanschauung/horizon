@@ -714,6 +714,56 @@ pub fn process_legacy_skin(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u
     Some(img)
 }
 
+/// The signed-in player's textures, resolved once during application startup.
+/// World connections reuse this result instead of fetching the profile again.
+static OWN_TEXTURES: std::sync::OnceLock<Option<Textures>> = std::sync::OnceLock::new();
+
+pub fn own_textures() -> Option<Textures> {
+    OWN_TEXTURES.get().cloned().flatten()
+}
+
+/// Resolve and warm the account's disk cache before any world can open.
+/// Service failures leave Steve available; they never prevent game startup.
+pub fn prepare_own(root: &std::path::Path) {
+    OWN_TEXTURES.get_or_init(|| {
+        let session = crate::auth::current()?;
+        let textures = crate::auth::own_textures(&session)?;
+        for (kind, url) in [
+            (Kind::Skin, &textures.skin),
+            (Kind::Cape, &textures.cape),
+            (Kind::Elytra, &textures.elytra),
+        ] {
+            if let Some(url) = url {
+                let _ = load_texture(root, kind, url);
+            }
+        }
+        Some(textures)
+    });
+}
+
+fn load_texture(root: &std::path::Path, kind: Kind, url: &str) -> Option<Vec<u8>> {
+    let hash = texture_hash(url)?;
+    let digest = skin_location(&hash)["skins/".len()..].to_owned();
+    let file = root.join(&digest[..2]).join(&digest);
+    let decode = |bytes: &[u8]| {
+        let (w, h, rgba) = crate::hud::decode_bytes(bytes).ok()?;
+        match kind {
+            Kind::Skin => process_legacy_skin(w, h, &rgba),
+            Kind::Cape => process_cape(w, h, &rgba),
+            Kind::Elytra => Some(rgba),
+        }
+    };
+    if let Some(image) = std::fs::read(&file).ok().and_then(|b| decode(&b)) {
+        return Some(image);
+    }
+    // A corrupt cache entry is repaired rather than masking the skin forever.
+    let body = http_get(url)?;
+    let image = decode(&body)?;
+    let _ = std::fs::create_dir_all(file.parent()?);
+    let _ = std::fs::write(file, body);
+    Some(image)
+}
+
 /// `SkinTextureDownloader`: fetches textures on background threads, from
 /// the local cache (`<root>/<2 hex>/<sha1>`) or over HTTP, keeping each one
 /// by kind and hash as vanilla's `TextureCache`s do. A texture that can't
@@ -775,26 +825,10 @@ impl Downloader {
             return *state;
         }
         self.states.insert(key.clone(), Download::Pending);
-        let digest: String = skin_location(&key.1)["skins/".len()..].to_owned();
-        let file = self
-            .root
-            .join(if digest.len() > 2 { &digest[..2] } else { "xx" })
-            .join(&digest);
+        let root = self.root.clone();
         let (url, send) = (url.to_owned(), self.send.clone());
         std::thread::spawn(move || {
-            let bytes = std::fs::read(&file).ok().or_else(|| {
-                let body = http_get(&url)?;
-                let _ = std::fs::create_dir_all(file.parent()?);
-                let _ = std::fs::write(&file, &body);
-                Some(body)
-            });
-            let image = bytes
-                .and_then(|b| crate::hud::decode_bytes(&b).ok())
-                .and_then(|(w, h, rgba)| match kind {
-                    Kind::Skin => process_legacy_skin(w, h, &rgba),
-                    Kind::Cape => process_cape(w, h, &rgba),
-                    Kind::Elytra => Some(rgba),
-                });
+            let image = load_texture(&root, kind, &url);
             let _ = send.send((key, image));
         });
         Download::Pending

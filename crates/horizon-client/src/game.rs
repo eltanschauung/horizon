@@ -18931,6 +18931,9 @@ pub fn run() -> Result<()> {
             log::warn!("could not add the official server to servers.dat: {e}");
         }
     }
+    if options.execution_role.is_client() {
+        horizon_client::skins::prepare_own(&std::env::current_dir()?.join("assets/skins"));
+    }
     let early_settings = Settings::load(&std::env::current_dir()?.join("options.txt"));
     // Minecraft's constructor opens the narrator; a server has none.
     if options.execution_role.is_client() {

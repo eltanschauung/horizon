@@ -360,13 +360,6 @@ pub(super) enum ServicesKeys {
     /// `canValidateProfileKeys()` is false: none could be had.
     Missing,
 }
-/// The signed-in account's `/minecraft/profile` fetch after joining.
-enum OwnProfile {
-    Idle,
-    Fetching(std::sync::mpsc::Receiver<Option<horizon_client::skins::Textures>>),
-    Done(Option<horizon_client::skins::Textures>),
-}
-
 pub(super) struct Remote {
     pub session: Session,
     pub brand: String,
@@ -496,7 +489,6 @@ pub(super) struct Remote {
     /// Each listed profile's unpacked `textures` property.
     skin_textures: HashMap<u128, horizon_client::skins::Textures>,
     /// Active skin and cape from the services profile when the server sent none.
-    own_profile: OwnProfile,
     /// The skin texture each profile's players show, once its download is ready.
     skins: HashMap<u128, String>,
     listed: std::collections::HashSet<u128>,
@@ -942,7 +934,6 @@ impl Game<'_> {
             players: HashMap::new(),
             tab_players: HashMap::new(),
             skin_textures: HashMap::new(),
-            own_profile: OwnProfile::Idle,
             skins: HashMap::new(),
             listed: Default::default(),
             online_mode: false,
@@ -4651,39 +4642,11 @@ impl Game<'_> {
             }
         }
     }
-    fn poll_own_profile(&mut self) {
-        let Some(r) = self.remote.as_mut() else {
-            return;
-        };
-        match &mut r.own_profile {
-            OwnProfile::Idle => {
-                let Some(auth) = horizon_client::auth::current() else {
-                    r.own_profile = OwnProfile::Done(None);
-                    return;
-                };
-                let (send, recv) = std::sync::mpsc::channel();
-                std::thread::Builder::new()
-                    .name("Own profile".into())
-                    .spawn(move || {
-                        let _ = send.send(horizon_client::auth::own_textures(auth.as_ref()));
-                    })
-                    .ok();
-                r.own_profile = OwnProfile::Fetching(recv);
-            }
-            OwnProfile::Fetching(recv) => {
-                if let Ok(own) = recv.try_recv() {
-                    r.own_profile = OwnProfile::Done(own);
-                }
-            }
-            OwnProfile::Done(_) => {}
-        }
-    }
     /// `PlayerInfo.getSkin` for every player entity, including NPCs that are
     /// never in the tab list: resolve each profile's textures and give the
     /// level's player models their skin.
     pub(super) fn update_remote_skins(&mut self) {
         let local = self.remote.as_ref().map(|r| r.profile);
-        self.poll_own_profile();
         let Some(r) = self.remote.as_mut() else {
             return;
         };
@@ -4693,10 +4656,7 @@ impl Game<'_> {
             &r.skin_textures,
             &mut r.level_player_textures,
         );
-        let own = match &r.own_profile {
-            OwnProfile::Done(Some(t)) => Some(t.clone()),
-            _ => None,
-        };
+        let own = horizon_client::skins::own_textures();
         // Minecraft.profileFuture: the signed-in account's active skin and cape
         // from `/minecraft/profile` when the server sent none (single player) or
         // only a skin without the equipped cape.
