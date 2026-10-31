@@ -4101,29 +4101,31 @@ impl Game<'_> {
             // Each chunk's ticking sections and their masks, read again only
             // after a block changed.
             let mut sections = Vec::new();
-            for (x, z) in ticking {
-                let mut read = None;
-                let pos = horizon_core::position::ChunkPos::new(x, z);
-                b.tick_chunk_random_masked(level, ticks, pos, |level, from| {
-                    if read != Some(level.world.revision) {
-                        read = Some(level.world.revision);
-                        sections.clear();
-                        if let Some(chunk) = level.world.chunks.get(&(x, z)) {
-                            level.random_tick_sections.masked(
-                                (x, z),
-                                chunk,
-                                level.facts,
-                                |id| b.random_tick_candidate(BlockStateId(id)),
-                                &mut sections,
-                            );
+            horizon_client::spans::time("random_ticks", || {
+                for (x, z) in ticking {
+                    let mut read = None;
+                    let pos = horizon_core::position::ChunkPos::new(x, z);
+                    b.tick_chunk_random_masked(level, ticks, pos, |level, from| {
+                        if read != Some(level.world.revision) {
+                            read = Some(level.world.revision);
+                            sections.clear();
+                            if let Some(chunk) = level.world.chunks.get(&(x, z)) {
+                                level.random_tick_sections.masked(
+                                    (x, z),
+                                    chunk,
+                                    level.facts,
+                                    |id| b.random_tick_candidate(BlockStateId(id)),
+                                    &mut sections,
+                                );
+                            }
                         }
-                    }
-                    sections
-                        .iter()
-                        .find(|(y, _)| *y >= from)
-                        .map(|(y, mask)| (*y, Some(mask.clone())))
-                });
-            }
+                        sections
+                            .iter()
+                            .find(|(y, _)| *y >= from)
+                            .map(|(y, mask)| (*y, Some(mask.clone())))
+                    });
+                }
+            });
             b.run_block_events(level, ticks);
             b.tick_block_entities(level, ticks);
         });
