@@ -4,17 +4,11 @@
 //! ([`rust_toolchain`]). Unlike `.hmod` mods they are not sandboxed: their code runs with the
 //! player's rights.
 //!
-//! A native mod pins the Horizon revision it was made for (a Nightly's or a release's commit).
-//! Mods pinning different ones build on the newest of them, once the player agreed to try (they
-//! often still apply and compile). A mod that hooks only Horizon's native hook points
-//! (`game/native_hooks.rs`) names the version it needs instead (`hooks`): it builds on any Horizon
-//! whose hook points have that version or a later one (they are only ever added to), the player's own
-//! by default, so such mods always build together. The build compiles that revision's source, from
-//! GitHub, never a checkout on this computer, and installs as its own version,
-//! `native-<revision>-<key>` (the key hashes the revision, the mods' files, the tool's commit and
-//! the profile, so the same set builds once). The instance the mods are installed in plays it, and
-//! its next build stays on the same revision ([`base_for`]) until the player asks to update
-//! ([`update_for`]), so a rebuild compiles only what the mods changed.
+//! This fork always builds the current `eltanschauung/horizon` main branch. Mod revision pins
+//! remain compatibility checks; they cannot select an older upstream game. Hook requirements
+//! must be satisfied by the fork, with no fallback to a mod's tested upstream revision.
+//! Source comes from the fork's GitHub archive and installs as `native-<revision>-<key>`.
+//! Fork builds and their compiler cache are separate from upstream installations.
 use crate::backend;
 use crate::i18n::{tr, trf};
 use crate::instances::{self, Instance};
@@ -283,7 +277,7 @@ pub fn is_native(version: &str) -> bool {
 }
 
 pub(crate) fn root() -> PathBuf {
-    backend::build_dir().join("native")
+    backend::build_dir().join("fork-native")
 }
 
 /// The build's log, kept until the next build.
@@ -454,7 +448,7 @@ fn agreed(
                 .map(|(r, id)| format!("{id} → {}", &r[..r.len().min(7)]))
                 .collect();
             return Err(format!(
-                "These mods were made for different {which} revisions and can't be built together: {}. Install versions made for the same Nightly.",
+                "These mods were made for different {which} revisions and can't be built together: {}. Use mods compatible with this fork.",
                 list.join(", ")
             ));
         }
@@ -1198,12 +1192,11 @@ fn sync(from: &Path, to: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Builds `folder`'s mods on the Horizon revision they pin (else `base`'s, the installed version
-/// whose game files the build reuses: a native build's own revision when it is one, [`base_for`])
+/// Builds `folder`'s mods on the current fork main, reusing `base`'s prepared game files
 /// and points `instance` at the build, the default one included. Returns the build's version; a
-/// build already made is used again. Mods pinning different revisions build on the newest one,
-/// with the newest horizon-mixins they name, only when the player agreed to try (`anyway`): else
-/// the error starts with [`MISMATCH`] and says which.
+/// build already made is used again. Incompatible revision pins require the usual `anyway`
+/// override; it repins the mods to the fork and never changes the game source. The newest
+/// horizon-mixins revision the mods require is used.
 pub fn build(
     base: &str,
     folder: &Path,
@@ -1239,21 +1232,9 @@ pub fn build(
             ..b
         })
         .collect();
-    // A mod naming a hook points' version doesn't pin: it follows the others, else the game.
-    let pins: Vec<Bundle> = mods.iter().filter(|b| b.hooks.is_none()).cloned().collect();
-    let free = pins.iter().all(|b| b.horizon.is_none());
-    let pinned = newest(
-        &pins,
-        "Horizon",
-        |b| b.horizon.as_ref(),
-        || match &built_on {
-            Some(about) => Ok(about.horizon.clone()),
-            None => revision_of(base),
-        },
-        None,
-        |r| committed(backend::REPO, r),
-    )?;
-    let revision = with_hooks(&mods, pinned, free, hooks_at)?;
+    // Compatibility pins describe the mod, never the game source in this fork.
+    // Always build the fork's current main and refuse hook-version fallbacks.
+    let revision = with_hooks(&mods, crate::fork::build_revision()?, false, hooks_at)?;
     let other = mismatch(&mods, &revision);
     if let (Some(list), false) = (&other, anyway) {
         return Err(format!("{MISMATCH}{list}."));
@@ -1267,7 +1248,7 @@ pub fn build(
     // Said with a failure: a mod made for another revision may not apply or compile on this one.
     let blame = |e: String| {
         match &other {
-        Some(list) => format!("{e}\n\nSome mods were made for other Horizon versions ({list}), which may be why. Install versions made for the same Nightly."),
+        Some(list) => format!("{e}\n\nSome mods were made for other Horizon versions ({list}), which may be why. Use mods compatible with this fork."),
         None => e,
     }
     };

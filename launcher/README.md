@@ -1,5 +1,17 @@
 # Horizon launcher
 
+## This fork
+
+This launcher uses `eltanschauung/horizon` for game source, release listings and launcher updates.
+Every native mod Build resolves the fork's current `main`; mod compatibility pins and missing hook
+APIs cannot redirect it to upstream source. Builds and release installs must contain the fork's skin
+changes (commit `b543e8e4e`). Incompatible mods report their usual compatibility error instead.
+
+Installed games live in `fork-versions/` and native build caches in `fork-native/`, separately from old
+upstream installations. The existing account keyring, Minecraft files, game folder, worlds and skin
+cache are reused. Release downloads retain signature verification. Until this fork publishes releases,
+the release updater offers none; native mod Build still fetches the latest fork source from GitHub.
+
 A small desktop app that installs Horizon builds, prepares them from your own copy of
 Minecraft, and starts the client or a dedicated server. Built with [GPUI](https://www.gpui.rs),
 Zed's UI framework; it has its own Cargo workspace and is not part of the game's builds.

@@ -7,6 +7,7 @@ pub mod datapacks;
 pub mod desktop;
 pub mod desktop_seams;
 pub mod export;
+pub mod fork;
 #[cfg(unix)]
 pub mod game_app;
 pub mod game_log;

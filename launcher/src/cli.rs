@@ -758,9 +758,8 @@ enum Cmd {
         /// (default: the selected one)
         #[arg(long)]
         instance: Option<String>,
-        /// The installed version whose game files the build reuses, and whose commit it builds on
-        /// when no mod pins one (default: the one the instance plays, so a rebuild stays on its
-        /// Horizon)
+        /// The installed version whose prepared game files the build reuses.
+        /// Game source always comes from this fork's current main.
         #[arg(long)]
         version: Option<String>,
         /// Move to the newest installed release or Nightly instead of the Horizon the instance
@@ -770,7 +769,7 @@ enum Cmd {
         /// You read the mods' source and trust it with full access to this computer
         #[arg(long)]
         trust_native_code: bool,
-        /// Build mods made for different Horizon versions together anyway, on the newest of them
+        /// Try incompatible mod pins on the current fork main, without changing game source
         #[arg(long)]
         allow_version_mismatch: bool,
         /// The Cargo profile: fast (the default: incremental, quick to rebuild) or release

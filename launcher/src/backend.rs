@@ -9,8 +9,9 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
-pub const REPO: &str = "horizon-rust/horizon";
-pub const README_URL: &str = "https://github.com/horizon-rust/horizon/blob/main/launcher/README.md";
+pub const REPO: &str = "eltanschauung/horizon";
+pub const README_URL: &str =
+    "https://github.com/eltanschauung/horizon/blob/main/launcher/README.md";
 /// The players' page on connecting an AI agent (the website's docs/agents.md).
 pub const AGENT_DOCS_URL: &str = "https://playhorizon.dev/docs/agents";
 /// This launcher's version: the release workflow sets `HORIZON_LAUNCHER_VERSION` from the
@@ -610,7 +611,7 @@ fn short_path(path: &Path) -> Option<PathBuf> {
 }
 
 fn versions_dir() -> PathBuf {
-    data_dir().join("versions")
+    data_dir().join("fork-versions")
 }
 
 pub fn version_dir(tag: &str) -> PathBuf {
@@ -749,6 +750,9 @@ fn unpack(archive: &Path, url: &str, to: &Path) -> Result<(), String> {
 /// the fraction done.
 pub fn install(release: &Release, progress: impl Fn(f32)) -> Result<(), String> {
     let tag = release.tag.as_str();
+    crate::fork::verify_revision(&crate::native_mods::revision_of(
+        release.nightly.as_deref().unwrap_or(tag),
+    )?)?;
     let sha256 = match &release.nightly {
         // Signed for the Nightly channel, served under its own GitHub tag.
         Some(published) => crate::signed::nightly_digest(
@@ -2900,6 +2904,7 @@ fn replace_bundle(_new: &Path, _app: &Path) -> Result<(), String> {
 /// working; `restart` starts the new one. When the file there already is that release or
 /// a newer one (updated from the command line or another window), there is nothing to do.
 pub fn self_update(release: &Release, progress: impl Fn(f32)) -> Result<(), String> {
+    crate::fork::verify_revision(&crate::native_mods::revision_of(&release.tag)?)?;
     let (url, size) = release
         .asset
         .clone()
