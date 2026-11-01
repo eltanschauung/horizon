@@ -159,7 +159,7 @@ impl Screen {
         centered(
             atlas,
             batch,
-            "Each character has unqiue attributes.",
+            "Each character has unique attributes.",
             28.0,
             0xffaaaaaa,
         );
