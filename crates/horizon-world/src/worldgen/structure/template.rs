@@ -5,7 +5,10 @@ use crate::{
     nbt::{Compound, Tag},
     registry::{BlockRegistry, BlockStateId},
 };
-use std::sync::{Arc, OnceLock};
+use std::{
+    collections::BTreeSet,
+    sync::{Arc, OnceLock},
+};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct BlockInfo {
@@ -41,11 +44,17 @@ pub struct EntityInfo {
     pub nbt: Compound,
 }
 #[derive(Debug)]
+pub struct EnvironmentRequirement {
+    pub pos: [i32; 3],
+    pub states: Arc<BTreeSet<BlockStateId>>,
+}
+#[derive(Debug)]
 pub struct StructureTemplate {
     /// The id it was loaded under (`StructureResources::template`); empty
     /// for a template read from elsewhere.
     pub location: Arc<str>,
     pub size: [i32; 3],
+    pub environment: Option<Vec<EnvironmentRequirement>>,
     palettes: Vec<Palette>,
     pub entities: Vec<EntityInfo>,
 }
@@ -222,6 +231,7 @@ impl StructureTemplate {
         Self {
             location: "".into(),
             size: [0; 3],
+            environment: None,
             palettes: Vec::new(),
             entities: Vec::new(),
         }
@@ -322,9 +332,62 @@ impl StructureTemplate {
                 });
             }
         }
+        let known_state = |tag: &Tag| {
+            let Tag::Compound(c) = tag else {
+                return None;
+            };
+            let name = string(get(c, "id").or_else(|| get(c, "Name")))?;
+            registry.default_state(&name)?;
+            let id = read_state(registry, tag);
+            if let Some(Tag::Compound(properties)) =
+                get(c, "properties").or_else(|| get(c, "Properties"))
+            {
+                let actual = registry.state(id)?;
+                for (key, value) in properties {
+                    let Tag::String(value) = value else {
+                        return None;
+                    };
+                    if actual.properties.get(&key.to_string_lossy())
+                        != Some(&value.to_string_lossy())
+                    {
+                        return None;
+                    }
+                }
+            }
+            Some(id)
+        };
+        let ground: Arc<BTreeSet<BlockStateId>> =
+            Arc::new(match get(root, "horizon:allowed_ground") {
+                Some(Tag::List(list)) => list.iter().filter_map(known_state).collect(),
+                _ => BTreeSet::new(),
+            });
+        let environment = match get(root, "horizon:environment") {
+            Some(Tag::List(list)) if list.len() <= 262144 => Some(
+                list.iter()
+                    .map(|tag| {
+                        let c = match tag {
+                            Tag::Compound(c) => Some(c),
+                            _ => None,
+                        };
+                        let at = |k| c.and_then(|c| get(c, k));
+                        let states = if at("ground") == Some(&Tag::Byte(1)) {
+                            ground.clone()
+                        } else {
+                            Arc::new(at("state").and_then(known_state).into_iter().collect())
+                        };
+                        EnvironmentRequirement {
+                            pos: int_list(at("pos")),
+                            states,
+                        }
+                    })
+                    .collect(),
+            ),
+            _ => None,
+        };
         Self {
             location: "".into(),
             size,
+            environment,
             palettes,
             entities,
         }

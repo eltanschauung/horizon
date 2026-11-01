@@ -45,6 +45,12 @@ impl TemplateFeature {
         let resources = resources(bindings)?;
         let value: Value = serde_json::from_str(json)?;
         let raw: Box<RawValue> = serde_json::from_str(&value["templates"].to_string())?;
+        let require_environment = value["require_environment"].as_bool() == Some(true);
+        if require_environment && value.get("processors").is_some() {
+            return Err(DecodeError::Field(
+                "guarded templates cannot relocate through processors",
+            ));
+        }
         let templates = WeightedList::decode(&raw, |entry| {
             let entry: Value = serde_json::from_str(entry.get())?;
             let id = entry["id"]
@@ -61,7 +67,13 @@ impl TemplateFeature {
                     .collect::<Result<Vec<_>, _>>()?,
                 None => Rotation::ALL.to_vec(),
             };
-            Ok((template(&resources, id)?, rotations))
+            let template = template(&resources, id)?;
+            if require_environment && template.environment.as_ref().is_none_or(Vec::is_empty) {
+                return Err(DecodeError::Field(
+                    "missing template environment requirements",
+                ));
+            }
+            Ok((template, rotations))
         })?;
         let processors = match value.get("processors") {
             Some(p) => ProcessorList::decode(&p.to_string(), &resources, bindings)?,
@@ -103,6 +115,29 @@ impl TemplateFeature {
             let length = template.size[axis] / 2;
             for i in 0..3 {
                 pos[i] += step[i] * length;
+            }
+        }
+        // Validate the complete environment before writing a single block.
+        if let Some(requirements) = &template.environment {
+            for requirement in requirements {
+                let shifted =
+                    StructureTemplate::transform(requirement.pos, Mirror::None, rotation, [0; 3]);
+                let p = std::array::from_fn(|i| pos[i].wrapping_add(shifted[i]));
+                if !world.ensure_can_write(p)? {
+                    return Ok(false);
+                }
+                let old = world.block_state(p)?;
+                let matches = if rotation == Rotation::None {
+                    requirement.states.contains(&old)
+                } else {
+                    requirement
+                        .states
+                        .iter()
+                        .any(|state| self.resources.transforms.rotate(*state, rotation) == old)
+                };
+                if !matches {
+                    return Ok(false);
+                }
             }
         }
         if let Some(blocks) = &self.clearance {
@@ -259,5 +294,154 @@ impl FossilFeature {
             )?;
         }
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod environment_tests {
+    use super::*;
+    use crate::{
+        nbt::Tag,
+        registry::{BlockRegistry, BlockStateId},
+        worldgen::{anchor::WorldGenerationContext, structure::StateTransforms},
+    };
+    use std::collections::BTreeMap;
+    fn fixture() -> TemplateFeature {
+        let names = [
+            "minecraft:air",
+            "minecraft:stone",
+            "minecraft:water",
+            "minecraft:barrier",
+        ];
+        let state = |name: &str| Tag::compound([("id", Tag::String(name.into()))]);
+        let registry = Box::leak(Box::new(
+            BlockRegistry::from_nbt(&Tag::compound([
+                ("DataVersion", Tag::Int(horizon_core::version::DATA_VERSION)),
+                (
+                    "states",
+                    Tag::List(names.iter().map(|n| state(n)).collect()),
+                ),
+                (
+                    "defaults",
+                    Tag::compound(
+                        names
+                            .iter()
+                            .enumerate()
+                            .map(|(i, n)| (*n, Tag::Int(i as i32))),
+                    ),
+                ),
+            ]))
+            .unwrap(),
+        ));
+        let transforms=StateTransforms::from_json(r#"{"rotate":[[0,0,0],[1,1,1],[2,2,2],[3,3,3]],"mirror":[[0,0],[1,1],[2,2],[3,3]],"full_block":[false,true,false,true],"loot_containers":[],"block_entities":{}}"#,4).unwrap();
+        let ints = |p: [i32; 3]| Tag::List(p.into_iter().map(Tag::Int).collect());
+        let tag = Tag::compound([
+            ("size", ints([1, 1, 1])),
+            ("palette", Tag::List(vec![state("minecraft:stone")])),
+            (
+                "blocks",
+                Tag::List(vec![Tag::compound([
+                    ("pos", ints([0, 0, 0])),
+                    ("state", Tag::Int(0)),
+                ])]),
+            ),
+            (
+                "horizon:allowed_ground",
+                Tag::List(vec![state("minecraft:stone")]),
+            ),
+            (
+                "horizon:environment",
+                Tag::List(vec![
+                    Tag::compound([("pos", ints([0, -1, 0])), ("ground", Tag::Byte(1))]),
+                    Tag::compound([("pos", ints([0, 0, 0])), ("state", state("minecraft:air"))]),
+                    Tag::compound([("pos", ints([0, 1, 0])), ("state", state("minecraft:air"))]),
+                ]),
+            ),
+        ]);
+        let template = Arc::new(StructureTemplate::from_nbt(&tag, registry, &transforms));
+        let resources = Arc::new(StructureResources::new(
+            registry,
+            transforms,
+            std::path::Path::new("/nonexistent"),
+            BTreeMap::new(),
+            &BTreeMap::new(),
+        ));
+        TemplateFeature {
+            templates: WeightedList::new(vec![((template, vec![Rotation::None]), 1)]).unwrap(),
+            processors: ProcessorList::default(),
+            resources,
+            offset: [0; 3],
+            clearance: None,
+        }
+    }
+    struct World {
+        origin: [i32; 3],
+        ground: BlockStateId,
+        ceiling: bool,
+        writes: Vec<[i32; 3]>,
+    }
+    impl FeatureWorld for World {
+        type Error = ();
+        fn block(&mut self, p: [i32; 3]) -> Result<BlockStateId, ()> {
+            Ok(if p[1] < self.origin[1] {
+                self.ground
+            } else if self.ceiling && p[1] > self.origin[1] {
+                BlockStateId(1)
+            } else {
+                BlockStateId(0)
+            })
+        }
+        fn set_block(&mut self, p: [i32; 3], _: BlockStateId, _: i32) -> Result<bool, ()> {
+            self.writes.push(p);
+            Ok(true)
+        }
+    }
+    impl PlacementContext for World {
+        fn generation(&self) -> WorldGenerationContext {
+            WorldGenerationContext::new(-64, 384, 63)
+        }
+        fn min_y(&mut self) -> Result<i32, PlacementQueryError> {
+            Ok(-64)
+        }
+        fn height(&mut self, _: HeightmapType, _: i32, _: i32) -> Result<i32, PlacementQueryError> {
+            panic!("an anchored feature must not project itself onto the ocean surface")
+        }
+        fn block_state(&mut self, p: [i32; 3]) -> Result<BlockStateId, PlacementQueryError> {
+            Ok(self.block(p).unwrap())
+        }
+        fn fluid_state(
+            &mut self,
+            _: [i32; 3],
+        ) -> Result<crate::fluid::FluidState, PlacementQueryError> {
+            Ok(crate::fluid::FluidState::EMPTY)
+        }
+    }
+    #[test]
+    fn guarded_templates_require_solid_substrate_and_space_before_any_writes() {
+        let feature = fixture();
+        for (y, ground, ceiling, expected) in [
+            (-30, 1, false, true),
+            (68, 1, false, true),
+            (63, 2, false, false),
+            (63, 0, false, false),
+            (-30, 1, true, false),
+        ] {
+            let mut world = World {
+                origin: [142, y, -864],
+                ground: BlockStateId(ground),
+                ceiling,
+                writes: vec![],
+            };
+            let origin = world.origin;
+            let result = feature
+                .place(
+                    &mut world,
+                    &mut horizon_core::random::LegacyRandom::new(42),
+                    origin,
+                )
+                .unwrap();
+            assert_eq!(result, expected);
+            assert_eq!(world.writes, if expected { vec![origin] } else { vec![] });
+        }
     }
 }

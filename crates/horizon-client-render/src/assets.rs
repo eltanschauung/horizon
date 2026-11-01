@@ -81,7 +81,42 @@ pub struct Assets {
 }
 /// The block models and their baked sprites, read from the pack at `root` over
 /// an existing block registry: everything the mesher and renderer need.
+#[derive(Clone, Copy, Debug, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BlockTint {
+    None,
+    Grass,
+    Foliage,
+    DryFoliage,
+    LilyPad,
+}
+/// Explicit color providers for namespaced blocks, indexed by model tint index.
+fn block_tints(root: &Path) -> Result<std::collections::BTreeMap<String, Vec<BlockTint>>> {
+    let mut out = std::collections::BTreeMap::new();
+    for namespace in std::fs::read_dir(root.join("assets"))? {
+        let namespace = namespace?;
+        let p = namespace.path().join("horizon/block_colors.json");
+        if !p.is_file() {
+            continue;
+        }
+        let entries: std::collections::BTreeMap<String, Vec<BlockTint>> =
+            serde_json::from_slice(&std::fs::read(&p)?)?;
+        for (name, tints) in entries {
+            if !name.starts_with(&format!("{}:", namespace.file_name().to_string_lossy()))
+                || tints.len() > 2
+                || tints.is_empty()
+            {
+                return Err(
+                    format!("invalid block color declaration {name} in {}", p.display()).into(),
+                );
+            }
+            out.insert(name, tints);
+        }
+    }
+    Ok(out)
+}
 pub struct RenderAssets {
+    pub block_tints: std::collections::BTreeMap<String, Vec<BlockTint>>,
     pub sprite_size: u32,
     pub sprite_minimum_size: u32,
     pub pixels: Vec<u8>,
@@ -247,6 +282,7 @@ impl RenderAssets {
         // `finish` grows the buffer by doubling: keep only the bytes in use.
         sprites.pixels.shrink_to_fit();
         Ok(Self {
+            block_tints: block_tints(root)?,
             sprite_size: sprites.size,
             sprite_minimum_size: sprites.minimum_size,
             texture_layers: u32::try_from(sprites.count())?,
@@ -340,5 +376,31 @@ mod tests {
             chicken.consumable.as_ref().unwrap().effects[..],
             [ConsumeEffect::ApplyEffects { probability, .. }] if probability == 0.3
         ));
+    }
+}
+
+#[cfg(test)]
+mod block_color_tests {
+    use super::*;
+    #[test]
+    fn explicit_sources_preserve_tint_indices_and_reject_invalid_declarations() {
+        let root = std::env::temp_dir().join(format!("block-colors-{}", std::process::id()));
+        let p = root.join("assets/plants/horizon");
+        std::fs::create_dir_all(&p).unwrap();
+        let file = p.join("block_colors.json");
+        std::fs::write(&file,r#"{"plants:clover":["grass"],"plants:petals":["none","grass"],"plants:leaves":["foliage"]}"#).unwrap();
+        let colors = block_tints(&root).unwrap();
+        assert_eq!(colors["plants:clover"], [BlockTint::Grass]);
+        assert_eq!(colors["plants:petals"], [BlockTint::None, BlockTint::Grass]);
+        assert_eq!(colors["plants:leaves"], [BlockTint::Foliage]);
+        for invalid in [
+            r#"{"minecraft:grass_block":["grass"]}"#,
+            r#"{"plants:clover":["unknown"]}"#,
+            r#"{"plants:clover":[]}"#,
+        ] {
+            std::fs::write(&file, invalid).unwrap();
+            assert!(block_tints(&root).is_err());
+        }
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

@@ -545,7 +545,7 @@ impl MeshTables {
             let prop = |k: &str| -> u8 { props.get(k).and_then(|v| v.parse().ok()).unwrap_or(0) };
             let name = s.name.strip_prefix("minecraft:").unwrap_or(&s.name);
             // BlockColors.createDefault: tint sources by block.
-            let (tints, tint_count) = match name {
+            let (mut tints, mut tint_count) = match name {
                 "large_fern" | "tall_grass" => {
                     if props.get("half").map(String::as_str) == Some("upper") {
                         ([Tint::TallGrassUpper; 2], 1)
@@ -573,6 +573,19 @@ impl MeshTables {
                 "lily_pad" => ([Tint::LilyPad; 2], 1),
                 _ => ([Tint::None; 2], 0),
             };
+            if let Some(sources) = render.block_tints.get(s.name.as_ref()) {
+                tints = [Tint::None; 2];
+                for (slot, source) in tints.iter_mut().zip(sources) {
+                    *slot = match source {
+                        crate::assets::BlockTint::None => Tint::None,
+                        crate::assets::BlockTint::Grass => Tint::Grass,
+                        crate::assets::BlockTint::Foliage => Tint::Foliage,
+                        crate::assets::BlockTint::DryFoliage => Tint::DryFoliage,
+                        crate::assets::BlockTint::LilyPad => Tint::Constant(0x20_8030),
+                    };
+                }
+                tint_count = sources.len() as u8;
+            }
             // getShadeBrightness overrides; the default is 0.2 for full collision shapes.
             let overrides = [
                 "TransparentBlock",

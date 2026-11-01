@@ -1179,3 +1179,21 @@ A native source bundle may include `mixins/<id>/data/runtime-toggle.json` with
 `{"runtime_toggle":true}` to keep its component built even while its menu switch
 is off. The component must honor world-scoped `WorldgenOverrides::mod_enabled`
 and activate cached world hooks via `WorldgenOverrides::activate`.
+
+`assets/<namespace>/horizon/block_colors.json` maps block IDs to an ordered list
+of color sources, one per model `tintindex` (up to two): `none`, `grass`,
+`foliage`, `dry_foliage`, or `lily_pad`. For example,
+`{"plants:clover":["grass"],"plants:flowers":["none","grass"]}`. Sources are
+explicit: a vanilla behavior template does not define a custom model's tint
+indices. Near meshes, particles/default block tints and distant terrain read
+the declaration. Faces without a tint index retain their original colors.
+
+Exported structure geometry can carry `horizon:environment` in its NBT: a list
+of `{pos:[x,y,z], state:<block state>}` input requirements, relative to the same
+origin as its blocks. A requirement with `ground:1b` uses the state alternatives
+in `horizon:allowed_ground`. The feature checks every requirement and placement
+bounds before writing. Unknown states fail closed. A configured template with
+`require_environment:true` refuses missing/empty requirements and processors
+that could relocate blocks after checking them. Requirements rotate with the
+shape. This permits conservative replay of an exported shape without discarding
+its substrate, fluid and clearance constraints.

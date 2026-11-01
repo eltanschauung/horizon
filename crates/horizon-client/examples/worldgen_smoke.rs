@@ -32,6 +32,18 @@ fn main() -> horizon_client::Result<()> {
     check(&a)
 }
 fn check(a: &[String]) -> horizon_client::Result<()> {
+    let seed = std::env::var("HORIZON_TEST_SEED")
+        .ok()
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(8448363262698333288);
+    let cx = std::env::var("HORIZON_TEST_CHUNK_X")
+        .ok()
+        .and_then(|s| s.parse::<i32>().ok())
+        .unwrap_or(0);
+    let cz = std::env::var("HORIZON_TEST_CHUNK_Z")
+        .ok()
+        .and_then(|s| s.parse::<i32>().ok())
+        .unwrap_or(0);
     let base = Path::new(&a[0]);
     let scratch = Path::new(&a[1]);
     std::fs::create_dir_all(scratch)?;
@@ -48,6 +60,28 @@ fn check(a: &[String]) -> horizon_client::Result<()> {
     let root = mod_content::resource_root(base, &mods, &scratch.join("cache"))?;
     let assets = Assets::load(&root)?;
     let biomes = Biomes::load(&root)?;
+    if let Ok(expected) = std::env::var("HORIZON_TEST_TINTS") {
+        let expected: std::collections::BTreeMap<String, Vec<Option<u32>>> =
+            serde_json::from_str(&expected)?;
+        let render = assets.reload(&root)?;
+        let facts = horizon_client::blocks::BlockFacts::load(&root, assets.registry)?;
+        let visibility = horizon_client::models::load_visibility(&root, assets.registry)?;
+        let tables = horizon_client::mesher::MeshTables::new(&assets, &render, &facts, visibility)?;
+        for (name, colors) in expected {
+            let state = assets
+                .registry
+                .default_state(&name)
+                .ok_or("missing tint test block")?;
+            for (index, expected) in colors.iter().enumerate() {
+                assert_eq!(
+                    tables.default_tint(state, index as i32, 0x123456),
+                    *expected,
+                    "{name} tint index {index}"
+                );
+            }
+        }
+        println!("PASS custom block tint sources");
+    }
     let mut ov = WorldgenOverrides::default();
     ov.set_mods([("tectonic_horizon".into(), a[3] == "true")].into());
     ov.activate();
@@ -72,12 +106,8 @@ fn check(a: &[String]) -> horizon_client::Result<()> {
         "minecraft:the_nether",
         "minecraft:the_end",
     ] {
-        let g = OverworldGenerator::for_dimension(
-            data.clone(),
-            8448363262698333288,
-            "minecraft:normal",
-            dimension,
-        )?;
+        let g =
+            OverworldGenerator::for_dimension(data.clone(), seed, "minecraft:normal", dimension)?;
         let unsupported = g.unsupported_features();
         assert!(unsupported.is_empty(), "{dimension}: {unsupported:?}");
         let mut worker = g.worker();
@@ -103,14 +133,15 @@ fn check(a: &[String]) -> horizon_client::Result<()> {
         &ov,
         assets.registry,
         &biomes,
-        8448363262698333288,
+        seed,
         "minecraft:normal",
         "minecraft:overworld",
         true,
     )?;
     let mut worker = terrain.worker();
-    let mut region: [Proto; 9] =
-        std::array::from_fn(|i| terrain.proto(&mut worker, i as i32 % 3 - 1, i as i32 / 3 - 1));
+    let mut region: [Proto; 9] = std::array::from_fn(|i| {
+        terrain.proto(&mut worker, i as i32 % 3 + cx - 1, i as i32 / 3 + cz - 1)
+    });
     terrain.decorate(&mut worker, &mut region);
     let [_, _, _, _, center, ..] = region;
     let chunk = terrain.finish(center);
@@ -121,8 +152,13 @@ fn check(a: &[String]) -> horizon_client::Result<()> {
     let chunk = Arc::new(chunk);
     save.save(&[chunk.clone()], assets.registry, &biomes)?;
     let loaded = save
-        .load(0, 0, assets.registry, &biomes)
+        .load(cx, cz, assets.registry, &biomes)
         .ok_or("chunk did not reopen")?;
+    let forbidden: Vec<String> = std::env::var("HORIZON_TEST_FORBID_SURFACE")
+        .ok()
+        .map(|v| serde_json::from_str(&v))
+        .transpose()?
+        .unwrap_or_default();
     let mut custom = 0;
     let mut hash = 0xcbf29ce484222325u64;
     for y in chunk.min_y()..chunk.max_y() {
@@ -131,6 +167,19 @@ fn check(a: &[String]) -> horizon_client::Result<()> {
                 let b = chunk.get(x, y, z);
                 assert_eq!(b, loaded.get(x, y, z));
                 hash = (hash ^ b as u64).wrapping_mul(0x100000001b3);
+                if y >= 63 && !forbidden.is_empty() {
+                    let name = &assets
+                        .registry
+                        .state(horizon_world::registry::BlockStateId(b))
+                        .unwrap()
+                        .name;
+                    assert!(
+                        !forbidden.iter().any(|id| id == name),
+                        "unexpected surface feature {name} at {},{y},{}",
+                        cx * 16 + x,
+                        cz * 16 + z
+                    );
+                }
                 custom += usize::from(
                     assets
                         .registry

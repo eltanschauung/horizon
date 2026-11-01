@@ -162,7 +162,18 @@ impl Mesher {
                     *slot = Some(Style {
                         layer: face.layer as u16 | if leaves { OPAQUE_LAYER } else { 0 },
                         tint: if face.quad.tint_index >= 0 {
-                            tint
+                            match context.render.block_tints.get(name) {
+                                Some(sources) => match sources.get(face.quad.tint_index as usize) {
+                                    Some(crate::assets::BlockTint::Grass) => Tint::Grass,
+                                    Some(crate::assets::BlockTint::Foliage) => Tint::Foliage,
+                                    Some(crate::assets::BlockTint::DryFoliage) => Tint::Dry,
+                                    Some(crate::assets::BlockTint::LilyPad) => {
+                                        Tint::Constant(0x20_8030)
+                                    }
+                                    _ => Tint::None,
+                                },
+                                None => tint,
+                            }
                         } else {
                             Tint::None
                         },
