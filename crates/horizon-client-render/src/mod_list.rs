@@ -62,15 +62,30 @@ impl ModList {
         Self::parse(&horizon_mods::selections::load(dir))
     }
     pub fn parse(text: &str) -> Self {
-        let ids = |value: &str| -> BTreeSet<String> {
-            text.lines()
-                .filter_map(|l| l.split_once(':'))
-                .filter(|(_, v)| v.trim() == value)
-                .filter_map(|(k, _)| k.trim().strip_prefix("mod."))
-                .map(str::to_owned)
-                .collect()
-        };
-        let (enabled, disabled) = (ids("true"), ids("false"));
+        let mut flags = BTreeMap::new();
+        for (key, value) in text.lines().filter_map(|line| line.split_once(':')) {
+            if let Some(id) = key.trim().strip_prefix("mod.") {
+                match value.trim() {
+                    "true" => {
+                        flags.insert(id.to_owned(), true);
+                    }
+                    "false" => {
+                        flags.insert(id.to_owned(), false);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let enabled = flags
+            .iter()
+            .filter(|(_, on)| **on)
+            .map(|(id, _)| id.clone())
+            .collect();
+        let disabled = flags
+            .into_iter()
+            .filter(|(_, on)| !*on)
+            .map(|(id, _)| id)
+            .collect();
         let mut keys: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
         for (k, v) in text.lines().filter_map(|l| l.split_once(':')) {
             // Mod ids have no dots; a key's name may.
@@ -127,14 +142,16 @@ impl ModList {
         let Some(m) = self.installed.get(i).filter(|m| !m.dev) else {
             return;
         };
-        if m.native.is_some() {
-            if self.disabled.remove(&m.id) {
-                self.enabled.insert(m.id.clone());
-            } else {
-                self.enabled.remove(&m.id);
-                self.disabled.insert(m.id.clone());
-            }
-        } else if !self.enabled.remove(&m.id) {
+        let on = if m.native.is_some() {
+            !self.disabled.contains(&m.id)
+        } else {
+            self.enabled.contains(&m.id)
+        };
+        if on {
+            self.enabled.remove(&m.id);
+            self.disabled.insert(m.id.clone());
+        } else {
+            self.disabled.remove(&m.id);
             self.enabled.insert(m.id.clone());
         }
     }
@@ -163,6 +180,13 @@ mod tests {
         ModList::default().save(&dir);
         assert!(ModList::load(&dir).enabled.is_empty());
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn repeated_selection_lines_use_the_last_value() {
+        let list = ModList::parse("mod.a:false\nmod.a:true\nmod.b:true\nmod.b:false\n");
+        assert!(list.enabled.contains("a") && !list.disabled.contains("a"));
+        assert!(list.disabled.contains("b") && !list.enabled.contains("b"));
     }
 
     #[test]
@@ -206,6 +230,10 @@ mod tests {
         assert_eq!(list.serialize(), "mod.a:true\n");
         list.toggle(0);
         assert!(!list.is_on(0));
+        list.toggle(0);
+        assert!(list.is_on(0));
+        assert!(!list.disabled.contains("a"));
+        list.toggle(0);
         list.installed.push(Installed {
             native: Some(NativePage::default()),
             ..installed("c", false)
@@ -214,10 +242,10 @@ mod tests {
         assert!(list.is_on(2));
         list.toggle(2);
         assert!(!list.is_on(2));
-        assert_eq!(list.serialize(), "mod.c:false\n");
+        assert_eq!(list.serialize(), "mod.a:false\nmod.c:false\n");
         assert_eq!(ModList::parse(&list.serialize()).disabled, list.disabled);
         list.toggle(2);
         assert!(list.is_on(2));
-        assert_eq!(list.serialize(), "mod.c:true\n");
+        assert_eq!(list.serialize(), "mod.c:true\nmod.a:false\n");
     }
 }

@@ -17928,7 +17928,6 @@ fn synchronous_startup(options: &Options) -> bool {
         || options.frames.is_some()
         || options.world_frames.is_some()
         || options.benchmark.is_some()
-        || options.control.is_some()
         || !options.execution_role.is_client()
         || std::env::var_os("HORIZON_DISPENSE_FIXTURE").is_some()
         || std::env::var_os("HORIZON_SCULK_FIXTURE").is_some()
@@ -19383,7 +19382,7 @@ pub fn run() -> Result<()> {
     // official server in their list (servers.dat in the game folder, the working directory). Not
     // for a server, a benchmark, a run that quits by itself, a harness's fixture or a run that
     // horizon-ctl drives: those start in a source checkout and wrote the list there.
-    if !options.offscreen && !synchronous_startup(&options) {
+    if !options.offscreen && !synchronous_startup(&options) && options.control.is_none() {
         horizon_client::heartbeat::start();
         if let Err(e) = horizon_client::multiplayer::add_official_server(&std::env::current_dir()?)
         {

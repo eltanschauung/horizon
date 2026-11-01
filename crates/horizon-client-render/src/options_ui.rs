@@ -5355,6 +5355,7 @@ mod tests {
             false,
         );
         assert!(!s.mods.is_on(0));
+        assert_eq!(s.mods.serialize(), "mod.normal:false\n");
         ui.in_world = true;
         let widgets = ui.layout(&s, size.0, size.1).0;
         assert!(
