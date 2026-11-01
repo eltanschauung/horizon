@@ -352,12 +352,16 @@ impl Settings {
                 mods,
                 ..Self::parse(&String::from_utf8_lossy(&bytes))
             },
-            Err(_) => Self {
+            Err(error) => Self {
                 horizon,
                 controller,
                 extras,
                 mods,
-                ..Self::default()
+                ..if error.kind() == std::io::ErrorKind::NotFound {
+                    Self::parse(include_str!("defaults/options.txt"))
+                } else {
+                    Self::default()
+                }
             },
         };
         settings.describe_for_crashes();
@@ -828,6 +832,49 @@ pub enum Opt {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn fork_preferences_apply_only_before_options_exist() {
+        let dir = std::env::temp_dir().join(format!("horizon-first-start-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("options.txt");
+        let first = Settings::load(&path);
+        assert_eq!(
+            (
+                first.render_distance,
+                first.simulation_distance,
+                first.max_fps
+            ),
+            (32, 12, 250)
+        );
+        assert!(!first.fullscreen);
+        assert!(!first.vsync);
+        assert_eq!(first.graphics_preset, "fabulous");
+        assert!(!first.horizon.entity_culling);
+        assert!(
+            !path.exists(),
+            "loading defaults must not write player files"
+        );
+        std::fs::write(
+            &path,
+            "renderDistance:8\nmaxFps:60\nfullscreen:true\nenableVsync:true\n",
+        )
+        .unwrap();
+        let saved = Settings::load(&path);
+        assert_eq!((saved.render_distance, saved.max_fps), (8, 60));
+        assert!(saved.fullscreen);
+        assert!(saved.vsync);
+        assert_eq!(saved.horizon, crate::graphics::Graphics::default());
+        std::fs::write(
+            dir.join(crate::graphics::FILE),
+            "entityCulling:true\nlodDistance:64\n",
+        )
+        .unwrap();
+        let custom = Settings::load(&path);
+        assert!(custom.horizon.entity_culling);
+        assert_eq!(custom.horizon.lod_distance, 64);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn the_narrator_reads_its_status_and_the_voice_under_master() {
         let s = Settings::parse("narrator:2\nsoundCategory_master:0.5\nsoundCategory_voice:0.5\n");

@@ -447,7 +447,14 @@ impl Graphics {
     pub fn load(dir: &Path) -> Self {
         let mut g: Self = fs::read_to_string(dir.join(FILE))
             .map(|t| Self::parse(&t))
-            .unwrap_or_default();
+            .unwrap_or_else(|error| {
+                if error.kind() == std::io::ErrorKind::NotFound && !dir.join("options.txt").exists()
+                {
+                    Self::parse(include_str!("defaults/graphics.txt"))
+                } else {
+                    Self::default()
+                }
+            });
         if fs::remove_file(dir.join(HDR_MARKER)).is_ok() && g.hdr {
             g.hdr = false;
             g.save(dir);

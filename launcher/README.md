@@ -7,6 +7,12 @@ Every native mod Build resolves the fork's current `main`; mod compatibility pin
 APIs cannot redirect it to upstream source. Builds and release installs must contain the fork's skin
 changes (commit `b543e8e4e`). Incompatible mods report their usual compatibility error instead.
 
+New game folders use this fork's portable first-start preferences (including 32-chunk render
+distance, 12-chunk simulation distance, Fabulous graphics, windowed mode and a 250 FPS cap).
+Existing options and graphics files take precedence. The profiles in
+`crates/horizon-client-render/src/defaults/` contain no account, server history, device identifiers
+or consent choices.
+
 Installed games live in `fork-versions/` and native build caches in `fork-native/`, separately from old
 upstream installations. The existing account keyring, Minecraft files, game folder, worlds and skin
 cache are reused. Release downloads retain signature verification. Until this fork publishes releases,
