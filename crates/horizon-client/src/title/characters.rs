@@ -254,7 +254,7 @@ fn draw_preview(
         poses.zrot(arm, sign * ((age * 0.09).cos() * 0.05 + 0.05));
         poses.xrot(arm, sign * (age * 0.067).sin() * 0.05);
     }
-    let yaw = ((cursor.0 - cx) / 120.0).clamp(-0.4, 0.4);
+    let yaw = ((cx - cursor.0) / 120.0).clamp(-0.4, 0.4);
     poses.yrot("head", yaw);
     poses.xrot(
         "head",
