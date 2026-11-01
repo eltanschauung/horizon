@@ -307,7 +307,7 @@ pub fn save_server_icon(saves: &Path, address: &str, png: &[u8]) {
 /// Horizon's official survival server: a name and an address like any entry. The address is
 /// `horizon_telemetry::server_status::OFFICIAL_ADDRESS`, the one place it is kept.
 pub const OFFICIAL_SERVER: (&str, &str) = (
-    "Horizon Official",
+    "Bantculture",
     horizon_telemetry::server_status::OFFICIAL_ADDRESS,
 );
 /// Beside servers.dat once the official server was offered, so a player who
@@ -377,6 +377,9 @@ fn move_official(list: &mut Vec<ServerEntry>, address: &str, previous: &[&str]) 
         }
         present = true;
         s.ip = address.to_owned();
+        if s.name == "Horizon Official" {
+            s.name = OFFICIAL_SERVER.0.to_owned();
+        }
         true
     });
     changed
@@ -2143,11 +2146,11 @@ mod tests {
         assert_eq!(ips(), [address, "127.0.0.1:2", "example.org"]);
         // Already there under the player's own name and spelling: not duplicated.
         fresh(&[
-            ServerEntry::new("SMP", "Play.PlayHorizon.dev:25565"),
+            ServerEntry::new("SMP", "Bantculture.COM:25565"),
             mine[0].clone(),
         ]);
         add_official_server(&dir).unwrap();
-        assert_eq!(ips(), ["Play.PlayHorizon.dev:25565", "127.0.0.1:2"]);
+        assert_eq!(ips(), ["Bantculture.COM:25565", "127.0.0.1:2"]);
         // Deleted by the player: never back.
         fresh(&mine);
         add_official_server(&dir).unwrap();

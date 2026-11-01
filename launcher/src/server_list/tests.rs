@@ -202,10 +202,10 @@ fn the_official_server_is_put_on_top_once() {
     // Already there under the player's own name and spelling: not duplicated.
     let home = scratch("official-present");
     let mut list = List::load(&home);
-    list.add("SMP", "Play.PlayHorizon.dev:25565").unwrap();
+    list.add("SMP", "Bantculture.COM:25565").unwrap();
     list.save(&home).unwrap();
     add_official_default(&home).unwrap();
-    assert_eq!(ips(&home), ["Play.PlayHorizon.dev:25565"]);
+    assert_eq!(ips(&home), ["Bantculture.COM:25565"]);
     // A list that can't be read is left alone, and offered again once it can be.
     let home = scratch("official-broken");
     fs::write(home.join(FILE), b"not nbt").unwrap();
@@ -275,10 +275,7 @@ fn a_moved_official_server_moves_the_players_entry_once() {
     let home = scratch("moved-present");
     offered_at(
         &home,
-        &[
-            ("Old", "horizon.bunchy7s.dev"),
-            ("New", "play.playhorizon.dev"),
-        ],
+        &[("Old", "horizon.bunchy7s.dev"), ("New", "bantculture.com")],
         "horizon.bunchy7s.dev",
     );
     add_official_default(&home).unwrap();
@@ -327,8 +324,8 @@ fn a_moved_official_server_moves_the_players_entry_once() {
 fn the_official_address_comes_from_links_json() {
     // The defaults: the new host, and the old one to move from.
     let defaults = Links::default();
-    assert_eq!(defaults.official_server, "play.playhorizon.dev");
-    assert_eq!(defaults.official_server_previous, ["horizon.bunchy7s.dev"]);
+    assert_eq!(defaults.official_server, "bantculture.com");
+    assert_eq!(defaults.official_server_previous, OFFICIAL_PREVIOUS);
     // The file on main says the same.
     let file = Links::parse(include_str!("../../links.json"));
     assert_eq!(file, defaults);
@@ -397,4 +394,25 @@ fn entries_of(bytes: &[u8]) -> Vec<Tag> {
         Some(Tag::List(list)) => list.clone(),
         other => panic!("no servers list: {other:?}"),
     }
+}
+
+#[test]
+fn upstream_default_is_replaced_with_bantculture() {
+    let home = scratch("fork-default");
+    offered_at(
+        &home,
+        &[
+            ("Horizon Official", "play.playhorizon.dev"),
+            ("Friends", "friends.example"),
+        ],
+        "play.playhorizon.dev",
+    );
+    add_official_default(&home).unwrap();
+    assert_eq!(
+        shown(&home),
+        [
+            ("Bantculture".into(), "bantculture.com".into()),
+            ("Friends".into(), "friends.example".into())
+        ]
+    );
 }
