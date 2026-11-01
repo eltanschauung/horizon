@@ -159,7 +159,7 @@ impl Screen {
         centered(
             atlas,
             batch,
-            "Choose your appearance, then select your character.",
+            "Each character has unqiue attributes.",
             28.0,
             0xffaaaaaa,
         );
