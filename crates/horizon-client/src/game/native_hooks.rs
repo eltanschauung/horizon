@@ -1879,6 +1879,7 @@ impl Game<'_> {
     /// `native_server_players`, so `native_net_send_to_player` reaches them.
     /// Once a join, with no player's state swapped in. Server-side. API 57.
     pub(super) fn native_player_logged_in(&mut self, player: u128, name: &str) {
+        self.character_logged_in(player);
         let _ = (player, name);
     }
     /// `player` (`name`) left the game (NeoForge's `PlayerLoggedOutEvent`), by
@@ -1888,6 +1889,7 @@ impl Game<'_> {
     /// before it saves, with them still listed and able to get a last message.
     /// Server-side. API 57.
     pub(super) fn native_player_logged_out(&mut self, player: u128, name: &str) {
+        self.character_logged_out(player);
         let _ = (player, name);
     }
     /// `player` died: where `ServerPlayer.die` starts, with the death

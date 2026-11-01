@@ -162,3 +162,63 @@ mod tests {
         );
     }
 }
+
+/// A selection carries no claimed player identity or client-defined appearance.
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SelectionRequest {
+    pub character: String,
+    pub catalog: String,
+}
+pub fn catalog_digest(roster: &[Character]) -> String {
+    use sha2::{Digest, Sha256};
+    format!(
+        "{:x}",
+        Sha256::digest(serde_json::to_vec(roster).unwrap_or_default())
+    )
+}
+pub fn resolve_selection(bytes: &[u8], roster: &[Character]) -> Option<Character> {
+    let request: SelectionRequest = serde_json::from_slice(bytes).ok()?;
+    if request.catalog != catalog_digest(roster) {
+        return None;
+    }
+    roster.iter().find(|c| c.id == request.character).cloned()
+}
+
+#[cfg(test)]
+mod network_tests {
+    use super::*;
+    fn catalog() -> Vec<Character> {
+        serde_json::from_value(serde_json::json!([
+            {"id":"lunatic:reimu","name":"Reimu","texture":"lunatic:entity/character/reimu","character_chat":true,"color":"red"},
+            {"id":"lunatic:marisa","name":"Marisa","texture":"lunatic:entity/character/marisa","character_chat":true,"color":"yellow"}
+        ])).unwrap()
+    }
+    #[test]
+    fn server_validates_ids_and_catalog_instead_of_trusting_client_metadata() {
+        let roster = catalog();
+        let request = |id: &str| {
+            serde_json::to_vec(&SelectionRequest {
+                character: id.into(),
+                catalog: catalog_digest(&roster),
+            })
+            .unwrap()
+        };
+        assert_eq!(
+            resolve_selection(&request("lunatic:reimu"), &roster)
+                .unwrap()
+                .color
+                .as_deref(),
+            Some("red")
+        );
+        assert!(resolve_selection(&request("lunatic:unknown"), &roster).is_none());
+        let mut tampered = roster.clone();
+        tampered[0].color = Some("blue".into());
+        assert!(resolve_selection(&request("lunatic:reimu"), &tampered).is_none());
+        let mut impersonation: serde_json::Value =
+            serde_json::from_slice(&request("lunatic:reimu")).unwrap();
+        impersonation["uuid"] = "another-player".into();
+        assert!(resolve_selection(&serde_json::to_vec(&impersonation).unwrap(), &roster).is_none());
+        assert!(resolve_selection(b"not json", &roster).is_none());
+    }
+}

@@ -31,8 +31,8 @@ The optional `model` is `slim` or `wide` (the default for older catalogs).
 The preview renders the matching prepared player model with idle arm movement,
 mouse-following head rotation, lighting, and depth. The confirmed skin also
 covers the local player's model and first-person arm. Selection changes appearance
-only, preserving the account name and UUID. It does not upload skins to account
-services or distribute them to other players on remote servers.
+only, preserving the account name and UUID. It does not upload skins to account services. Matching fork servers synchronize
+server-approved character IDs to other clients.
 
 Steve is only the fallback for a missing or invalid skin and is never inserted
 into the character roster. With no enabled character catalog, the screen explains
@@ -42,8 +42,17 @@ Characters may set `character_chat: true` to display the local player's ordinary
 chat as `Character Name : message`, and use that name on the player's own visible
 nametag. Optional `color` accepts Minecraft named colors or `#RRGGBB`, and colors
 the name only. These are presentation changes: profile identity, scoreboard keys,
-message signing, commands and private messages are unchanged. Selections are not
-yet synchronized to other clients, so this does not rename remote players.
+message signing, commands and private messages are unchanged. Selections synchronize over `lunatic:characters_v1` on Horizon mod networking.
+The authenticated connection supplies the UUID; clients submit only a character ID
+and catalog digest. The server rejects unknown IDs, changed catalogs and extra
+fields. It saves choices in `character-selections.json`, restores them on login,
+and sends the online roster on join, change and periodic refresh. Disconnects
+remove the online appearance without deleting the saved preference.
+
+Player models, overhead names, player-list names/skins and ordinary chat resolve
+through that shared UUID map. Accounts, scoreboard keys and signed message bodies
+remain unchanged. Chat messages retain a sender UUID and skin snapshot internally;
+the ChatHeads compatibility bundle uses those rather than parsing character names.
 
 ChatHeads 0.1.0 parses only `<profile>` chat lines. Our compatible bundle is built
 with `python3 tools/patch_chatheads.py ORIGINAL.hnmod OUTPUT.hnmod`, then installed

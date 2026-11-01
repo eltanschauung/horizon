@@ -154,6 +154,7 @@ mod tests {
                 "appleskin",
                 "chatheads",
                 "eatinganimation",
+                "lunatic",
                 "minimap",
                 "tectonic_horizon",
                 "zoom"

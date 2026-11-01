@@ -429,6 +429,11 @@ impl Game<'_> {
         // another player's does (`villager::sleep_pose`).
         let bed = self.sleeping.map_or(0, |head| self.bed_facing(head));
         let spectator = self.spectator();
+        let approved = self
+            .remote
+            .as_ref()
+            .and_then(|r| self.character_for(r.profile()))
+            .cloned();
         let Some(m) = self.player_model.as_mut() else {
             return;
         };
@@ -503,7 +508,12 @@ impl Game<'_> {
             Some(r) => r.own_shoulders,
             None => shoulder_variants(self.level.player_extra.as_ref()),
         };
-        if let Some(character) = &self.character {
+        if let Some(character) = approved.as_ref().or_else(|| {
+            self.remote
+                .is_none()
+                .then_some(self.character.as_ref())
+                .flatten()
+        }) {
             m.skin = Some(character.skin(&self.gui.atlas).to_owned());
             m.slim = character.is_slim(&self.gui.atlas);
         }

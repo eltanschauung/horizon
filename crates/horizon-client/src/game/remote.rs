@@ -920,6 +920,7 @@ impl Game<'_> {
                     }
                 };
             });
+        self.character_sync = Default::default();
         self.remote = Some(Remote {
             session,
             brand: "unknown".into(),
@@ -4304,6 +4305,35 @@ impl Game<'_> {
                     .decorate_chat(&p.chat_type, &decorated, Decoration::Narration)
                     .plain();
                 let line = self.decorate_chat(&p.chat_type, &content, Decoration::Chat);
+                let standard = self.remote.as_ref().is_some_and(|r| {
+                    chat_type_decorate(
+                        r.registries
+                            .data("minecraft:chat_type", p.chat_type.chat_type),
+                        Decoration::Chat,
+                        &p.chat_type,
+                        &content,
+                    )
+                    .get("translate")
+                    .and_then(|v| v.as_str())
+                        == Some("chat.type.text")
+                });
+                let line = self
+                    .character_for(p.sender)
+                    .filter(|_| standard)
+                    .and_then(|c| c.chat_line(&content))
+                    .map(|line| {
+                        line.with_component_fields(vec![
+                            ("lunatic_sender".into(), format!("{:032x}", p.sender).into()),
+                            (
+                                "lunatic_skin".into(),
+                                self.character_for(p.sender)
+                                    .unwrap()
+                                    .skin(&self.gui.atlas)
+                                    .into(),
+                            ),
+                        ])
+                    })
+                    .unwrap_or(line);
                 let trust = self.chat_trust(
                     p.sender,
                     signature.is_some(),
@@ -4665,6 +4695,18 @@ impl Game<'_> {
                 .collect()
         };
         for p in &mut players {
+            if let Some(c) = self.character_for(p.uuid).cloned() {
+                p.skin = c.skin(&self.gui.atlas).to_owned();
+                p.display_name = Some(c.display_name().component());
+                self.gui
+                    .atlas
+                    .set_object_skin(format!("id:{:032x}", p.uuid), p.skin.clone());
+                self.gui.atlas.set_object_skin(
+                    format!("name:{}", p.name.to_ascii_lowercase()),
+                    p.skin.clone(),
+                );
+                continue;
+            }
             p.skin = self
                 .remote
                 .as_ref()
@@ -4989,12 +5031,7 @@ impl Game<'_> {
         uuid: u128,
         (skin, slim): (String, bool),
     ) -> (String, bool) {
-        if self
-            .remote
-            .as_ref()
-            .is_some_and(|remote| remote.profile == uuid)
-            && let Some(character) = &self.character
-        {
+        if let Some(character) = self.character_for(uuid) {
             return (
                 character.skin(&self.gui.atlas).to_owned(),
                 character.is_slim(&self.gui.atlas),
@@ -5027,10 +5064,25 @@ impl Game<'_> {
         let chat_type = r.registries.data("minecraft:chat_type", bound.chat_type);
         let component = chat_type_decorate(chat_type, decoration, bound, content);
         if component.get("translate").and_then(|k| k.as_str()) == Some("chat.type.text")
-            && comp_text(&horizon_client::scoreboard::tag_to_json(&bound.name)).plain()
-                == self.options.player_name()
-            && let Some(line) = self.character.as_ref().and_then(|c| c.chat_line(content))
+            && let Some(line) = self
+                .character_for_name(
+                    &comp_text(&horizon_client::scoreboard::tag_to_json(&bound.name)).plain(),
+                )
+                .and_then(|c| c.chat_line(content))
         {
+            let name = comp_text(&horizon_client::scoreboard::tag_to_json(&bound.name)).plain();
+            if let Some(uuid) = r.character_uuid(&name) {
+                return line.with_component_fields(vec![
+                    ("lunatic_sender".into(), format!("{uuid:032x}").into()),
+                    (
+                        "lunatic_skin".into(),
+                        self.character_for(uuid)
+                            .unwrap()
+                            .skin(&self.gui.atlas)
+                            .into(),
+                    ),
+                ]);
+            }
             return line;
         }
         comp_text(&component)
@@ -5326,6 +5378,7 @@ impl Game<'_> {
         self.tick_remote_level()?;
         // Client mods tick on any server, single player's own included.
         self.native_net.to_server = 0;
+        self.tick_character_sync();
         self.native_tick();
         self.tell_native_now();
         self.tick_chat_session();
@@ -8941,6 +8994,7 @@ impl Game<'_> {
                 *m.entry(t.kind.as_str()).or_default() += 1;
                 m
             }),
+            "characters": self.character_sync.peers.iter().map(|(u,c)| (format!("{u:032x}"), c)).collect::<std::collections::BTreeMap<_,_>>(),
             "players": r.players.values().collect::<Vec<_>>(),
             // Where the other players' entities are (harnesses check movement).
             // What the other players hold and wear, as this client draws them.
@@ -9489,6 +9543,15 @@ impl Remote {
         self.players.len()
     }
     /// The local player's profile UUID.
+    pub(super) fn character_uuid(&self, name: &str) -> Option<u128> {
+        if name == self.profile_name {
+            return Some(self.profile);
+        }
+        self.players
+            .iter()
+            .find(|(_, n)| n.as_str() == name)
+            .map(|(u, _)| *u)
+    }
     pub(super) fn profile(&self) -> u128 {
         self.profile
     }

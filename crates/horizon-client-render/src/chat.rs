@@ -379,7 +379,19 @@ impl Chat {
         };
         let width = self.max_width() - icon;
         let content = self.displayed(&message.content);
-        for line in font.wrap_components(&content, width) {
+        let identity = message.content.component();
+        for (index, mut line) in font
+            .wrap_components(&content, width)
+            .into_iter()
+            .enumerate()
+        {
+            if index == 0 {
+                let fields = ["lunatic_sender", "lunatic_skin"]
+                    .into_iter()
+                    .filter_map(|key| identity.get(key).cloned().map(|v| (key.to_owned(), v)))
+                    .collect();
+                line = line.with_component_fields(fields);
+            }
             if focused && self.scroll > 0 {
                 self.new_since_scroll = true;
                 self.scroll_by(1, focused);

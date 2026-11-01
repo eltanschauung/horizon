@@ -77,6 +77,7 @@ mod campfire;
 mod campfire_douse;
 mod cartography;
 mod cat_spawner;
+mod character_sync;
 mod chat;
 mod chat_filter;
 mod chiseled_bookshelf;
@@ -2607,6 +2608,7 @@ struct Game<'a> {
     native_lifecycle: native_lifecycle::NativeLifecycle,
     /// Native mods' messages waiting (`game/native_net.rs`).
     native_net: native_net::NativeNet,
+    character_sync: character_sync::State,
     /// Meshed sections waiting for an upload budget (Horizon settings).
     pending_uploads: Vec<((i32, i32, i32), horizon_client::mesher::SectionMesh)>,
     /// This frame's view frustum, for culling entities and block entities.
@@ -17350,6 +17352,7 @@ impl<'a> Game<'a> {
             native_shaders: Default::default(),
             native_lifecycle: Default::default(),
             native_net: Default::default(),
+            character_sync: Default::default(),
             sky_darken_memo: Default::default(),
             water_plane_memo: Default::default(),
             water_plane_scan: Default::default(),

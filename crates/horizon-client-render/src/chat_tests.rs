@@ -646,3 +646,43 @@ fn a_chat_message_is_cut_to_the_256_utf16_units_the_packet_holds() {
     let mixed = format!("{}\u{1f600}", "b".repeat(255));
     assert_eq!(normalize_chat_message(&mixed), "b".repeat(255));
 }
+
+#[test]
+fn character_chat_identity_survives_wrapping_and_rewrap_without_parsing_text() {
+    let font = font();
+    let mut chat = Chat::default();
+    chat.options.width = 0.0;
+    let content = Text::literal("Reimu : ".to_owned() + &"long message ".repeat(40))
+        .with_component_fields(vec![
+            (
+                "lunatic_sender".into(),
+                "00000000000000000000000000000001".into(),
+            ),
+            (
+                "lunatic_skin".into(),
+                "lunatic:entity/character/reimu".into(),
+            ),
+        ]);
+    let message = Message {
+        added: 0,
+        content,
+        tag: None,
+        source: ChatSource::Player,
+        signature: None,
+    };
+    chat.push_message(&font, message, false);
+    assert!(chat.lines.len() > 1);
+    let has_identity = |c: &Chat| {
+        c.lines
+            .iter()
+            .filter(|l| l.content.component().get("lunatic_sender").is_some())
+            .count()
+    };
+    assert_eq!(has_identity(&chat), 1);
+    chat.rewrap(&font);
+    assert_eq!(has_identity(&chat), 1);
+    assert_eq!(
+        chat.lines.last().unwrap().content.component()["lunatic_skin"],
+        "lunatic:entity/character/reimu"
+    );
+}

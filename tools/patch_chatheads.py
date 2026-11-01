@@ -19,6 +19,7 @@ def patch(files):
         return (!name.is_empty()).then_some(name);
     }
     let name = line.strip_prefix('<')?.split_once('>')?.0;''')
+    runtime = replace(runtime, 'pub fn sender(line: &str) -> Option<&str> {', 'pub fn sender(line: &str) -> Option<&str> {\n    if line.starts_with("@skin:") { return Some(line); }')
     files[root + 'runtime.rs'] = runtime.encode()
     shift = files[root + 'shift.rs'].decode()
     shift += '''
@@ -42,19 +43,22 @@ fn character_line(line: &str) -> bool {
 }
 '''
     shift = replace(shift, "if plain.starts_with('<') {", "if plain.starts_with('<') || character_line(&plain) {")
+    shift = replace(shift, "if plain.starts_with('<') || character_line(&plain) {", """if let Some(skin) = text.component().get("lunatic_skin").and_then(|v| v.as_str()) {
+            heads.push((*x, *y, (*color >> 24) as u8, format!("@skin:{skin}")));
+        } else if plain.starts_with('<') || character_line(&plain) {""")
     files[root + 'shift.rs'] = shift.encode()
     glue = files[root + 'glue.rs'].decode()
     glue = replace(glue, 'pub(crate) fn mark(game: &Game<\'_>) {', '''pub(crate) fn mark(game: &Game<'_>) {
     if let Some(character) = game.character.as_ref().filter(|c| c.character_chat) {
         layout::register_character(&character.name, character.skin(&game.gui.atlas));
     }''')
-    glue = replace(glue, '    let skin = match atlas.object_skins.get(&key) {', '''    let character_skin = layout::character_skin(name);
+    glue = replace(glue, '    let skin = match atlas.object_skins.get(&key) {', '''    let character_skin = name.strip_prefix("@skin:").map(str::to_owned).or_else(|| layout::character_skin(name));
     let skin = match character_skin.as_ref().or_else(|| atlas.object_skins.get(&key)) {''')
     files[root + 'glue.rs'] = glue.encode()
     manifest = files[root + 'horizon-mixin.toml'].decode()
-    files[root + 'horizon-mixin.toml'] = replace(manifest, 'version = "0.1.0"', 'version = "0.1.0+character.1"').encode()
+    files[root + 'horizon-mixin.toml'] = replace(manifest, 'version = "0.1.0"', 'version = "0.1.0+character.2"').encode()
     metadata = json.loads(files['horizon-native.json'])
-    metadata['version'] = '0.1.0+character.1'
+    metadata['version'] = '0.1.0+character.2'
     files['horizon-native.json'] = (json.dumps(metadata, indent=2) + '\n').encode()
     return files
 
