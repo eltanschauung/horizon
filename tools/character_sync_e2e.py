@@ -31,6 +31,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('game', 'ctl', 'resources', 'mod'):
         parser.add_argument('--' + name, type=Path, required=True)
+    parser.add_argument('--worldspawn', action='store_true', help='Also test the operator worldspawn command')
     args = parser.parse_args()
     args.game, args.ctl, args.resources, args.mod = (p.resolve() for p in (args.game, args.ctl, args.resources, args.mod))
     with tempfile.TemporaryDirectory(prefix='lunatic-network-test-') as directory:
@@ -91,6 +92,34 @@ def main():
             ctl(bob,'chat','character-sync-proof')
             until(lambda:ctl(alice,'status'),lambda s:any('Kirisame Marisa : character-sync-proof' in line for line in s['server']['chat']))
             until(lambda:ctl(alice,'status'),lambda s:'Kirisame Marisa' in (s.get('name_tags') or []))
+            if args.worldspawn:
+                def console(command):
+                    srv.stdin.write((command+'\n').encode());srv.stdin.flush()
+                def position(path): return ctl(path,'status')['player']['position']
+                def near_spawn(state):
+                    p=state['player']['position']
+                    return state['server']['dimension']=='minecraft:overworld' and all(abs(a-b)<0.05 for a,b in zip(p,[2.5,4,-2.5]))
+                console('op Alice')
+                until(lambda:(server/'test-process.log').read_text(),lambda text:'Made Alice a server operator' in text)
+                console('gamemode creative Alice')
+                console('setworldspawn 2 4 -3 90 0')
+                until(lambda:(server/'test-process.log').read_text(),lambda text:'world spawn point to 2, 4, -3' in text)
+                console('spawnpoint Alice 10 4 10')
+                console('tp Alice 25.5 4 25.5')
+                until(lambda:position(alice),lambda p:abs(p[0]-25.5)<0.05)
+                before=position(bob)
+                ctl(bob,'chat','/worldspawn')
+                time.sleep(1)
+                after=position(bob)
+                assert abs(before[0]-after[0])<0.05 and abs(before[2]-after[2])<0.05, 'Non-operator was teleported'
+                ctl(alice,'chat','/worldspawn')
+                state=until(lambda:ctl(alice,'status'),near_spawn)
+                assert abs(state['yaw']-90)<0.05
+                console('execute in minecraft:the_nether run tp Alice 0 80 0')
+                until(lambda:ctl(alice,'status'),lambda state:state['server']['dimension']=='minecraft:the_nether')
+                ctl(alice,'chat','/worldspawn')
+                until(lambda:ctl(alice,'status'),near_spawn)
+                print('PASS: operator worldspawn, non-operator denied, bed ignored, centering/facing and Nether return',flush=True)
             ctl(bob,'quit'); b.wait(timeout=30)
             until(lambda:ctl(alice,'status'),lambda s:len(s['server']['characters'])==1)
             bob,b=client('Bob','lunatic:cirno')

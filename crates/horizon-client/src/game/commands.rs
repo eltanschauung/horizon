@@ -964,6 +964,7 @@ impl Game<'_> {
             }
             "spawnpoint" => self.cmd_spawnpoint(ctx),
             "setworldspawn" => self.cmd_setworldspawn(ctx),
+            "worldspawn" => self.cmd_worldspawn(),
             "clear" => self.cmd_clear(ctx),
             "item" => self.cmd_item(ctx),
             "item.modify" => self.cmd_item_modify(ctx),
@@ -2937,6 +2938,29 @@ impl Game<'_> {
         self.feedback(Text::translate(key, &args));
         Ok(targets.len() as i32)
     }
+    /// Fork's operator shortcut to the global Overworld spawn, not a bed/anchor.
+    fn cmd_worldspawn(&mut self) -> R<i32> {
+        let target = self
+            .source_entity()
+            .filter(|t| t.is_player())
+            .ok_or_else(|| err("permissions.requires.player", &[]))?;
+        let [x, y, z] = self
+            .level
+            .world_spawn
+            .ok_or_else(|| err("command.failed", &[]))?;
+        let position = [f64::from(x) + 0.5, f64::from(y), f64::from(z) + 0.5];
+        let rotation = Some(self.level.world_spawn_angle);
+        if !self.teleport_across(target, Dim::Overworld, position, rotation) {
+            if target == Target::Player && self.dim != Dim::Overworld {
+                self.teleport_player_to_dimension(Dim::Overworld, position, rotation)?;
+            } else {
+                self.teleport_to(target, position, rotation);
+            }
+        }
+        self.feedback(Text::literal("Teleported to the world spawn."));
+        Ok(1)
+    }
+
     fn cmd_setworldspawn(&mut self, ctx: &Context) -> R<i32> {
         let pos = if ctx.get("pos").is_some() {
             self.block_pos_arg(ctx, "pos")?

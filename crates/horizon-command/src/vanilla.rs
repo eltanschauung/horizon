@@ -601,19 +601,22 @@ pub fn set_horizon_commands(on: bool) {
 pub const PREGEN_PROPERTY: &str = "horizon-pregen";
 pub(crate) fn game_tree(dev: bool, horizon: bool, dedicated: bool) -> &'static Dispatcher {
     static TREES: [std::sync::OnceLock<Dispatcher>; 8] = [const { std::sync::OnceLock::new() }; 8];
-    match (dev, horizon, dedicated) {
-        (true, false, false) => dispatcher(),
-        (false, false, false) => release_dispatcher(),
-        _ => TREES[usize::from(dev) | usize::from(horizon) << 1 | usize::from(dedicated) << 2]
-            .get_or_init(|| {
-                let mut d = build_for(dev, dedicated);
-                if horizon {
-                    horizon_commands(&mut d, 0);
-                }
-                d
-            }),
-    }
+    TREES[usize::from(dev) | usize::from(horizon) << 1 | usize::from(dedicated) << 2].get_or_init(
+        || {
+            let mut d = build_for(dev, dedicated);
+            // Fork command: available on integrated and dedicated servers, without
+            // changing the vanilla-only trees used by parity harnesses.
+            let spawn = d.literal(0, "worldspawn");
+            d.requires(spawn, GAMEMASTERS);
+            d.executes(spawn, "worldspawn");
+            if horizon {
+                horizon_commands(&mut d, 0);
+            }
+            d
+        },
+    )
 }
+
 /// Commands vanilla doesn't have, after its own: `/pregen`
 /// (docs/pregeneration.md).
 fn horizon_commands(d: &mut Dispatcher, root: usize) {

@@ -879,3 +879,19 @@ fn a_dedicated_server_keeps_seed_and_version_for_game_masters() {
         }
     }
 }
+
+#[test]
+fn fork_worldspawn_requires_operator_and_accepts_no_arguments() {
+    for dedicated in [false, true] {
+        let d = vanilla::game_tree(false, false, dedicated);
+        let mut r = reg();
+        r.permission = 0;
+        assert!(d.parse("worldspawn", &r).executable().is_err());
+        r.permission = 2;
+        assert_eq!(
+            d.parse("worldspawn", &r).executable().unwrap().1,
+            "worldspawn"
+        );
+        assert!(d.parse("worldspawn OtherPlayer", &r).executable().is_err());
+    }
+}
