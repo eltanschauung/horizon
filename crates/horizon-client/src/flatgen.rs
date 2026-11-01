@@ -76,9 +76,19 @@ impl FlatTerrain {
         biomes: &crate::biome::Biomes,
         shape: LevelShape,
     ) -> Option<Self> {
+        Self::for_dimension(settings, "minecraft:overworld", registry, biomes, shape)
+    }
+    /// Flat generators belong to dimension stems, including custom Nether/End maps.
+    pub fn for_dimension(
+        settings: &Tag,
+        dimension: &str,
+        registry: &BlockRegistry,
+        biomes: &crate::biome::Biomes,
+        shape: LevelShape,
+    ) -> Option<Self> {
         let generator = settings
             .get("dimensions")?
-            .get("minecraft:overworld")?
+            .get(dimension)?
             .get("generator")?;
         if crate::save::text(generator.get("type"))?.trim_start_matches("minecraft:") != "flat" {
             return None;
@@ -587,5 +597,67 @@ mod tests {
             )])))
             .is_none()
         );
+    }
+}
+
+#[cfg(test)]
+mod dimension_tests {
+    use super::*;
+    #[test]
+    #[ignore = "requires HORIZON_TEST_RESOURCES prepared assets"]
+    fn void_flat_generators_work_in_every_dimension_without_a_platform() {
+        let root = std::path::PathBuf::from(
+            std::env::var_os("HORIZON_TEST_RESOURCES").expect("prepared resources"),
+        );
+        let assets = crate::assets::Assets::load(&root).unwrap();
+        let biomes = crate::biome::Biomes::load(&root).unwrap();
+        for dimension in [
+            "minecraft:overworld",
+            "minecraft:the_nether",
+            "minecraft:the_end",
+        ] {
+            let settings = Tag::compound([(
+                "dimensions",
+                Tag::compound([(
+                    dimension,
+                    Tag::compound([(
+                        "generator",
+                        Tag::compound([
+                            ("type", Tag::String("minecraft:flat".into())),
+                            (
+                                "settings",
+                                Tag::compound([
+                                    ("biome", Tag::String("minecraft:the_void".into())),
+                                    ("layers", Tag::List(vec![])),
+                                    ("features", Tag::Byte(0)),
+                                    ("lakes", Tag::Byte(0)),
+                                    ("structure_overrides", Tag::List(vec![])),
+                                ]),
+                            ),
+                        ]),
+                    )]),
+                )]),
+            )]);
+            let terrain = FlatTerrain::for_dimension(
+                &settings,
+                dimension,
+                assets.registry,
+                &biomes,
+                LevelShape::OVERWORLD,
+            )
+            .unwrap();
+            let chunk = terrain.finish(terrain.proto(&mut (), 0, 0));
+            for y in -64..320 {
+                for x in 0..16 {
+                    for z in 0..16 {
+                        assert_eq!(
+                            assets.registry.state(chunk.block(x, y, z)).unwrap().name,
+                            "minecraft:air",
+                            "{dimension} {x} {y} {z}"
+                        );
+                    }
+                }
+            }
+        }
     }
 }

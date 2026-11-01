@@ -627,17 +627,15 @@ pub(super) fn make_streaming(
         enabled_features,
     );
     let mut locator = None;
-    let flat = (dim == Dim::Overworld)
-        .then(|| horizon_client::save::world_gen_settings(world_root))
-        .flatten()
-        .and_then(|s| {
-            horizon_client::flatgen::FlatTerrain::from_settings(
-                &s,
-                pack.assets.registry,
-                res.biomes(),
-                shape,
-            )
-        });
+    let flat = horizon_client::save::world_gen_settings(world_root).and_then(|s| {
+        horizon_client::flatgen::FlatTerrain::for_dimension(
+            &s,
+            dim.id(),
+            pack.assets.registry,
+            res.biomes(),
+            shape,
+        )
+    });
     // `DebugLevelSource`: the overworld of the Debug preset.
     let debug = (dim == Dim::Overworld)
         .then(|| horizon_client::save::world_gen_settings(world_root))

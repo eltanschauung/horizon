@@ -249,3 +249,12 @@ Horizon entry; `LootTableSeed` without a `LootTable` and a vault's default rewar
 
 Remaining known differences: a handful of single blocks near structure pieces in full generation (abandoned camps, shipwreck, villages) that
 need per-feature tracing, and tree features only through `tools/test_tree_feature_parity.py` (8,898 fixtures, all equal).
+
+## Flat generators in imported dimensions
+
+The fork honors a saved dimension's `minecraft:flat` generator in the Overworld,
+Nether and End. An empty `layers` list, `minecraft:the_void` biome, `features: false`,
+`lakes: false` and empty `structure_overrides` generate only air, with no start
+platform. Set this per dimension in the world's saved world-generation settings;
+existing region files retain their terrain. Flat generators take precedence over
+the normal noise generator, including native Tectonic terrain overrides.
