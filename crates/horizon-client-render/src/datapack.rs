@@ -598,6 +598,10 @@ fn content_id(file: &str) -> Option<String> {
         "tags" => {
             return Some(format!("tags/{ns}:{}", rest.strip_suffix(".json")?));
         }
+        "worldgen" => {
+            let path = rest.strip_prefix("biome/")?.strip_suffix(".json")?;
+            return Some(format!("worldgen/biome/{ns}:{path}"));
+        }
         _ => return None,
     };
     Some(format!("{kind}/{ns}:{}", rest.strip_suffix(".json")?))
@@ -631,6 +635,7 @@ impl DataStore {
                 "tags",
                 "trade_set",
                 "villager_trade",
+                "worldgen/biome",
             ]) {
                 if !seen.insert(f.clone()) {
                     continue;
@@ -930,13 +935,12 @@ mod tests {
         );
         assert_eq!(
             o.entries("biomes").collect::<Vec<_>>(),
-            [("minecraft:plains", "{}")]
+            [("minecraft:new_peaks", "{}"), ("minecraft:plains", "{}")]
         );
         let tag_packs: Vec<&str> = o.tags("biome_tags").map(|(_, p, _)| p).collect();
         assert_eq!(tag_packs, ["file/b", "file/a"]);
-        assert_eq!(warnings.len(), 2, "{warnings:?}");
-        assert!(warnings[0].contains("minecraft:new_peaks"));
-        assert!(warnings[1].contains("worldgen/world_preset"));
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].contains("worldgen/world_preset"));
         assert_eq!(
             o.level_height("minecraft:overworld").map(|h| h.height),
             Some(2096)
@@ -1035,6 +1039,10 @@ mod tests {
             "data/mine/dialog/config/points.json",
             "{\"type\":\"minecraft:notice\",\"title\":\"Points\"}",
         );
+        write(
+            "data/mine/worldgen/biome/sub/woodland.json",
+            "{\"temperature\":0.5}",
+        );
         let packs = discover(&dir);
         assert_eq!(packs.len(), 1);
         assert_eq!(packs[0].id, "file/mypack");
@@ -1051,6 +1059,10 @@ mod tests {
         assert_eq!(
             store.files["dialog/mine:config/points"],
             [b"{\"type\":\"minecraft:notice\",\"title\":\"Points\"}".to_vec()]
+        );
+        assert_eq!(
+            store.files["worldgen/biome/mine:sub/woodland"],
+            [b"{\"temperature\":0.5}".to_vec()]
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

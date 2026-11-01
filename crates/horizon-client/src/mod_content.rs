@@ -1456,9 +1456,13 @@ const TAG_BUNDLES: [&str; 2] = ["block-tags.json", "worldgen/block_tags.json"];
 const BIOME_TAGS: &str = "worldgen/biome_tags.json";
 /// Worldgen registries a content mod may add to, and the bundle the
 /// worldgen loader reads each from (id → the file's text): what structure
-/// mods hold. Biomes, noise and density functions change the terrain and
-/// are not read from mods.
-const WORLDGEN_BUNDLES: [(&str, &str); 6] = [
+/// mods hold, plus additive biome content. Terrain noise/settings stay with
+/// the host generator or its native terrain mod.
+const WORLDGEN_BUNDLES: [(&str, &str); 10] = [
+    ("biome", "worldgen/biomes.json"),
+    ("biome_placement", "worldgen/biome_placements.json"),
+    ("carver", "worldgen/carvers.json"),
+    ("feature", "worldgen/features.json"),
     ("structure", "worldgen/structures.json"),
     ("structure_set", "worldgen/structure_sets.json"),
     ("template_pool", "worldgen/template_pools.json"),
@@ -1469,7 +1473,8 @@ const WORLDGEN_BUNDLES: [(&str, &str); 6] = [
 
 /// The registry of `command-registries.json` that each bundle's ids join,
 /// for the commands that suggest them (`/locate`, `/place`).
-const COMMAND_REGISTRIES: [(&str, &str); 6] = [
+const COMMAND_REGISTRIES: [(&str, &str); 7] = [
+    ("worldgen/biomes.json", "minecraft:worldgen/biome"),
     ("worldgen/structures.json", "minecraft:worldgen/structure"),
     (
         "worldgen/structure_sets.json",
@@ -1616,7 +1621,7 @@ fn place_in_biomes(
     if !base.join(BIOMES).exists() {
         return Err(format!("biome modifiers need {BIOMES}").into());
     }
-    let mut doc = read_json(&base.join(BIOMES))?;
+    let mut doc = read_json(&out_path(overlay, BIOMES))?;
     let biome_ids: BTreeSet<String> = match &doc {
         J::Obj(o) => o.iter().map(|(k, _)| k.clone()).collect(),
         _ => return Err(format!("{BIOMES}: not an object").into()),
@@ -2007,7 +2012,14 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
     // A tag naming an id nobody registers fails as a whole in vanilla, and
     // carried-over mods name blocks left out or other mods' ids: such
     // entries are dropped instead, so the rest of the tag holds.
-    let known = Known::new(base, &plan, &tags)?;
+    let mut known = Known::new(base, &plan, &tags)?;
+    known.biomes.extend(
+        worldgen
+            .get(BIOMES)
+            .into_iter()
+            .flatten()
+            .map(|(id, _)| id.clone()),
+    );
     for (file, merge) in &mut tags {
         merge.values.retain(|v| known.keeps(file, v));
     }
@@ -2078,10 +2090,11 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
     }
     let mut placed_doc = None;
     for (bundle, entries) in &worldgen {
-        if !base.join(bundle).exists() {
-            continue;
-        }
-        let mut doc = read_json(&base.join(bundle))?;
+        let mut doc = if base.join(bundle).exists() {
+            read_json(&base.join(bundle))?
+        } else {
+            J::Obj(Vec::new())
+        };
         for (id, text) in entries {
             doc.set(id, J::Str(text.clone()));
         }

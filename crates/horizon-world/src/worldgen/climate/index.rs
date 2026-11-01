@@ -332,11 +332,28 @@ pub struct ClimateSearch<'a, T> {
 }
 impl<'a, T> ClimateSearch<'a, T> {
     pub fn find(&mut self, target: TargetPoint) -> Result<&'a T, IndexError> {
+        Ok(self.find_entry(target)?.1)
+    }
+    /// Resolve equal-distance candidates independently of worker query history.
+    /// Vanilla queries continue using `find` and its previous-leaf semantics.
+    pub fn find_entry_stable(
+        &mut self,
+        target: TargetPoint,
+    ) -> Result<(&'a ParameterPoint, &'a T), IndexError> {
+        self.last = None;
+        self.find_entry(target)
+    }
+    /// The winning interval and value, for explicit composition of biome pools.
+    pub fn find_entry(
+        &mut self,
+        target: TargetPoint,
+    ) -> Result<(&'a ParameterPoint, &'a T), IndexError> {
         let result = self.index.search(0, &target.parameters(), self.last)?;
         self.last = Some(result);
         let (entry, 0) = self.index.links[result] else {
             unreachable!("search returns a leaf");
         };
-        Ok(&self.index.entries[entry as usize].1)
+        let (point, value) = &self.index.entries[entry as usize];
+        Ok((point, value))
     }
 }

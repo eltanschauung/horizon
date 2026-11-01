@@ -51,6 +51,9 @@ impl From<SampleError> for BiomeError {
 #[derive(Debug)]
 pub struct MultiNoiseBiomeSource {
     parameters: ClimateIndex<String>,
+    /// Additive declarations win equal fitness explicitly, rather than being
+    /// silently shadowed by vanilla's climate boxes or previous-leaf cache.
+    additions: Option<ClimateIndex<String>>,
 }
 impl MultiNoiseBiomeSource {
     pub fn new(entries: Vec<(ParameterPoint, String)>) -> Result<Self, BiomeError> {
@@ -60,6 +63,7 @@ impl MultiNoiseBiomeSource {
             .collect::<Result<_, DecodeError>>()?;
         Ok(Self {
             parameters: ClimateIndex::new(entries)?,
+            additions: None,
         })
     }
     /// Horizon's quantized import format, not the vanilla biome definition
@@ -68,6 +72,7 @@ impl MultiNoiseBiomeSource {
     pub fn from_quantized_json(json: &str) -> Result<Self, BiomeError> {
         let input: serde_json::Value = serde_json::from_str(json).map_err(DecodeError::from)?;
         let mut entries = Vec::new();
+        let mut additions = Vec::new();
         for entry in input
             .as_array()
             .ok_or(DecodeError::Field("biome parameter list"))?
@@ -97,15 +102,20 @@ impl MultiNoiseBiomeSource {
             let biome = entry["biome"]
                 .as_str()
                 .ok_or(DecodeError::Field("biome identifier"))?;
-            entries.push((
-                ParameterPoint {
-                    coordinates,
-                    offset,
-                },
-                biome.to_owned(),
-            ));
+            let point = ParameterPoint {
+                coordinates,
+                offset,
+            };
+            if entry["horizon:additive"].as_bool() == Some(true) {
+                additions.push((point, identifier(biome)?));
+            }
+            entries.push((point, biome.to_owned()));
         }
-        Self::new(entries)
+        let mut source = Self::new(entries)?;
+        if !additions.is_empty() {
+            source.additions = Some(ClimateIndex::new(additions)?);
+        }
+        Ok(source)
     }
     pub fn parameters(&self) -> &ClimateIndex<String> {
         &self.parameters
@@ -114,6 +124,7 @@ impl MultiNoiseBiomeSource {
         BiomeResolver {
             climate,
             search: self.parameters.searcher(),
+            additions: self.additions.as_ref().map(ClimateIndex::searcher),
         }
     }
 }
@@ -121,6 +132,7 @@ impl MultiNoiseBiomeSource {
 pub struct BiomeResolver<'a> {
     climate: &'a ClimateSampler,
     search: ClimateSearch<'a, String>,
+    additions: Option<ClimateSearch<'a, String>>,
 }
 impl<'a> BiomeResolver<'a> {
     pub fn sample(
@@ -128,10 +140,7 @@ impl<'a> BiomeResolver<'a> {
         context: &mut SamplerContext,
         quart: [i32; 3],
     ) -> Result<&'a str, BiomeError> {
-        Ok(self
-            .search
-            .find(self.climate.sample(context, quart)?)?
-            .as_str())
+        self.resolve(self.climate.sample(context, quart)?)
     }
     pub fn prepare_volume(
         &self,
@@ -148,6 +157,16 @@ impl<'a> BiomeResolver<'a> {
         quart: [i32; 3],
     ) -> Result<&'a str, BiomeError> {
         let target = volume.target(quart).ok_or(BiomeError::OutsideVolume)?;
-        Ok(self.search.find(target)?.as_str())
+        self.resolve(target)
+    }
+    fn resolve(&mut self, target: super::climate::TargetPoint) -> Result<&'a str, BiomeError> {
+        let (point, name) = self.search.find_entry(target)?;
+        if let Some(additions) = &mut self.additions {
+            let (added_point, added_name) = additions.find_entry_stable(target)?;
+            if added_point.fitness(target) <= point.fitness(target) {
+                return Ok(added_name.as_str());
+            }
+        }
+        Ok(name.as_str())
     }
 }

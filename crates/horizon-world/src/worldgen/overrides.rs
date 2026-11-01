@@ -18,7 +18,8 @@ pub const DIMENSION_TYPES: &str = "dimension_types";
 
 /// Pack folders (`data/<ns>/<kind>/`) the chunk generator reads, and the
 /// bundle each joins.
-const KINDS: [(&str, &str); 16] = [
+const KINDS: [(&str, &str); 17] = [
+    ("worldgen/biome_placement", "biome_placements"),
     ("dimension", DIMENSIONS),
     ("dimension_type", DIMENSION_TYPES),
     ("worldgen/biome", "biomes"),
@@ -194,19 +195,16 @@ impl WorldgenOverrides {
             PackFile::Other
         }
     }
-    /// After the last pack: leaves out the packs' new biomes (`known` says
-    /// which the game has), and what names them names the rest without
-    /// them: their biome tags' other biomes, and the climate points of the
-    /// other biomes in a level stem's multi-noise list (the left-out
-    /// biome's climate goes to its nearest neighbours). Returns what it
-    /// left out, for the log.
+    /// Keep newly declared, namespaced biomes. Only malformed identifiers are
+    /// omitted; references are checked against the assembled registry later.
+    /// `known` preserves compatibility with hosts supplying built-in IDs.
     pub fn finish(&mut self, known: impl Fn(&str) -> bool) -> Vec<String> {
-        let left_out = self.retain("biomes", &known);
+        let left_out = self.retain("biomes", &|id: &str| {
+            known(id) || super::density::identifier(id).is_ok()
+        });
         let mut warnings: Vec<String> = left_out
             .iter()
-            .map(|id| {
-                format!("biome {id} is new: Horizon cannot add biomes yet, so it is left out")
-            })
+            .map(|id| format!("biome {id} has an invalid identifier and is left out"))
             .collect();
         if left_out.is_empty() {
             return warnings;
@@ -452,7 +450,7 @@ mod tests {
     }
 
     #[test]
-    fn new_biomes_are_left_out_of_tags_and_climate_points() {
+    fn new_biomes_keep_tags_and_climate_points() {
         let mut o = WorldgenOverrides::default();
         o.set("biomes", "minecraft:plains", "{}".into());
         o.set("biomes", "minecraft:molten_peaks", "{}".into());
@@ -468,11 +466,11 @@ mod tests {
             r#"{"generator":{"biome_source":{"biomes":[{"biome":"minecraft:plains"},{"biome":"minecraft:molten_peaks"}]}}}"#.into(),
         );
         let warnings = o.finish(|id| id == "minecraft:plains");
-        assert_eq!(warnings.len(), 2, "{warnings:?}");
-        assert_eq!(o.entries("biomes").count(), 1);
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(o.entries("biomes").count(), 2);
         let (_, _, tag) = o.tags("biome_tags").next().unwrap();
-        assert_eq!(tag, r#"{"values":["minecraft:plains"]}"#);
+        assert!(tag.contains("molten_peaks"));
         let (_, stem) = o.entries(DIMENSIONS).next().unwrap();
-        assert!(!stem.contains("molten_peaks") && stem.contains("minecraft:plains"));
+        assert!(stem.contains("molten_peaks") && stem.contains("minecraft:plains"));
     }
 }

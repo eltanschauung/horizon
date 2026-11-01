@@ -238,6 +238,8 @@ fn read_optional_bundle(
 ) -> Result<Option<Bundle>, GeneratorError> {
     if dir.join(format!("{name}.json")).exists() {
         read_bundle(dir, overrides, name).map(Some)
+    } else if overrides.entries(name).next().is_some() {
+        Ok(Some(overrides.apply(name, BTreeMap::new())))
     } else {
         Ok(None)
     }
@@ -489,6 +491,11 @@ impl GeneratorData {
                     .or_insert(quantize_parameter_report(&fs::read_to_string(&path)?)?);
             }
         }
+        super::biome_placement::extend_presets(
+            &mut presets,
+            &read_optional_bundle(dir, ov, "biome_placements")?.unwrap_or_default(),
+            &biome_set,
+        )?;
         let source_catalog =
             BiomeSourceCatalog::new(&biome_set, &biome_tags, &presets.keys().cloned().collect())?;
         let carvers = CarverCatalog::from_json(&read_bundle(dir, ov, "carvers")?)?;

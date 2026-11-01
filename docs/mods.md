@@ -263,6 +263,10 @@ A pool addition holds `"elements"` as a pool does, a processor list addition `"p
 Lithostitched's `add_structure_set_entries`, `add_template_pool_elements` and `add_processor_list_processors` modifiers
 do on NeoForge and Fabric, and `horizon-port-pack carry` writes the last two from those.
 
+The fork also supports namespaced biome definitions and additive climate placement in content mods.
+See [Content biome extensions](biome-extensions.md) for the declaration format, registry/save/network behavior,
+and the boundaries of this support. Biome additions use the active host or Tectonic climate samplers.
+
 A mod's own configured and placed features (`data/<ns>/worldgen/configured_feature/`, `placed_feature/`) generate in
 biomes it does not own (vanilla's) through NeoForge's biome modifiers, files in `data/<ns>/neoforge/biome_modifier/`
 (older Forge mods: `data/<ns>/forge/biome_modifier/`, `forge:` types). `add_features` appends its `features` to one

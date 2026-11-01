@@ -292,6 +292,24 @@ impl Biomes {
             let v: Value = serde_json::from_slice(&fs::read(&path)?)?;
             list.push(BiomeInfo::from_json(name, &v, &maps));
         }
+        // Content mods add biome definitions to the generator bundle. Keep
+        // vanilla's local IDs, then append custom identifiers in a stable order.
+        let bundle = root.join("worldgen/biomes.json");
+        if bundle.exists() {
+            let files: BTreeMap<String, String> = serde_json::from_slice(&fs::read(bundle)?)?;
+            let mut files: Vec<_> = files
+                .into_iter()
+                .filter(|(id, _)| !list.iter().any(|b| &b.name == id))
+                .collect();
+            files.sort_by(|a, b| identifier_order(&a.0, &b.0));
+            for (name, text) in files {
+                if list.len() >= usize::from(u16::MAX) {
+                    return Err("too many biomes in content registry".into());
+                }
+                let json: Value = serde_json::from_str(&text)?;
+                list.push(BiomeInfo::from_json(name, &json, &maps));
+            }
+        }
         let index = list
             .iter()
             .enumerate()
@@ -480,6 +498,47 @@ mod pack_tests {
             colormaps: Arc::new(maps),
             packs: BTreeMap::new(),
         }
+    }
+
+    #[test]
+    fn content_biomes_load_with_stable_ids_and_survive_world_pack_changes() {
+        let root =
+            std::env::temp_dir().join(format!("horizon-content-biomes-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let data = root.join("data/minecraft/worldgen/biome");
+        let maps = root.join("assets/minecraft/textures/colormap");
+        fs::create_dir_all(&data).unwrap();
+        fs::create_dir_all(&maps).unwrap();
+        fs::create_dir_all(root.join("worldgen")).unwrap();
+        for name in ["grass", "foliage", "dry_foliage"] {
+            let file = fs::File::create(maps.join(format!("{name}.png"))).unwrap();
+            let mut encoder = png::Encoder::new(file, 256, 256);
+            encoder.set_color(png::ColorType::Rgb);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder
+                .write_header()
+                .unwrap()
+                .write_image_data(&vec![100; 256 * 256 * 3])
+                .unwrap();
+        }
+        fs::write(data.join("plains.json"), "{}").unwrap();
+        let custom = json!({"temperature":0.3,"downfall":0.9,"has_precipitation":true,
+            "effects":{"water_color":0x123456},"features":[[],["example:tree"]]});
+        let bundle = json!({"example:woodland":custom.to_string(),"other:alpine":"{}"});
+        fs::write(root.join("worldgen/biomes.json"), bundle.to_string()).unwrap();
+        let biomes = Biomes::load(&root).unwrap();
+        assert_eq!(biomes.id("minecraft:plains"), 0);
+        assert_eq!(biomes.id("other:alpine"), 1);
+        assert_eq!(biomes.id("example:woodland"), 2);
+        assert_eq!(biomes.get(2).temperature, 0.3);
+        assert_eq!(biomes.get(2).water, 0x123456);
+        assert_eq!(biomes.get(2).features[1], ["example:tree"]);
+        assert!(biomes.with_packs([]).contains("example:woodland"));
+        assert_eq!(
+            biomes.registry_order(),
+            ["other:alpine", "minecraft:plains", "example:woodland"]
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

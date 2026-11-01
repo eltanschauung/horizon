@@ -369,12 +369,14 @@ fn allocated_ids_follow_mod_and_entry_order_after_vanilla() {
 
 fn prepared() -> Option<PathBuf> {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    [
-        manifest.join("../../.local/horizon-client/26.3"),
-        manifest.join("../../../../.local/horizon-client/26.3"),
-    ]
-    .into_iter()
-    .find(|root| root.join("gameplay-facts.json").exists())
+    std::env::var_os("HORIZON_TEST_RESOURCES")
+        .map(PathBuf::from)
+        .into_iter()
+        .chain([
+            manifest.join("../../.local/horizon-client/26.3"),
+            manifest.join("../../../../.local/horizon-client/26.3"),
+        ])
+        .find(|root| root.join("gameplay-facts.json").exists())
 }
 
 /// A content mod folder: a full block, a door and an item-less glass from
@@ -3189,7 +3191,7 @@ fn content_root_generates_a_biome_modifier_ore() {
     };
     let scratch = std::env::temp_dir().join(format!("horizon-mod-ore-{}", std::process::id()));
     let _ = fs::remove_dir_all(&scratch);
-    let ore = |modifier: bool| -> usize {
+    let ore = |modifier: bool, custom: bool| -> usize {
         let mut files = vec![
             ("horizon-mod.toml", manifest("zinc", "")),
             (
@@ -3214,16 +3216,32 @@ fn content_root_generates_a_biome_modifier_ore() {
                     .to_owned(),
             ),
         ];
+        if custom {
+            let mut biome: serde_json::Value = serde_json::from_slice(
+                &fs::read(base.join("data/minecraft/worldgen/biome/plains.json")).unwrap(),
+            )
+            .unwrap();
+            biome["features"] = serde_json::json!([[], [], [], [], [], [], [], [], [], [], []]);
+            files.push(("data/zinc/worldgen/biome/woodland.json", biome.to_string()));
+            files.push((
+                "data/zinc/worldgen/biome_placement/woodland.json",
+                serde_json::json!({
+                "preset":"minecraft:overworld","biomes":[{"biome":"zinc:woodland","parameters":{
+                    "temperature":[-2,2],"humidity":[-2,2],"continentalness":[-2,2],
+                    "erosion":[-2,2],"depth":[-2,2],"weirdness":[-2,2],"offset":0
+                }}]})
+                .to_string(),
+            ));
+        }
         if modifier {
             files.push((
                 "data/zinc/neoforge/biome_modifier/add_zinc.json",
-                r##"{"type": "neoforge:add_features", "biomes": "#minecraft:is_overworld",
-                    "features": "zinc:ore_zinc", "step": "underground_ores"}"##
-                    .to_owned(),
+                serde_json::json!({"type":"neoforge:add_features","biomes":if custom {"zinc:woodland"} else {"#minecraft:is_overworld"},
+                    "features":"zinc:ore_zinc","step":"underground_ores"}).to_string(),
             ));
         }
         let files: Vec<(&str, &str)> = files.iter().map(|(a, b)| (*a, b.as_str())).collect();
-        let dir = scratch.join(format!("zinc-{modifier}"));
+        let dir = scratch.join(format!("zinc-{modifier}-{custom}"));
         let m = folder_mod(&dir, &files);
         let root = resource_root(&base, &[m], &dir.join("cache")).unwrap();
         let assets = Assets::load(&root).unwrap();
@@ -3242,6 +3260,9 @@ fn content_root_generates_a_biome_modifier_ore() {
         terrain.decorate(&mut worker, &mut region);
         let [_, _, _, _, center, ..] = region;
         let chunk = terrain.finish(center);
+        if custom {
+            assert_eq!(biomes.get(chunk.biome(0, 64, 0)).name, "zinc:woodland");
+        }
         let mut count = 0;
         for y in chunk.min_y()..chunk.max_y() {
             for z in 0..16 {
@@ -3250,10 +3271,38 @@ fn content_root_generates_a_biome_modifier_ore() {
                 }
             }
         }
+        if custom {
+            let save = crate::save::SaveDir::new(
+                dir.join("roundtrip"),
+                crate::chunk::LevelShape::OVERWORLD,
+            );
+            save.save(&[std::sync::Arc::new(chunk)], assets.registry, &biomes)
+                .unwrap();
+            let loaded = save
+                .load(0, 0, assets.registry, &biomes)
+                .expect("custom biome/block chunk reopens");
+            assert_eq!(biomes.get(loaded.biome(0, 64, 0)).name, "zinc:woodland");
+            let mut persisted = 0;
+            for y in loaded.min_y()..loaded.max_y() {
+                for z in 0..16 {
+                    for x in 0..16 {
+                        persisted += usize::from(loaded.get(x, y, z) == zinc);
+                    }
+                }
+            }
+            assert_eq!(
+                persisted, count,
+                "custom blocks survive region-file save/reopen"
+            );
+        }
         count
     };
-    assert!(ore(true) > 0, "the modifier's ore generates");
-    assert_eq!(ore(false), 0, "no modifier, no ore");
+    assert!(ore(true, false) > 0, "the modifier's ore generates");
+    assert_eq!(ore(false, false), 0, "no modifier, no ore");
+    assert!(
+        ore(true, true) > 0,
+        "custom biome generates the registered custom block feature"
+    );
     let _ = fs::remove_dir_all(&scratch);
 }
 
@@ -3294,4 +3343,67 @@ fn biome_modifiers_take_one_biome_or_a_list() {
         serde_json::json!([["minecraft:fossil"], ["minecraft:lake"]])
     );
     let _ = fs::remove_dir_all(&scratch);
+}
+
+#[test]
+fn content_biomes_join_bundles_tags_and_modifiers_without_replacing_terrain() {
+    let base = biome_base("content-biomes");
+    let scratch = base.parent().unwrap().to_owned();
+    let dir = scratch.join("climatepack");
+    let files = [
+        (
+            "horizon-mod.toml",
+            "id = \"climatepack\"\nname = \"Climate pack\"\nversion = \"1.0\"\napi = \"0.2\"\nside = \"both\"\ncapabilities = [\"registries\"]\n",
+        ),
+        (
+            "data/climatepack/worldgen/biome/woodland.json",
+            r##"{"temperature":0.5,"features":[[],[],[],[],[],[],["climatepack:ore"]]}"##,
+        ),
+        (
+            "data/climatepack/worldgen/feature/ore.json",
+            r##"{"type":"minecraft:no_op"}"##,
+        ),
+        (
+            "data/climatepack/worldgen/placed_feature/ore.json",
+            r##"{"feature":"climatepack:ore","placement":[]}"##,
+        ),
+        (
+            "data/climatepack/worldgen/biome_placement/woodland.json",
+            r##"{"preset":"minecraft:overworld","biomes":[]}"##,
+        ),
+        (
+            "data/climatepack/tags/worldgen/biome/forests.json",
+            r##"{"values":["climatepack:woodland"]}"##,
+        ),
+        (
+            "data/climatepack/neoforge/biome_modifier/remove.json",
+            r##"{"type":"neoforge:remove_features","biomes":"#climatepack:forests","features":"climatepack:ore","steps":["underground_ores"]}"##,
+        ),
+    ];
+    for (file, text) in files {
+        let path = dir.join(file);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, text).unwrap();
+    }
+    let package = horizon_mods::Package::read(&dir).unwrap();
+    let content = Content::read(&dir, &package.manifest).unwrap();
+    let m = ContentMod {
+        id: "climatepack".into(),
+        content,
+    };
+    let out = scratch.join("out");
+    build(&base, &[m], &out).unwrap();
+    let bundle = |name: &str| -> BTreeMap<String, String> {
+        serde_json::from_slice(&fs::read(out.join(format!("worldgen/{name}.json"))).unwrap())
+            .unwrap()
+    };
+    let biomes = bundle("biomes");
+    let custom: serde_json::Value = serde_json::from_str(&biomes["climatepack:woodland"]).unwrap();
+    assert!(custom["features"][6].as_array().unwrap().is_empty());
+    assert_eq!(custom["temperature"], 0.5);
+    assert!(bundle("features").contains_key("climatepack:ore"));
+    assert!(bundle("biome_placements").contains_key("climatepack:woodland"));
+    assert!(bundle("biome_tags")["climatepack:forests"].contains("climatepack:woodland"));
+    assert!(!out.join("worldgen/densities.json").exists());
+    fs::remove_dir_all(scratch).unwrap();
 }

@@ -6,6 +6,7 @@ pub mod bamboo;
 pub mod biome;
 pub mod biome_chunk;
 pub mod biome_predicate;
+pub mod biome_placement;
 pub mod biome_source;
 pub mod biome_temperature;
 pub mod biome_weather;

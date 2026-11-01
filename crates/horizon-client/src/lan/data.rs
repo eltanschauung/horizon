@@ -55,7 +55,7 @@ pub const CORE_PACK: (&str, &str, &str) = ("minecraft", "core", horizon_protocol
 /// Synchronized registries a world's data packs add entries to (or replace
 /// them in). The others stay the game's own: Horizon's gameplay reads them
 /// from the prepared resources only.
-const PACK_REGISTRIES: &[&str] = &["minecraft:dialog"];
+const PACK_REGISTRIES: &[&str] = &["minecraft:dialog", "minecraft:worldgen/biome"];
 
 /// A data-driven registry: entry names in network order and their JSON.
 #[derive(Clone)]
@@ -107,6 +107,23 @@ fn walk(dir: &Path, prefix: &str, out: &mut BTreeMap<String, Value>) {
         {
             out.insert(format!("{prefix}{stem}"), value);
         }
+    }
+}
+
+/// Content biomes join the same registry as the base pack. Their definitions
+/// must be sent even when a client acknowledges vanilla's known core pack.
+fn content_biomes(resources: &Path, entries: &mut Vec<((String, String), Value, bool)>) {
+    let Ok(namespaces) = std::fs::read_dir(resources.join("data")) else {
+        return;
+    };
+    for namespace in namespaces.flatten() {
+        let ns = namespace.file_name().to_string_lossy().into_owned();
+        if ns == "minecraft" {
+            continue;
+        }
+        let mut found = BTreeMap::new();
+        walk(&namespace.path().join("worldgen/biome"), "", &mut found);
+        entries.extend(found.into_iter().map(|(p, v)| ((ns.clone(), p), v, true)));
     }
 }
 
@@ -223,6 +240,9 @@ impl SyncData {
                 .into_iter()
                 .map(|(p, v)| (("minecraft".to_owned(), p), v, false))
                 .collect();
+            if *key == "minecraft:worldgen/biome" {
+                content_biomes(resources, &mut entries);
+            }
             if PACK_REGISTRIES.contains(key) {
                 pack_entries(path, overlay, &mut entries);
             }
@@ -650,6 +670,40 @@ mod tests {
         };
         assert_eq!(data(true), [false, true]);
         assert_eq!(data(false), [true, true]);
+    }
+
+    #[test]
+    fn content_biomes_are_sorted_and_always_sent_with_their_definitions() {
+        let root = std::env::temp_dir().join(format!("horizon-biome-sync-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dir = root.join("data/example/worldgen/biome");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("alpine.json"), r#"{"temperature":0.2}"#).unwrap();
+        let mut entries = vec![(
+            ("minecraft".into(), "plains".into()),
+            serde_json::json!({}),
+            false,
+        )];
+        content_biomes(&root, &mut entries);
+        file_order(&mut entries);
+        assert_eq!(entries[0].0, ("example".into(), "alpine".into()));
+        let mut sync = SyncData::empty();
+        let mut e = Entries {
+            names: Vec::new(),
+            json: Vec::new(),
+            from_pack: Vec::new(),
+        };
+        for ((ns, path), json, from_pack) in entries {
+            e.names.push(format!("{ns}:{path}"));
+            e.json.push(json);
+            e.from_pack.push(from_pack);
+        }
+        sync.registries.push(("minecraft:worldgen/biome".into(), e));
+        let packet = &sync.registry_packets(true, &LevelShapes::VANILLA)[0];
+        assert_eq!(packet.entries[0].id, "example:alpine");
+        assert!(packet.entries[0].data.is_some());
+        assert!(packet.entries[1].data.is_none());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
