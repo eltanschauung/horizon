@@ -215,6 +215,8 @@ enum Job {
     /// Proto chunks checked out to be saved (`ChunkGenerator::save_protos`),
     /// off the main thread like vanilla's IOWorker.
     Save(Vec<((i32, i32), Proto)>),
+    /// A proto chunk checked out for its light view (`light_region`).
+    LightView(i32, i32, Proto),
     /// Meshes the renderer is done with (`Streaming::free`): their memory
     /// is given back here, not in the frame.
     Free(Vec<((i32, i32, i32), SectionMesh)>),
@@ -235,6 +237,8 @@ pub enum Done {
     Lit(i32, i32, Vec<crate::chunk::Light>, u64),
     Meshed(i32, i32, i32, SectionMesh, u64),
     Saved(Vec<((i32, i32), Proto)>),
+    /// A proto chunk back from `Job::LightView`, with its view.
+    LightView(i32, i32, Proto, Option<Chunk>),
 }
 struct Queued {
     priority: i64,
@@ -352,7 +356,6 @@ pub struct Streaming {
     /// Columns generated and saved as they were left behind: new when they
     /// next arrive, though read from the save (`World::loaded_chunks`).
     dropped_new: FxHashSet<(i32, i32)>,
-    light_view: Arc<dyn Fn(&Proto) -> Option<Chunk> + Send + Sync>,
     non_air_sections: Arc<dyn Fn(&Proto) -> Option<SectionMask> + Send + Sync>,
     threads: Vec<thread::JoinHandle<()>>,
     order: u64,
@@ -377,6 +380,8 @@ pub struct Streaming {
     decorating_finals: HashSet<(i32, i32)>,
     /// Save jobs in flight.
     saving: usize,
+    /// Proto chunks checked out to a worker for their light view.
+    viewing: FxHashSet<(i32, i32)>,
     /// Vanilla's decoration order around the player, and the centre and
     /// radius it was last ranked for.
     decoration_order: DecorationOrder,
@@ -732,6 +737,10 @@ impl Streaming {
                                     generator.save_protos(&refs);
                                     Done::Saved(protos)
                                 }
+                                Job::LightView(x, z, proto) => {
+                                    let view = generator.light_view(&proto);
+                                    Done::LightView(x, z, proto, view)
+                                }
                                 Job::Free(meshes) => {
                                     for (_, mesh) in meshes {
                                         let rejected = shared.meshes.lock().unwrap().put(mesh);
@@ -783,17 +792,12 @@ impl Streaming {
                     .expect("spawn worker")
             })
             .collect();
-        let light_view = {
-            let generator = generator.clone();
-            Arc::new(move |p: &Proto| generator.light_view(p))
-        };
         let non_air_sections = {
             let generator = generator.clone();
             Arc::new(move |p: &Proto| generator.non_air_sections(p))
         };
         Self {
             shared,
-            light_view,
             non_air_sections,
             threads,
             order: 0,
@@ -808,6 +812,7 @@ impl Streaming {
             decorating: 0,
             decorating_finals: HashSet::new(),
             saving: 0,
+            viewing: Default::default(),
             decoration_order: DecorationOrder::default(),
             order_area: None,
             queue_basis: Default::default(),
@@ -1092,28 +1097,42 @@ impl Streaming {
     /// The 3x3 a light job reads: the finished columns, and for a neighbour
     /// that will not finish (past the area), its decorated proto chunk, as
     /// vanilla lights its last FULL ring against neighbours at FEATURES.
+    /// A proto neighbour without its view yet is checked out to a worker,
+    /// which builds the view off the server thread (`Job::LightView`); the
+    /// region is asked for again once it is back.
     fn light_region(&mut self, world: &World, x: i32, z: i32) -> Option<Box<Region>> {
         let mut region: Region = Default::default();
+        let mut complete = true;
         for dz in 0..3 {
             for dx in 0..3 {
                 let n = (x + dx as i32 - 1, z + dz as i32 - 1);
-                region[dz][dx] = Some(match world.chunks.get(&n) {
-                    Some(chunk) => chunk.clone(),
+                region[dz][dx] = match world.chunks.get(&n) {
+                    Some(chunk) => Some(chunk.clone()),
                     None if !self.in_range(n.0, n.1, 1) && self.decorated.contains(&n) => {
                         if let Some(view) = self.light_views.get(&n) {
-                            view.clone()
+                            Some(view.clone())
                         } else {
-                            let proto = self.protos.get(&n)?.as_ref()?;
-                            let view = Arc::new((self.light_view)(proto)?);
-                            self.light_views.insert(n, view.clone());
-                            view
+                            let proto = self.protos.get_mut(&n)?.take()?;
+                            self.viewing.insert(n);
+                            self.submit(Some((x, z)), 0, Job::LightView(n.0, n.1, proto));
+                            complete = false;
+                            None
                         }
                     }
                     None => return None,
-                });
+                };
             }
         }
-        Some(Box::new(region))
+        complete.then(|| Box::new(region))
+    }
+    /// A proto chunk back from its light view: the view waits in
+    /// `light_views` for the light jobs that asked for it.
+    fn receive_light_view(&mut self, x: i32, z: i32, proto: Proto, view: Option<Chunk>) {
+        self.viewing.remove(&(x, z));
+        self.protos.insert((x, z), Some(proto));
+        if let Some(view) = view {
+            self.light_views.insert((x, z), Arc::new(view));
+        }
     }
     /// Whether `light_region` would find all nine columns: the same walk
     /// without building the snapshot, so the scheduler can rank the ready
@@ -1201,6 +1220,7 @@ impl Streaming {
     pub fn busy(&self) -> bool {
         !(self.generating.is_empty()
             && self.decorating == 0
+            && self.viewing.is_empty()
             && self.finishing.is_empty()
             && self.lighting.is_empty()
             && self.meshing.is_empty()
@@ -1264,6 +1284,7 @@ impl Streaming {
                 }
                 Done::Generated(chunk) => self.receive_generated(chunk, world),
                 Done::Saved(protos) => self.receive_saved(protos),
+                Done::LightView(x, z, proto, view) => self.receive_light_view(x, z, proto, view),
                 Done::Lit(x, z, sections, seq) => {
                     if self.lighting.get(&(x, z)) != Some(&seq) {
                         continue;
@@ -1822,7 +1843,11 @@ impl Streaming {
             return;
         }
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        while self.decorating > 0 || !self.finishing.is_empty() || self.saving > 0 {
+        while self.decorating > 0
+            || !self.finishing.is_empty()
+            || self.saving > 0
+            || !self.viewing.is_empty()
+        {
             let left = deadline.saturating_duration_since(std::time::Instant::now());
             match self.shared.done.recv_timeout(left) {
                 Some(Done::Decorated(x, z, region, finals, writes)) => {
@@ -1830,6 +1855,9 @@ impl Streaming {
                 }
                 Some(Done::Generated(chunk)) => self.receive_generated(chunk, world),
                 Some(Done::Saved(protos)) => self.receive_saved(protos),
+                Some(Done::LightView(x, z, proto, view)) => {
+                    self.receive_light_view(x, z, proto, view)
+                }
                 Some(other) => self.deferred.push(other),
                 None => {
                     log::warn!("Horizon: chunk generation did not finish before saving");
@@ -1860,13 +1888,18 @@ impl Streaming {
                 }
                 Done::Generated(chunk) => self.receive_generated(chunk, world),
                 Done::Saved(protos) => self.receive_saved(protos),
+                Done::LightView(x, z, proto, view) => self.receive_light_view(x, z, proto, view),
                 other => self.deferred.push(other),
             }
             if started.elapsed() >= std::time::Duration::from_millis(2) {
                 return false;
             }
         }
-        if self.decorating > 0 || !self.finishing.is_empty() || self.saving > 0 {
+        if self.decorating > 0
+            || !self.finishing.is_empty()
+            || self.saving > 0
+            || !self.viewing.is_empty()
+        {
             return false;
         }
         let written: Vec<_> = self.written.drain().collect();
@@ -1940,7 +1973,11 @@ impl Streaming {
                 counts[1] += 1;
             } else {
                 counts[2] += 1;
-                if self.light_region(world, key.0, key.1).is_some() {
+                if self.light_region(world, key.0, key.1).is_some()
+                    || (-1..=1).any(|dz| {
+                        (-1..=1).any(|dx| self.viewing.contains(&(key.0 + dx, key.1 + dz)))
+                    })
+                {
                     world.dirty_light.insert(key);
                 }
             }
