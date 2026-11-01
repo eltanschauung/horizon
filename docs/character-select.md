@@ -44,3 +44,11 @@ nametag. Optional `color` accepts Minecraft named colors or `#RRGGBB`, and color
 the name only. These are presentation changes: profile identity, scoreboard keys,
 message signing, commands and private messages are unchanged. Selections are not
 yet synchronized to other clients, so this does not rename remote players.
+
+ChatHeads 0.1.0 parses only `<profile>` chat lines. Our compatible bundle is built
+with `python3 tools/patch_chatheads.py ORIGINAL.hnmod OUTPUT.hnmod`, then installed
+as ChatHeads and included in launcher Build. The patch registers character names
+and skin locations with ChatHeads' layout, recognizes their `Name : message`
+prefix, and draws the character skin's face. Profile chat remains supported.
+The source checks deliberately reject changed/already patched bundles so a newer
+upstream ChatHeads requires reviewing the patch rather than silently losing it.
