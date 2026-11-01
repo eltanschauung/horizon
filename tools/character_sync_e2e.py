@@ -93,19 +93,20 @@ def main():
             until(lambda:ctl(alice,'status'),lambda s:any('Kirisame Marisa : character-sync-proof' in line for line in s['server']['chat']))
             until(lambda:ctl(alice,'status'),lambda s:'Kirisame Marisa' in (s.get('name_tags') or []))
             if args.worldspawn:
+                spawn_y = round(ctl(bob,'status')['player']['position'][1])
                 def console(command):
                     srv.stdin.write((command+'\n').encode());srv.stdin.flush()
                 def position(path): return ctl(path,'status')['player']['position']
                 def near_spawn(state):
                     p=state['player']['position']
-                    return state['server']['dimension']=='minecraft:overworld' and all(abs(a-b)<0.05 for a,b in zip(p,[2.5,4,-2.5]))
+                    return state['server']['dimension']=='minecraft:overworld' and all(abs(a-b)<0.05 for a,b in zip(p,[2.5,spawn_y,-2.5]))
                 console('op Alice')
                 until(lambda:(server/'test-process.log').read_text(),lambda text:'Made Alice a server operator' in text)
                 console('gamemode creative Alice')
-                console('setworldspawn 2 4 -3 90 0')
-                until(lambda:(server/'test-process.log').read_text(),lambda text:'world spawn point to 2, 4, -3' in text)
-                console('spawnpoint Alice 10 4 10')
-                console('tp Alice 25.5 4 25.5')
+                console(f'setworldspawn 2 {spawn_y} -3 90 0')
+                until(lambda:(server/'test-process.log').read_text(),lambda text:f'world spawn point to 2, {spawn_y}, -3' in text)
+                console(f'spawnpoint Alice 10 {spawn_y} 10')
+                console(f'tp Alice 25.5 {spawn_y} 25.5')
                 until(lambda:position(alice),lambda p:abs(p[0]-25.5)<0.05)
                 before=position(bob)
                 ctl(bob,'chat','/worldspawn')
