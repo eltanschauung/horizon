@@ -312,6 +312,8 @@ mod environment_tests {
             "minecraft:stone",
             "minecraft:water",
             "minecraft:barrier",
+            "minecraft:cave_air",
+            "minecraft:void_air",
         ];
         let state = |name: &str| Tag::compound([("id", Tag::String(name.into()))]);
         let registry = Box::leak(Box::new(
@@ -333,7 +335,7 @@ mod environment_tests {
             ]))
             .unwrap(),
         ));
-        let transforms=StateTransforms::from_json(r#"{"rotate":[[0,0,0],[1,1,1],[2,2,2],[3,3,3]],"mirror":[[0,0],[1,1],[2,2],[3,3]],"full_block":[false,true,false,true],"loot_containers":[],"block_entities":{}}"#,4).unwrap();
+        let transforms=StateTransforms::from_json(r#"{"rotate":[[0,0,0],[1,1,1],[2,2,2],[3,3,3],[4,4,4],[5,5,5]],"mirror":[[0,0],[1,1],[2,2],[3,3],[4,4],[5,5]],"full_block":[false,true,false,true,false,false],"loot_containers":[],"block_entities":{}}"#,6).unwrap();
         let ints = |p: [i32; 3]| Tag::List(p.into_iter().map(Tag::Int).collect());
         let tag = Tag::compound([
             ("size", ints([1, 1, 1])),
@@ -353,8 +355,16 @@ mod environment_tests {
                 "horizon:environment",
                 Tag::List(vec![
                     Tag::compound([("pos", ints([0, -1, 0])), ("ground", Tag::Byte(1))]),
-                    Tag::compound([("pos", ints([0, 0, 0])), ("state", state("minecraft:air"))]),
-                    Tag::compound([("pos", ints([0, 1, 0])), ("state", state("minecraft:air"))]),
+                    Tag::compound([
+                        ("pos", ints([0, 0, 0])),
+                        ("state", state("minecraft:air")),
+                        ("air", Tag::Byte(1)),
+                    ]),
+                    Tag::compound([
+                        ("pos", ints([0, 1, 0])),
+                        ("state", state("minecraft:air")),
+                        ("air", Tag::Byte(1)),
+                    ]),
                 ]),
             ),
         ]);
@@ -378,6 +388,7 @@ mod environment_tests {
         origin: [i32; 3],
         ground: BlockStateId,
         ceiling: bool,
+        air: BlockStateId,
         writes: Vec<[i32; 3]>,
     }
     impl FeatureWorld for World {
@@ -388,7 +399,7 @@ mod environment_tests {
             } else if self.ceiling && p[1] > self.origin[1] {
                 BlockStateId(1)
             } else {
-                BlockStateId(0)
+                self.air
             })
         }
         fn set_block(&mut self, p: [i32; 3], _: BlockStateId, _: i32) -> Result<bool, ()> {
@@ -419,29 +430,32 @@ mod environment_tests {
     #[test]
     fn guarded_templates_require_solid_substrate_and_space_before_any_writes() {
         let feature = fixture();
-        for (y, ground, ceiling, expected) in [
-            (-30, 1, false, true),
-            (68, 1, false, true),
-            (63, 2, false, false),
-            (63, 0, false, false),
-            (-30, 1, true, false),
-        ] {
-            let mut world = World {
-                origin: [142, y, -864],
-                ground: BlockStateId(ground),
-                ceiling,
-                writes: vec![],
-            };
-            let origin = world.origin;
-            let result = feature
-                .place(
-                    &mut world,
-                    &mut horizon_core::random::LegacyRandom::new(42),
-                    origin,
-                )
-                .unwrap();
-            assert_eq!(result, expected);
-            assert_eq!(world.writes, if expected { vec![origin] } else { vec![] });
+        for air in [0, 4, 5] {
+            for (y, ground, ceiling, expected) in [
+                (-30, 1, false, true),
+                (68, 1, false, true),
+                (63, 2, false, false),
+                (63, 0, false, false),
+                (-30, 1, true, false),
+            ] {
+                let mut world = World {
+                    origin: [142, y, -864],
+                    ground: BlockStateId(ground),
+                    ceiling,
+                    air: BlockStateId(air),
+                    writes: vec![],
+                };
+                let origin = world.origin;
+                let result = feature
+                    .place(
+                        &mut world,
+                        &mut horizon_core::random::LegacyRandom::new(42),
+                        origin,
+                    )
+                    .unwrap();
+                assert_eq!(result, expected);
+                assert_eq!(world.writes, if expected { vec![origin] } else { vec![] });
+            }
         }
     }
 }

@@ -6,7 +6,7 @@ use crate::{
     registry::{BlockRegistry, BlockStateId},
 };
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     sync::{Arc, OnceLock},
 };
 
@@ -361,6 +361,13 @@ impl StructureTemplate {
                 Some(Tag::List(list)) => list.iter().filter_map(known_state).collect(),
                 _ => BTreeSet::new(),
             });
+        let air: Arc<BTreeSet<BlockStateId>> = Arc::new(
+            ["minecraft:air", "minecraft:cave_air", "minecraft:void_air"]
+                .into_iter()
+                .filter_map(|name| registry.default_state(name))
+                .collect(),
+        );
+        let mut exact = BTreeMap::<Option<BlockStateId>, Arc<BTreeSet<BlockStateId>>>::new();
         let environment = match get(root, "horizon:environment") {
             Some(Tag::List(list)) if list.len() <= 262144 => Some(
                 list.iter()
@@ -372,8 +379,14 @@ impl StructureTemplate {
                         let at = |k| c.and_then(|c| get(c, k));
                         let states = if at("ground") == Some(&Tag::Byte(1)) {
                             ground.clone()
+                        } else if at("air") == Some(&Tag::Byte(1)) {
+                            air.clone()
                         } else {
-                            Arc::new(at("state").and_then(known_state).into_iter().collect())
+                            let state = at("state").and_then(known_state);
+                            exact
+                                .entry(state)
+                                .or_insert_with(|| Arc::new(state.into_iter().collect()))
+                                .clone()
                         };
                         EnvironmentRequirement {
                             pos: int_list(at("pos")),

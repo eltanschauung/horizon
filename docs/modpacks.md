@@ -1197,3 +1197,7 @@ bounds before writing. Unknown states fail closed. A configured template with
 that could relocate blocks after checking them. Requirements rotate with the
 shape. This permits conservative replay of an exported shape without discarding
 its substrate, fluid and clearance constraints.
+
+An environment requirement with `air:1b` accepts ordinary air, cave air and
+void air, preserving empty-space checks across generated and carved caves.
+Identical allowed-state sets are shared within each template to bound memory.
