@@ -13,6 +13,7 @@ pub(super) struct Screen {
     pub preview: usize,
     page: usize,
     model: Option<Part>,
+    slim_model: Option<Part>,
     instance: PathBuf,
     error: Option<String>,
 }
@@ -28,6 +29,7 @@ impl Screen {
             preview: selected.unwrap_or(0),
             page: 0,
             model: None,
+            slim_model: None,
             instance,
             error: None,
         }
@@ -37,10 +39,11 @@ impl Screen {
         self.preview = self.selected.unwrap_or(0);
         self.page = self.preview / Self::page_size(h);
         self.error = None;
-        if self.model.is_none() {
-            self.model = EntityModelDocument::load(root)
-                .ok()
-                .and_then(|models| models.model("minecraft:player#main"));
+        if self.model.is_none()
+            && let Ok(models) = EntityModelDocument::load(root)
+        {
+            self.model = models.model("minecraft:player#main");
+            self.slim_model = models.model("minecraft:player_slim#main");
         }
     }
 
@@ -194,7 +197,12 @@ impl Screen {
                     true,
                 );
             }
-            if let Some(model) = &self.model {
+            let model = if character.is_slim(atlas) {
+                self.slim_model.as_ref().or(self.model.as_ref())
+            } else {
+                self.model.as_ref()
+            };
+            if let Some(model) = model {
                 let bounds = [
                     left,
                     top + 12.0 + lines.len() as f32 * 10.0,

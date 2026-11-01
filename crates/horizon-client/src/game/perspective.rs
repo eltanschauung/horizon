@@ -505,7 +505,7 @@ impl Game<'_> {
         };
         if let Some(character) = &self.character {
             m.skin = Some(character.skin(&self.gui.atlas).to_owned());
-            m.slim = false;
+            m.slim = character.is_slim(&self.gui.atlas);
         }
         m.extra.main_hand_left = self.settings.main_hand_left;
         m.extra.hidden_model_parts = !self.settings.file.model_customisation() & 0x7F;

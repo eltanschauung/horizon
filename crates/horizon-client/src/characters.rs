@@ -6,14 +6,29 @@ use std::{fs, io, io::Write, path::Path};
 pub const FALLBACK_SKIN: &str = "entity/player/wide/steve";
 const CHOICE_FILE: &str = "character.json";
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Model {
+    #[default]
+    Wide,
+    Slim,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Character {
     pub id: String,
     pub name: String,
     pub texture: String,
+    #[serde(default)]
+    pub model: Model,
 }
 
 impl Character {
+    /// Steve's failure fallback retains its wide arms.
+    pub fn is_slim(&self, atlas: &HudAtlas) -> bool {
+        self.model == Model::Slim && atlas.sprites.contains_key(&self.texture)
+    }
+
     /// A broken appearance uses Steve without adding him to the roster.
     pub fn skin(&self, atlas: &HudAtlas) -> &str {
         if atlas.sprites.contains_key(&self.texture) {

@@ -21,7 +21,7 @@ impl Fixture {
         let catalog = root.join("assets/lunatic/horizon");
         fs::create_dir_all(&catalog).unwrap();
         fs::write(root.join("horizon-mod-content.json"), br#"["lunatic"]"#).unwrap();
-        fs::write(catalog.join("characters.json"), br#"{"characters":[{"id":"lunatic:reisen","name":"Reisen Udongein Inaba","texture":"lunatic:entity/character/reisen"}]}"#).unwrap();
+        fs::write(catalog.join("characters.json"), br#"{"characters":[{"id":"lunatic:reisen","name":"Reisen Udongein Inaba","texture":"lunatic:entity/character/reisen","model":"slim"}]}"#).unwrap();
         let mut title = Title::new(root.join("saves"), &root);
         // Existing world-menu fixtures start with an already chosen character.
         title.characters.selected = Some(0);
@@ -1844,6 +1844,7 @@ fn character_selection_gates_play_and_survives_a_restart() {
         panic!("selection must be applied to the game")
     };
     assert_eq!(chosen.id, "lunatic:reisen");
+    assert_eq!(chosen.model, crate::characters::Model::Slim);
     assert!(matches!(f.title.mode, Mode::Main));
     let restarted = Title::new(f.root.join("saves"), &f.root);
     assert_eq!(restarted.selected_character(), Some(chosen));
@@ -1869,6 +1870,7 @@ fn missing_catalog_and_corrupt_choice_keep_play_locked_and_broken_skins_fall_bac
     let choice = f.title.selected_character().unwrap();
     let atlas = HudAtlas::fonts(&f.root).unwrap();
     assert_eq!(choice.skin(&atlas), crate::characters::FALLBACK_SKIN);
+    assert!(!choice.is_slim(&atlas), "Steve fallback must remain wide");
     fs::write(f.root.join("character.json"), "broken").unwrap();
     f.title = Title::new(f.root.join("saves"), &f.root);
     assert!(f.title.selected_character().is_none());

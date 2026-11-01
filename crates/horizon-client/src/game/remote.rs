@@ -4908,7 +4908,10 @@ impl Game<'_> {
             .is_some_and(|remote| remote.profile == uuid)
             && let Some(character) = &self.character
         {
-            return (character.skin(&self.gui.atlas).to_owned(), false);
+            return (
+                character.skin(&self.gui.atlas).to_owned(),
+                character.is_slim(&self.gui.atlas),
+            );
         }
         if (skin.starts_with("skins/") || skin == "horizon/offline_skin") && !self.again_skin(&skin)
         {
