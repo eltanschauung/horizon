@@ -1165,7 +1165,7 @@ impl Hub {
         let packet = match &self.sync.commands {
             Some(tree) => {
                 let dedicated = self.config.dedicated && !self.config.integrated;
-                tree.packet_with(
+                tree.game_packet_with(
                     g.permission,
                     dedicated,
                     &self.sync.builtin,

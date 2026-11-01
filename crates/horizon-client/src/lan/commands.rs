@@ -94,6 +94,30 @@ impl CommandTree {
         self.packet_with(level, dedicated, builtin, &Value::Null)
     }
 
+    /// The fork's live server tree, including commands absent from vanilla's
+    /// generated report. Keep `packet`/`packet_with` vanilla-only for parity probes.
+    pub fn game_packet_with(
+        &self,
+        level: u8,
+        dedicated: bool,
+        builtin: &Builtin,
+        extra: &Value,
+    ) -> Commands {
+        let mut extra = extra.clone();
+        if !extra.is_object() {
+            extra = serde_json::json!({"type": "root", "children": {}});
+        }
+        extra["children"]["worldspawn"] = serde_json::json!({
+            "type": "literal",
+            "executable": true,
+            "permissions": {
+                "type": "minecraft:require",
+                "permission": {"type": "minecraft:command_level", "level": "gamemasters"}
+            }
+        });
+        self.packet_with(level, dedicated, builtin, &extra)
+    }
+
     /// [`CommandTree::packet`] with more commands after vanilla's: `extra`
     /// is a root in the report's format (server mods' commands).
     pub fn packet_with(
@@ -383,6 +407,43 @@ mod tests {
             ["", "me", "tell", "say", "stop", "action", "message"]
         );
         assert!(op.nodes[3].restricted);
+    }
+
+    #[test]
+    fn fork_worldspawn_is_advertised_and_completes_only_for_operators() {
+        use crate::command::{Registries, network, vanilla};
+        let tree = CommandTree {
+            root: serde_json::json!({"type": "root", "children": {}}),
+        };
+        let mods = serde_json::json!({"type": "root", "children": {
+            "example": {"type": "literal", "executable": true}
+        }});
+        for dedicated in [false, true] {
+            for level in 0..=4 {
+                let packet = tree.game_packet_with(level, dedicated, &Builtin::default(), &mods);
+                let node = packet.nodes.iter().find(|n| n.name == "worldspawn");
+                assert_eq!(node.is_some(), level >= 2);
+                if let Some(node) = node {
+                    assert!(node.executable && node.restricted && node.children.is_empty());
+                }
+                // Exercise the actual packet -> chat dispatcher -> completion path.
+                let chat = network::from_packet(&packet, vanilla::game_dispatcher());
+                let reg = Registries {
+                    permission: level,
+                    ..Registries::default()
+                };
+                for input in ["", "worlds"] {
+                    let parse = chat.parse(input, &reg);
+                    let (_, suggestions) = chat.client_suggestions(&parse, input.len(), &reg);
+                    assert_eq!(
+                        suggestions.iter().any(|s| s.text == "worldspawn"),
+                        level >= 2
+                    );
+                }
+                assert!(chat.find("example").is_some());
+            }
+        }
+        assert!(!tree.has("worldspawn"));
     }
 
     #[test]
