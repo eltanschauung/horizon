@@ -2359,6 +2359,7 @@ struct Game<'a> {
     /// Player skin downloads, and which skin each atlas skin slot holds
     /// (least recently shown first).
     skin_downloads: RefCell<horizon_client::skins::Downloader>,
+    character: Option<horizon_client::characters::Character>,
     /// `ProfileResolver.Cached`: `Dynamic` profiles (name- or id-only heads
     /// and mannequins) resolve through the services in the background.
     skin_profiles: RefCell<horizon_client::skins::Resolver>,
@@ -10783,6 +10784,7 @@ impl Game<'_> {
     /// What the title screen asked for, from a click or Enter.
     fn title_action(&mut self, event_loop: &dyn EventLoopCtl, action: Action) -> Result<()> {
         match action {
+            Action::CharacterSelected(character) => self.character = Some(character),
             Action::Quit => event_loop.exit(),
             Action::Options => self.open_options(true),
             Action::Accessibility => {
@@ -16877,6 +16879,7 @@ impl<'a> Game<'a> {
                     .unwrap_or_default()
                     .join("assets/skins"),
             )),
+            character: horizon_client::characters::selected(&root, &std::env::current_dir()?),
             skin_profiles: RefCell::new(horizon_client::skins::Resolver::new()),
             skin_slots: horizon_client::skins::SkinSlots::new(horizon_client::hud::SKIN_SLOTS),
             trim_slots: Vec::new(),

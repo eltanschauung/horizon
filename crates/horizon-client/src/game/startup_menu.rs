@@ -110,6 +110,9 @@ impl StartupMenu {
     }
 
     pub(super) fn handoff(&mut self, game: &mut Game<'_>) {
+        if let Some(title) = &self.title {
+            game.character = title.selected_character();
+        }
         game.title = self
             .title
             .take()
@@ -645,6 +648,8 @@ impl Loading {
 
     fn menu_action(&mut self, event_loop: &dyn EventLoopCtl, action: Action) {
         match action {
+            // Title saved the choice; handoff carries it into the game.
+            Action::CharacterSelected(_) => {}
             Action::Quit => event_loop.exit(),
             Action::Options => self.open_menu_options(Page::Main),
             Action::Accessibility => self.open_menu_options(Page::Accessibility),

@@ -543,6 +543,9 @@ impl Game<'_> {
                 .collect::<Vec<_>>()
         };
         match &title.mode {
+            Mode::Characters => {
+                json!({ "mode": "characters", "selected": title.selected_character().map(|c| c.id) })
+            }
             Mode::Main => json!({ "mode": "main", "worlds": worlds() }),
             Mode::Select {
                 worlds: list,

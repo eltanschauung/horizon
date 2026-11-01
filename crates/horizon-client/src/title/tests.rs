@@ -18,10 +18,14 @@ impl Fixture {
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
         fs::create_dir_all(root.join("saves")).unwrap();
-        Self {
-            title: Title::new(root.join("saves"), &root),
-            root,
-        }
+        let catalog = root.join("assets/lunatic/horizon");
+        fs::create_dir_all(&catalog).unwrap();
+        fs::write(root.join("horizon-mod-content.json"), br#"["lunatic"]"#).unwrap();
+        fs::write(catalog.join("characters.json"), br#"{"characters":[{"id":"lunatic:reisen","name":"Reisen Udongein Inaba","texture":"lunatic:entity/character/reisen"}]}"#).unwrap();
+        let mut title = Title::new(root.join("saves"), &root);
+        // Existing world-menu fixtures start with an already chosen character.
+        title.characters.selected = Some(0);
+        Self { title, root }
     }
     fn world(&self, folder: &str, name: &str) {
         crate::save::write_dat(
@@ -577,10 +581,8 @@ fn classic_navigation_buttons_sound_even_without_a_game_action() {
         f.title.click(0.0, 0.0, (480.0, 262.0)),
         (Action::None, false)
     );
-    assert_eq!(
-        f.click_with_sound("Minecraft Realms"),
-        (Action::None, false)
-    );
+    assert_eq!(f.click_with_sound("Character Select"), (Action::None, true));
+    f.click("Back");
     assert_eq!(f.click_with_sound("Singleplayer"), (Action::None, true));
     assert_eq!(
         f.click_with_sound("Play Selected World"),
@@ -1817,4 +1819,125 @@ fn a_finished_optimization_stamps_the_level_data() {
     let root = crate::save::read_dat(&path).unwrap();
     let version = root.get("Data").and_then(|d| d.get("DataVersion"));
     assert!(matches!(version, Some(Tag::Int(v)) if *v == horizon_world::DATA_VERSION));
+}
+
+#[test]
+fn character_selection_gates_play_and_survives_a_restart() {
+    let mut f = Fixture::new();
+    f.title.characters.selected = None;
+    for label in ["Singleplayer", "Multiplayer", "Friends"] {
+        assert_eq!(f.click_with_sound(label), (Action::None, false));
+        assert!(matches!(f.title.mode, Mode::Main));
+    }
+    f.click("Character Select");
+    assert!(matches!(f.title.mode, Mode::Characters));
+    assert!(f.title.characters.roster.iter().all(|c| c.name != "Steve"));
+    f.click("Reisen Udongein Inaba");
+    f.click("Back");
+    assert_eq!(
+        f.click_with_sound("Singleplayer"),
+        (Action::None, false),
+        "browsing does not confirm"
+    );
+    f.click("Character Select");
+    let Action::CharacterSelected(chosen) = f.click("Select Character") else {
+        panic!("selection must be applied to the game")
+    };
+    assert_eq!(chosen.id, "lunatic:reisen");
+    assert!(matches!(f.title.mode, Mode::Main));
+    let restarted = Title::new(f.root.join("saves"), &f.root);
+    assert_eq!(restarted.selected_character(), Some(chosen));
+    assert!(
+        restarted
+            .buttons(480.0, 262.0)
+            .iter()
+            .find(|b| b.id == 1)
+            .unwrap()
+            .enabled
+    );
+    f.title.allows_multiplayer = false;
+    assert_eq!(
+        f.click_with_sound("Multiplayer"),
+        (Action::None, false),
+        "character choice cannot bypass account restrictions"
+    );
+}
+
+#[test]
+fn missing_catalog_and_corrupt_choice_keep_play_locked_and_broken_skins_fall_back() {
+    let mut f = Fixture::new();
+    let choice = f.title.selected_character().unwrap();
+    let atlas = HudAtlas::fonts(&f.root).unwrap();
+    assert_eq!(choice.skin(&atlas), crate::characters::FALLBACK_SKIN);
+    fs::write(f.root.join("character.json"), "broken").unwrap();
+    f.title = Title::new(f.root.join("saves"), &f.root);
+    assert!(f.title.selected_character().is_none());
+    f.click("Character Select");
+    f.click("Select Character");
+    // A disabled/removed mod must invalidate its saved choice, rather than silently unlock play.
+    fs::write(f.root.join("horizon-mod-content.json"), "[]").unwrap();
+    f.title = Title::new(f.root.join("saves"), &f.root);
+    assert!(f.title.selected_character().is_none());
+    assert_eq!(f.click_with_sound("Singleplayer"), (Action::None, false));
+    f.click("Character Select");
+    assert_eq!(
+        f.click_with_sound("Select Character"),
+        (Action::None, false)
+    );
+}
+
+#[test]
+fn failed_character_save_does_not_unlock_play() {
+    let mut f = Fixture::new();
+    f.title.characters.selected = None;
+    // A directory in place of the preference file makes atomic replacement fail.
+    fs::create_dir(f.root.join("character.json")).unwrap();
+    f.click("Character Select");
+    assert_eq!(f.click("Select Character"), Action::None);
+    assert!(matches!(f.title.mode, Mode::Characters));
+    assert!(f.title.selected_character().is_none());
+    f.click("Back");
+    assert_eq!(f.click_with_sound("Singleplayer"), (Action::None, false));
+}
+
+#[test]
+fn character_pages_support_small_windows_keyboard_choice_and_resizing() {
+    let mut f = Fixture::new();
+    f.title.characters.selected = None;
+    let template = f.title.characters.roster[0].clone();
+    f.title.characters.roster = (0..11)
+        .map(|i| crate::characters::Character {
+            id: format!("lunatic:character_{i}"),
+            name: format!("Character {i}"),
+            ..template.clone()
+        })
+        .collect();
+    f.click("Character Select");
+    f.click("Next");
+    assert!(
+        f.title
+            .buttons(320.0, 240.0)
+            .iter()
+            .any(|b| b.label == "Character 10")
+    );
+    // Growing the window must clamp the old page to one that still contains characters.
+    assert!(
+        f.title
+            .buttons(854.0, 480.0)
+            .iter()
+            .any(|b| b.label == "Character 0")
+    );
+    let button = f
+        .title
+        .buttons(320.0, 240.0)
+        .into_iter()
+        .find(|b| b.label == "Character 10")
+        .unwrap();
+    f.title.focused_button = Some(button.id);
+    assert_eq!(
+        f.title.confirm_key_size((320.0, 240.0)),
+        (Action::None, true)
+    );
+    assert_eq!(f.title.characters.preview, 10);
+    assert_eq!(f.title.focused_button, Some(button.id));
 }

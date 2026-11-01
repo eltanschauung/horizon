@@ -15,6 +15,7 @@ use std::{
     sync::mpsc,
 };
 
+mod characters;
 mod confirm_experiments;
 mod create_world;
 mod experiments;
@@ -260,6 +261,7 @@ pub enum Alert {
 #[derive(Clone, Debug)]
 pub enum Mode {
     Main,
+    Characters,
     Select {
         worlds: Vec<WorldEntry>,
         selected: Option<usize>,
@@ -350,6 +352,7 @@ pub enum Mode {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
     None,
+    CharacterSelected(crate::characters::Character),
     Quit,
     Options,
     Accessibility,
@@ -384,6 +387,7 @@ pub enum Action {
 }
 pub struct Title {
     pub mode: Mode,
+    characters: characters::Screen,
     /// Direct Connection's address, synchronized with `options.txt`'s `lastServer`.
     pub last_server: String,
     /// `skipMultiplayerWarning`, synchronized with `options.txt` the same way.
@@ -667,8 +671,10 @@ impl Title {
         );
         let mode = Mode::Main;
         let now = std::time::Instant::now();
+        let instance = saves.parent().unwrap_or(Path::new(".")).to_owned();
         Self {
             mode,
+            characters: characters::Screen::new(resources, instance),
             last_server: String::new(),
             skip_multiplayer_warning: false,
             saves,
@@ -705,6 +711,9 @@ impl Title {
             preparing: false,
             reopen_data_packs: false,
         }
+    }
+    pub fn selected_character(&self) -> Option<crate::characters::Character> {
+        self.characters.selected_character()
     }
     /// Vanilla bypasses the selector when there are no saves.
     pub fn enter_singleplayer(&mut self) {
@@ -1551,6 +1560,7 @@ impl Title {
             trailing: None,
         };
         match &self.mode {
+            Mode::Characters => self.characters.buttons(w, h),
             Mode::Main => {
                 let cx = (w / 2.0).floor();
                 let y = (h / 4.0).floor() + 48.0;
@@ -1560,7 +1570,7 @@ impl Title {
                         y,
                         200.0,
                         &lang::get_or("menu.singleplayer", "Singleplayer"),
-                        true,
+                        self.characters.selected.is_some(),
                         1,
                     ),
                     b(
@@ -1568,17 +1578,10 @@ impl Title {
                         y + 24.0,
                         200.0,
                         &lang::get_or("menu.multiplayer", "Multiplayer"),
-                        self.allows_multiplayer,
+                        self.allows_multiplayer && self.characters.selected.is_some(),
                         4,
                     ),
-                    b(
-                        cx - 100.0,
-                        y + 48.0,
-                        200.0,
-                        &lang::get_or("menu.online", "Minecraft Realms"),
-                        false,
-                        0,
-                    ),
+                    b(cx - 100.0, y + 48.0, 200.0, "Character Select", true, 0),
                     b(
                         cx - 100.0,
                         y + 96.0,
@@ -1619,6 +1622,10 @@ impl Title {
                         true,
                         id,
                     );
+                    if id == 5 {
+                        button.enabled =
+                            self.allows_multiplayer && self.characters.selected.is_some();
+                    }
                     button.icon = Some((icon, 15.0));
                     buttons.push(button);
                 }
@@ -2016,6 +2023,7 @@ impl Title {
         let info = match &self.mode {
             // TitleScreen: `narrator.screen.title`, not its (empty) title.
             Mode::Main => ScreenInfo::new("title", get("narrator.screen.title", "Title Screen")),
+            Mode::Characters => ScreenInfo::new("characters", "Character Select"),
             Mode::Select { .. } => {
                 ScreenInfo::new("select_world", get("selectWorld.title", "Select World"))
             }
@@ -2280,6 +2288,10 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
             crate::widgets::begin_screen(|| info);
         }
         match &self.mode {
+            Mode::Characters => {
+                self.characters
+                    .draw(atlas, batch, cursor, self.started.elapsed().as_secs_f32())
+            }
             Mode::Main => {
                 draw_logo(atlas, batch, w);
                 if !hide_splash && let Some(splash) = self.splash.as_deref() {
@@ -2309,6 +2321,11 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                         ];
                     }
                 }
+                let status = self.selected_character().map_or_else(
+                    || "Select a character to play".to_owned(),
+                    |character| character.name,
+                );
+                centered(atlas, batch, &status, (h / 4.0).floor() + 36.0, 0xffaaaaaa);
                 let version = format!("Horizon {} (Rust)", horizon_core::VANILLA_VERSION);
                 batch.text(atlas, &version, 2.0, h - 10.0, u32::MAX, true);
                 // A nightly names its build in the top-left corner, the one spot no button reaches at any GUI
@@ -3155,6 +3172,29 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
     }
     fn click_action(&mut self, x: f32, y: f32, (w, h): (f32, f32), hit: Option<u8>) -> Action {
         match (&mut self.mode, hit) {
+            (Mode::Main, Some(0)) => {
+                self.characters.open(&self.resources, h);
+                self.mode = Mode::Characters;
+                self.focused_button = None;
+                Action::None
+            }
+            (Mode::Characters, Some(203)) => {
+                self.mode = Mode::Main;
+                self.focused_button = None;
+                Action::None
+            }
+            (Mode::Characters, Some(id)) => {
+                if let Some(character) = self.characters.click(id, h) {
+                    self.mode = Mode::Main;
+                    self.focused_button = None;
+                    Action::CharacterSelected(character)
+                } else {
+                    if id >= 200 {
+                        self.focused_button = None;
+                    }
+                    Action::None
+                }
+            }
             (Mode::Main, Some(1)) => {
                 // The title button is no longer part of the world-select screen.
                 // Clear it so Enter can activate the selected world after a
@@ -4319,6 +4359,8 @@ mod classic_tests {
                 .unwrap()
                 .enabled
         };
+        assert!(!multiplayer(&title));
+        title.characters.selected = Some(0);
         assert!(multiplayer(&title));
         title.allows_multiplayer = false;
         assert!(!multiplayer(&title));
@@ -4363,6 +4405,7 @@ mod classic_tests {
             PathBuf::new(),
             Path::new("/nonexistent/horizon-test-resources"),
         );
+        title.characters.selected = Some(0);
         for (w, h) in [(960.0, 523.0), (480.0, 320.0), (427.0, 240.0)] {
             let buttons = title.buttons(w, h);
             let cx = (w / 2.0).floor();

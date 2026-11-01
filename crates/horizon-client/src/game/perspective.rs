@@ -503,6 +503,10 @@ impl Game<'_> {
             Some(r) => r.own_shoulders,
             None => shoulder_variants(self.level.player_extra.as_ref()),
         };
+        if let Some(character) = &self.character {
+            m.skin = Some(character.skin(&self.gui.atlas).to_owned());
+            m.slim = false;
+        }
         m.extra.main_hand_left = self.settings.main_hand_left;
         m.extra.hidden_model_parts = !self.settings.file.model_customisation() & 0x7F;
         m.extra.spectator = spectator;

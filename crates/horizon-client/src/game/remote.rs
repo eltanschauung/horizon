@@ -4902,6 +4902,14 @@ impl Game<'_> {
         uuid: u128,
         (skin, slim): (String, bool),
     ) -> (String, bool) {
+        if self
+            .remote
+            .as_ref()
+            .is_some_and(|remote| remote.profile == uuid)
+            && let Some(character) = &self.character
+        {
+            return (character.skin(&self.gui.atlas).to_owned(), false);
+        }
         if (skin.starts_with("skins/") || skin == "horizon/offline_skin") && !self.again_skin(&skin)
         {
             let skin = horizon_client::tab_list::default_skin(uuid);

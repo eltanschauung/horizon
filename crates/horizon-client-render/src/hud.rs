@@ -541,6 +541,14 @@ impl HudAtlas {
                 }
             }
         }
+        if folders.contains(&"entity") {
+            for namespace in &namespaces {
+                walk(
+                    &root.join(format!("assets/{namespace}/textures/entity/character")),
+                    &mut files,
+                );
+            }
+        }
         let assets = root.join("assets");
         // Content mods' GUI textures, for their screens: `<namespace>:gui/...`.
         if full && let Ok(namespaces) = fs::read_dir(&assets) {
@@ -568,6 +576,14 @@ impl HudAtlas {
             let image = decode(path)
                 .map_err(|e| log::warn!("skipped GUI texture {}: {e}", path.display()))
                 .ok()?;
+            // Luanti's legacy 64x32 skins need mirrored left limbs and the
+            // same alpha normalization as downloaded Minecraft skins.
+            let image = if name.contains(":entity/character/") {
+                let (w, h, pixels) = image;
+                (64, 64, crate::skins::process_legacy_skin(w, h, &pixels)?)
+            } else {
+                image
+            };
             let mcmeta = fs::read_to_string(path.with_extension("png.mcmeta")).ok();
             let animation = animation_of(mcmeta.as_deref());
             // An animated strip keeps its first frame.
@@ -2185,6 +2201,42 @@ mod tests {
         let at = ((py * atlas.width + px) * 4) as usize;
         atlas.pixels[at..at + 4].try_into().unwrap()
     }
+    #[test]
+    fn character_skins_expand_legacy_limbs_and_reject_invalid_images() {
+        let root =
+            std::env::temp_dir().join(format!("horizon-character-atlas-{}", std::process::id()));
+        let directory = root.join("assets/lunatic/textures/entity/character");
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(
+            root.join(horizon_items::content_namespaces::MARKER),
+            br#"["lunatic"]"#,
+        )
+        .unwrap();
+        write_strip(
+            &directory.join("reisen.png"),
+            64,
+            32,
+            &[[200, 100, 50, 255]],
+            None,
+        );
+        write_strip(&directory.join("invalid.png"), 16, 16, &[[255; 4]], None);
+        let atlas = HudAtlas::build(&root).unwrap();
+        let skin = atlas.sprites["lunatic:entity/character/reisen"];
+        assert_eq!((skin.w, skin.h), (64, 64));
+        assert_eq!(texel_at(&atlas, skin, 20, 52), [200, 100, 50, 255]);
+        assert_eq!(
+            texel_at(&atlas, skin, 40, 8)[3],
+            0,
+            "legacy opaque hat is cleared"
+        );
+        assert!(
+            !atlas
+                .sprites
+                .contains_key("lunatic:entity/character/invalid")
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn content_mod_equipment_textures_pack_under_their_namespace() {
         let root = std::env::temp_dir().join(format!("horizon-atlas-equip-{}", std::process::id()));
