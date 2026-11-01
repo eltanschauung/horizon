@@ -61,3 +61,17 @@ and skin locations with ChatHeads' layout, recognizes their `Name : message`
 prefix, and draws the character skin's face. Profile chat remains supported.
 The source checks deliberately reject changed/already patched bundles so a newer
 upstream ChatHeads requires reviewing the patch rather than silently losing it.
+
+
+Run the multiplayer regression with a built game and your prepared resources:
+
+```sh
+python3 tools/character_sync_e2e.py --game /path/to/horizon-client \
+  --ctl /path/to/horizon-ctl --resources /path/to/prepared/26.3 \
+  --mod /path/to/lunatic.hmod
+```
+
+It runs a private offline dedicated fixture and two headless clients, all in
+scratch folders, and checks the shared roster/colors, late joins, chat,
+overhead names, disconnects, changed selections, reconnects and persisted UUID
+choices. The production server uses online authentication.
