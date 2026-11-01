@@ -21,9 +21,28 @@ pub struct Character {
     pub texture: String,
     #[serde(default)]
     pub model: Model,
+    #[serde(default)]
+    pub character_chat: bool,
+    #[serde(default)]
+    pub color: Option<String>,
 }
 
 impl Character {
+    pub fn display_name(&self) -> crate::text::Text {
+        crate::scoreboard::comp_text(&serde_json::json!({"text": self.name, "color": self.color}))
+    }
+
+    /// Content mods opt into character-labelled chat without changing account identity.
+    pub fn chat_line(&self, content: &serde_json::Value) -> Option<crate::text::Text> {
+        self.character_chat.then(|| {
+            let mut line = crate::text::Text::empty();
+            line.push(self.display_name());
+            line.push(crate::text::Text::literal(" : "));
+            line.push(crate::scoreboard::comp_text(content));
+            line
+        })
+    }
+
     /// Steve's failure fallback retains its wide arms.
     pub fn is_slim(&self, atlas: &HudAtlas) -> bool {
         self.model == Model::Slim && atlas.sprites.contains_key(&self.texture)
@@ -119,4 +138,27 @@ pub fn save(instance: &Path, character: &Character) -> io::Result<()> {
         let _ = fs::remove_file(temporary);
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn character_chat_is_opt_in_and_treats_names_and_messages_as_text() {
+        let mut c: Character = serde_json::from_value(serde_json::json!({
+            "id":"lunatic:reimu", "name":"Hakurei Reimu", "texture":"lunatic:entity/character/reimu"
+        }))
+        .unwrap();
+        assert!(c.chat_line(&serde_json::json!("hello")).is_none());
+        c.character_chat = true;
+        c.color = Some("red".into());
+        assert_eq!(c.display_name().plain(), "Hakurei Reimu");
+        assert_eq!(c.display_name().spans[0].style.color, Some(0xFF5555));
+        assert_eq!(
+            c.chat_line(&serde_json::json!({"text":"hello", "color":"red"}))
+                .unwrap()
+                .plain(),
+            "Hakurei Reimu : hello"
+        );
+    }
 }

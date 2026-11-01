@@ -5025,7 +5025,15 @@ impl Game<'_> {
             return comp_text(content);
         };
         let chat_type = r.registries.data("minecraft:chat_type", bound.chat_type);
-        comp_text(&chat_type_decorate(chat_type, decoration, bound, content))
+        let component = chat_type_decorate(chat_type, decoration, bound, content);
+        if component.get("translate").and_then(|k| k.as_str()) == Some("chat.type.text")
+            && comp_text(&horizon_client::scoreboard::tag_to_json(&bound.name)).plain()
+                == self.options.player_name()
+            && let Some(line) = self.character.as_ref().and_then(|c| c.chat_line(content))
+        {
+            return line;
+        }
+        comp_text(&component)
     }
     fn remote_item_data(&mut self, id: i32, stack: &Option<Stack>) {
         let Some(stack) = self.to_stack(stack) else {

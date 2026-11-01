@@ -1914,6 +1914,8 @@ fn character_pages_support_small_windows_keyboard_choice_and_resizing() {
         .map(|i| crate::characters::Character {
             id: format!("lunatic:character_{i}"),
             name: format!("Character {i}"),
+            character_chat: false,
+            color: None,
             ..template.clone()
         })
         .collect();

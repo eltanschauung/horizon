@@ -37,3 +37,10 @@ services or distribute them to other players on remote servers.
 Steve is only the fallback for a missing or invalid skin and is never inserted
 into the character roster. With no enabled character catalog, the screen explains
 that characters are unavailable and keeps play disabled.
+
+Characters may set `character_chat: true` to display the local player's ordinary
+chat as `Character Name : message`, and use that name on the player's own visible
+nametag. Optional `color` accepts Minecraft named colors or `#RRGGBB`, and colors
+the name only. These are presentation changes: profile identity, scoreboard keys,
+message signing, commands and private messages are unchanged. Selections are not
+yet synchronized to other clients, so this does not rename remote players.

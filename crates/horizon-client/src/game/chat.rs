@@ -889,6 +889,11 @@ impl Game<'_> {
                 "chat.type.text",
                 &[self.player_display_name(), Text::literal(message.as_str())],
             );
+            let line = self
+                .character
+                .as_ref()
+                .and_then(|c| c.chat_line(&serde_json::Value::from(message.as_str())))
+                .unwrap_or(line);
             let focused = self.screen == Screen::Chat;
             self.ui.chat.add(
                 &self.gui.atlas,

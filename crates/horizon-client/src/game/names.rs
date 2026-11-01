@@ -199,7 +199,14 @@ impl Game<'_> {
             }
             // getDisplayName: the name in the team's prefix, suffix and colour.
             let member = if player {
-                Text::literal(&name)
+                if name == self.own_profile_name() {
+                    self.character
+                        .as_ref()
+                        .filter(|c| c.character_chat)
+                        .map_or_else(|| Text::literal(&name), |c| c.display_name())
+                } else {
+                    Text::literal(&name)
+                }
             } else {
                 m.custom_name_text
                     .clone()
