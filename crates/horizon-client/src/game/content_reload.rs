@@ -30,7 +30,7 @@ impl Loading {
             options.offscreen,
             Some(&boot),
             None,
-            None,
+            game.renderer.as_ref(),
             settings.horizon.api,
         )?;
         horizon_client::ui_theme::reset_atlas();
