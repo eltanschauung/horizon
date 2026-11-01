@@ -1150,3 +1150,32 @@ the mods that need porting (not counting performance mods and libraries), 2 of 8
   login, as Zenith does) or only download published ports.
 - CurseForge: dropped for now (its API needs a paid key; Ludovic, 2026-10-22), shown as coming
   soon. CurseForge packs import from their zip or an installed instance.
+
+### Generation selections and host extensions
+
+The title menu can reload immutable content registries after a content-mod
+switch, using the current window. Content toggles are disabled inside an open
+world. Generation selections are saved in `horizon-worldgen-mods.json` per world;
+worldgen bundles from a disabled mod's namespace are filtered out even when its
+content is currently loaded. Worlds requiring absent custom biomes refuse to
+open before reading chunks. Use a separate world to test a different selection.
+
+`worldgen/biome_placement/*.json` may group climate entries with `group` (a
+namespaced ID), positive `weight`, and `selector` (one of the six host climate
+axes; default `weirdness`). A coherent host field chooses a weighted group;
+nearest climate fitness still determines eligibility. No independent spatial
+noise is introduced. Weights control thresholds, not guaranteed area fractions.
+
+`worldgen/generation_extension/*.json` names a host noise `settings` ID and an
+optional `surface_rule` reference. Its rule precedes the host fallback, retaining
+host bedrock and ore rules. It can also declare `biome_replacements`, mapping a
+source biome to weighted `{biome,weight}` choices. Replacements use the host
+sampler. Extensions never replace the density/router. A template feature may
+set `offset: [x,y,z]` and `clearance: true` for tree-like occupancy checks. A
+spring may use `block_state` instead of a vanilla fluid `state` for static custom
+blocks; these do not schedule a vanilla fluid tick.
+
+A native source bundle may include `mixins/<id>/data/runtime-toggle.json` with
+`{"runtime_toggle":true}` to keep its component built even while its menu switch
+is off. The component must honor world-scoped `WorldgenOverrides::mod_enabled`
+and activate cached world hooks via `WorldgenOverrides::activate`.

@@ -54,6 +54,9 @@ pub struct MultiNoiseBiomeSource {
     /// Additive declarations win equal fitness explicitly, rather than being
     /// silently shadowed by vanilla's climate boxes or previous-leaf cache.
     additions: Option<ClimateIndex<String>>,
+    baseline: Option<ClimateIndex<String>>,
+    groups: Vec<(f64, ClimateIndex<String>)>,
+    selector_axis: usize,
 }
 impl MultiNoiseBiomeSource {
     pub fn new(entries: Vec<(ParameterPoint, String)>) -> Result<Self, BiomeError> {
@@ -64,6 +67,9 @@ impl MultiNoiseBiomeSource {
         Ok(Self {
             parameters: ClimateIndex::new(entries)?,
             additions: None,
+            baseline: None,
+            groups: Vec::new(),
+            selector_axis: 5,
         })
     }
     /// Horizon's quantized import format, not the vanilla biome definition
@@ -73,6 +79,10 @@ impl MultiNoiseBiomeSource {
         let input: serde_json::Value = serde_json::from_str(json).map_err(DecodeError::from)?;
         let mut entries = Vec::new();
         let mut additions = Vec::new();
+        let mut baseline = Vec::new();
+        let mut selector_axis = None;
+        let mut groups =
+            std::collections::BTreeMap::<String, (f64, Vec<(ParameterPoint, String)>)>::new();
         for entry in input
             .as_array()
             .ok_or(DecodeError::Field("biome parameter list"))?
@@ -106,14 +116,37 @@ impl MultiNoiseBiomeSource {
                 coordinates,
                 offset,
             };
-            if entry["horizon:additive"].as_bool() == Some(true) {
+            if let Some(group) = entry["horizon:group"].as_str() {
+                let axis = entry["horizon:selector_axis"].as_u64().unwrap_or(5) as usize;
+                if axis > 5 || selector_axis.is_some_and(|a| a != axis) {
+                    return Err(DecodeError::Field("biome pool selector mismatch").into());
+                }
+                selector_axis = Some(axis);
+                let weight = entry["horizon:weight"].as_f64().unwrap_or(1.0);
+                if !weight.is_finite() || weight <= 0.0 {
+                    return Err(DecodeError::Field("biome group weight").into());
+                }
+                let group = groups
+                    .entry(group.to_owned())
+                    .or_insert_with(|| (weight, Vec::new()));
+                group.1.push((point, identifier(biome)?));
+            } else if entry["horizon:additive"].as_bool() == Some(true) {
                 additions.push((point, identifier(biome)?));
+            } else {
+                baseline.push((point, identifier(biome)?));
             }
             entries.push((point, biome.to_owned()));
         }
         let mut source = Self::new(entries)?;
         if !additions.is_empty() {
             source.additions = Some(ClimateIndex::new(additions)?);
+        }
+        if (!source.additions.is_none() || !groups.is_empty()) && !baseline.is_empty() {
+            source.baseline = Some(ClimateIndex::new(baseline)?);
+        }
+        source.selector_axis = selector_axis.unwrap_or(5);
+        for (_, (weight, points)) in groups {
+            source.groups.push((weight, ClimateIndex::new(points)?));
         }
         Ok(source)
     }
@@ -123,8 +156,18 @@ impl MultiNoiseBiomeSource {
     pub fn resolver<'a>(&'a self, climate: &'a ClimateSampler) -> BiomeResolver<'a> {
         BiomeResolver {
             climate,
-            search: self.parameters.searcher(),
+            search: self
+                .baseline
+                .as_ref()
+                .unwrap_or(&self.parameters)
+                .searcher(),
             additions: self.additions.as_ref().map(ClimateIndex::searcher),
+            selector_axis: self.selector_axis,
+            groups: self
+                .groups
+                .iter()
+                .map(|(weight, index)| (*weight, index.searcher()))
+                .collect(),
         }
     }
 }
@@ -133,6 +176,8 @@ pub struct BiomeResolver<'a> {
     climate: &'a ClimateSampler,
     search: ClimateSearch<'a, String>,
     additions: Option<ClimateSearch<'a, String>>,
+    groups: Vec<(f64, ClimateSearch<'a, String>)>,
+    selector_axis: usize,
 }
 impl<'a> BiomeResolver<'a> {
     pub fn sample(
@@ -161,6 +206,25 @@ impl<'a> BiomeResolver<'a> {
     }
     fn resolve(&mut self, target: super::climate::TargetPoint) -> Result<&'a str, BiomeError> {
         let (point, name) = self.search.find_entry(target)?;
+        if !self.groups.is_empty() {
+            let total: f64 = self.groups.iter().map(|(weight, _)| weight).sum();
+            // Reuse the host's coherent climate field. No coordinate hash or
+            // independent biome-size noise is introduced by a content pack.
+            let selector =
+                (target.parameters()[self.selector_axis] as f64 / 5000.0).tanh() * 0.5 + 0.5;
+            let mut remaining = selector * total;
+            let last = self.groups.len() - 1;
+            for (i, (weight, search)) in self.groups.iter_mut().enumerate() {
+                if remaining < *weight || i == last {
+                    let (candidate, biome) = search.find_entry_stable(target)?;
+                    if candidate.fitness(target) <= point.fitness(target) {
+                        return Ok(biome.as_str());
+                    }
+                    break;
+                }
+                remaining -= *weight;
+            }
+        }
         if let Some(additions) = &mut self.additions {
             let (added_point, added_name) = additions.find_entry_stable(target)?;
             if added_point.fitness(target) <= point.fitness(target) {

@@ -106,7 +106,7 @@ pub fn enabled(home: &Path) -> Vec<Mod> {
     for path in hnmods(home) {
         match horizon_mods::index::native::Bundle::read(&path) {
             Ok(b) => {
-                if java::is_enabled(home, &b.manifest.id) {
+                if b.runtime_toggle() || java::is_enabled(home, &b.manifest.id) {
                     let digest = native_mods::digest(
                         b.files.iter().map(|(n, d)| (n.as_str(), d.as_slice())),
                     );

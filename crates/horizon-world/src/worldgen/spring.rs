@@ -16,7 +16,7 @@ use std::{collections::BTreeSet, sync::Arc};
 #[derive(Clone, Debug)]
 pub struct SpringFeature {
     state: BlockStateId,
-    fluid: FluidKind,
+    fluid: Option<FluidKind>,
     requires_below: bool,
     rocks: i32,
     holes: i32,
@@ -26,11 +26,18 @@ pub struct SpringFeature {
 impl SpringFeature {
     pub fn from_json(json: &str, bindings: &FeatureBlockBindings<'_>) -> Result<Self, DecodeError> {
         let object: Object = serde_json::from_str(json)?;
-        let fluid = FluidState::from_json(required(&object, "state")?.get())
-            .map_err(|e| DecodeError::Registry(e.to_string()))?;
-        let state = FluidBlockBindings::new(bindings.registry())
-            .map_err(|e| DecodeError::Registry(e.to_string()))?
-            .block(fluid);
+        // Static custom liquid blocks can use the cavity checks without
+        // pretending to have a registered vanilla fluid simulation.
+        let (state, fluid) = if let Some(block) = optional(&object, "block_state") {
+            (bindings.predicate_state(block.get())?, None)
+        } else {
+            let fluid = FluidState::from_json(required(&object, "state")?.get())
+                .map_err(|e| DecodeError::Registry(e.to_string()))?;
+            let state = FluidBlockBindings::new(bindings.registry())
+                .map_err(|e| DecodeError::Registry(e.to_string()))?
+                .block(fluid);
+            (state, Some(fluid.kind()))
+        };
         let requires_below = optional(&object, "requires_block_below")
             .map(|v| serde_json::from_str(v.get()))
             .transpose()?
@@ -45,7 +52,7 @@ impl SpringFeature {
             .unwrap_or(1);
         Ok(Self {
             state,
-            fluid: fluid.kind(),
+            fluid,
             requires_below,
             rocks,
             holes,
@@ -108,9 +115,11 @@ impl SpringFeature {
         world
             .set_block(p, self.state, 2)
             .map_err(BlockFeatureError::World)?;
-        world
-            .schedule_fluid_tick(p, self.fluid, 0)
-            .map_err(BlockFeatureError::Query)?;
+        if let Some(fluid) = self.fluid {
+            world
+                .schedule_fluid_tick(p, fluid, 0)
+                .map_err(BlockFeatureError::Query)?;
+        }
         Ok(true)
     }
 }

@@ -674,10 +674,11 @@ pub fn shared_data_with(
     overrides: &WorldgenOverrides,
     registry: &'static BlockRegistry,
 ) -> crate::Result<Arc<GeneratorData>> {
+    overrides.activate();
     let mut cache = SHARED_DATA.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((_, _, data)) = cache
         .iter()
-        .find(|(path, o, _)| path == dir && o == overrides)
+        .find(|(path, o, data)| path == dir && o == overrides && data.uses_registry(registry))
     {
         return Ok(data.clone());
     }

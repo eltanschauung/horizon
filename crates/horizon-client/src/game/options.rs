@@ -349,7 +349,9 @@ impl Game<'_> {
                 }
                 Event::Packs(_) => {
                     self.settings.save(&Self::options_path());
-                    self.reload_packs();
+                    if !self.ui.options.reload_content {
+                        self.reload_packs();
+                    }
                 }
                 Event::OpenPackFolder => {
                     let dir = super::packs::packs_dir();

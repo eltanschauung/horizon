@@ -1458,8 +1458,10 @@ const BIOME_TAGS: &str = "worldgen/biome_tags.json";
 /// worldgen loader reads each from (id → the file's text): what structure
 /// mods hold, plus additive biome content. Terrain noise/settings stay with
 /// the host generator or its native terrain mod.
-const WORLDGEN_BUNDLES: [(&str, &str); 10] = [
+const WORLDGEN_BUNDLES: [(&str, &str); 12] = [
     ("biome", "worldgen/biomes.json"),
+    ("material_rule", "worldgen/rules.json"),
+    ("generation_extension", "worldgen/generation_extensions.json"),
     ("biome_placement", "worldgen/biome_placements.json"),
     ("carver", "worldgen/carvers.json"),
     ("feature", "worldgen/features.json"),

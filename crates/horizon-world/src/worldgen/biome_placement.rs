@@ -43,12 +43,35 @@ pub fn extend_presets(
                 )));
             }
             let point = decode_parameter_point(&entry["parameters"].to_string())?;
-            table.push(json!({
+            let mut candidate = json!({
                 "biome": biome,
                 "coordinates": point.coordinates.map(|p| [p.min, p.max]),
                 "offset": point.offset,
                 "horizon:additive": true
-            }));
+            });
+            if let Some(group) = doc["group"].as_str() {
+                identifier(group)?;
+                let weight = doc["weight"].as_f64().unwrap_or(1.0);
+                if !weight.is_finite() || weight <= 0.0 {
+                    return Err(DecodeError::Field("biome group weight"));
+                }
+                let selector = doc["selector"].as_str().unwrap_or("weirdness");
+                let axis = [
+                    "temperature",
+                    "humidity",
+                    "continentalness",
+                    "erosion",
+                    "depth",
+                    "weirdness",
+                ]
+                .iter()
+                .position(|name| *name == selector)
+                .ok_or(DecodeError::Field("biome pool selector"))?;
+                candidate["horizon:selector_axis"] = json!(axis);
+                candidate["horizon:group"] = json!(group);
+                candidate["horizon:weight"] = json!(weight);
+            }
+            table.push(candidate);
         }
         assembled.insert(preset, serde_json::to_string(&table)?);
     }
@@ -73,6 +96,52 @@ mod tests {
         [("minecraft:overworld".into(), json!([{
             "biome":"minecraft:plains", "coordinates":[[0,0],[-10000,10000],[-10000,10000],[-10000,10000],[-10000,10000],[-10000,10000]], "offset":0
         }]).to_string())].into()
+    }
+    #[test]
+    fn weighted_groups_use_host_selector_and_are_query_order_independent() {
+        use crate::worldgen::climate::ClimateSampler;
+        use horizon_core::density::{ConstantSampler, DensitySampler, SamplerContext};
+        use std::sync::Arc;
+        let mut presets = base();
+        let mut declarations = BTreeMap::new();
+        for (id, biome) in [("a", "example:cold"), ("b", "example:warm")] {
+            let mut doc: Value = serde_json::from_str(&contribution(biome, 0.)).unwrap();
+            doc["group"] = json!(format!("example:{id}"));
+            doc["weight"] = json!(1);
+            doc["selector"] = json!("humidity");
+            declarations.insert(format!("example:{id}"), doc.to_string());
+        }
+        extend_presets(
+            &mut presets,
+            &declarations,
+            &[
+                "minecraft:plains".into(),
+                "example:cold".into(),
+                "example:warm".into(),
+            ]
+            .into(),
+        )
+        .unwrap();
+        let source =
+            MultiNoiseBiomeSource::from_quantized_json(&presets["minecraft:overworld"]).unwrap();
+        for (h, expected) in [(-0.8, "example:cold"), (0.8, "example:warm")] {
+            let fields: [Arc<dyn DensitySampler>; 6] = std::array::from_fn(|i| {
+                Arc::new(ConstantSampler(if i == 1 { h } else { 0. })) as Arc<dyn DensitySampler>
+            });
+            let climate = ClimateSampler::new(fields);
+            let mut resolver = source.resolver(&climate);
+            let mut context = SamplerContext::cached();
+            let volume = resolver
+                .prepare_volume(&mut context, [-2, 0, -2], [4, 1, 4])
+                .unwrap();
+            for x in [-1, 0, 1, 0, -1] {
+                assert_eq!(resolver.sample(&mut context, [x, 0, 0]).unwrap(), expected);
+                assert_eq!(
+                    resolver.sample_prepared(&volume, [x, 0, 0]).unwrap(),
+                    expected
+                );
+            }
+        }
     }
     #[test]
     fn contributions_are_additive_deterministic_and_use_host_climate() {

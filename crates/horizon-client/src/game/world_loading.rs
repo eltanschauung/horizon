@@ -103,6 +103,7 @@ impl WorldRequest {
             )
             .into());
         }
+        horizon_client::worldgen_mods::capture(&save_root, res.biomes())?;
         horizon_client::save::upgrade_older_world_with(&save_root, upgrade)?;
         horizon_client::save::migrate_legacy(&save_root)?;
         let session_lock = horizon_client::save::SessionLock::acquire(&save_root)?;
@@ -513,8 +514,9 @@ pub(super) fn creation_worldgen_overrides(
         .iter()
         .filter_map(|id| packs.iter().find(|p| &p.id == id))
         .collect();
-    let (overrides, _) =
+    let (mut overrides, _) =
         horizon_client::datapack::worldgen_overrides(&enabled, |b| biomes.contains(b));
+    let _ = horizon_client::worldgen_mods::apply(None, &mut overrides);
     overrides
 }
 /// The worldgen entries of the world's enabled data packs, logging what
@@ -550,7 +552,12 @@ fn worldgen_overrides_of(
         .iter()
         .filter_map(|id| packs.iter().find(|p| &p.id == id))
         .collect();
-    horizon_client::datapack::worldgen_overrides(&enabled, |b| biomes.contains(b))
+    let (mut overrides, warnings) =
+        horizon_client::datapack::worldgen_overrides(&enabled, |b| biomes.contains(b));
+    if let Err(error) = horizon_client::worldgen_mods::apply(Some(world_root), &mut overrides) {
+        log::error!("Horizon: generation-mod selection: {error}");
+    }
+    (overrides, warnings)
 }
 
 /// The shapes of the world's levels: their dimension types, the world's
@@ -571,12 +578,10 @@ pub(super) fn level_shapes(
         .filter_map(|id| packs.iter().find(|p| &p.id == id))
         .collect();
     let mut shapes = LevelShapes::VANILLA;
-    if enabled.is_empty() {
-        return shapes;
-    }
     // What the packs leave out is logged when the generator reads them.
-    let (overrides, _) =
+    let (mut overrides, _) =
         horizon_client::datapack::worldgen_overrides(&enabled, |b| biomes.contains(b));
+    let _ = horizon_client::worldgen_mods::apply(Some(world_root), &mut overrides);
     for level in [
         "minecraft:overworld",
         "minecraft:the_nether",

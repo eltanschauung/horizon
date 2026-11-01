@@ -306,6 +306,7 @@ mod win;
 mod wind;
 mod wither;
 mod world_loading;
+mod content_reload;
 mod zombie_reinforcements;
 mod zombie_villagers;
 use event_loop::EventLoopCtl;
@@ -19202,13 +19203,20 @@ impl ApplicationHandler for App {
         enum Step {
             Waiting,
             Ready(Box<split::Split<'static>>),
+            Reload(Box<Loading>),
             Done,
             Failed(Box<dyn std::error::Error>),
         }
         let step = match self {
             App::Ready(game) => {
                 game.about_to_wait(event_loop);
-                return;
+                if !game.host.ui.options.reload_content || game.host.title.is_none() {
+                    return;
+                }
+                match Loading::after_content_change(&mut game.host) {
+                    Ok(loading) => Step::Reload(Box::new(loading)),
+                    Err(error) => Step::Failed(error),
+                }
             }
             App::Loading(loading) => {
                 loading.about_to_wait(event_loop);
@@ -19234,6 +19242,7 @@ impl ApplicationHandler for App {
         match step {
             Step::Waiting => {}
             Step::Ready(game) => *self = App::Ready(game),
+            Step::Reload(loading) => *self = App::Loading(loading),
             Step::Done => event_loop.exit(),
             Step::Failed(e) => {
                 if let App::Loading(loading) = self {

@@ -18,8 +18,9 @@ pub const DIMENSION_TYPES: &str = "dimension_types";
 
 /// Pack folders (`data/<ns>/<kind>/`) the chunk generator reads, and the
 /// bundle each joins.
-const KINDS: [(&str, &str); 17] = [
+const KINDS: [(&str, &str); 18] = [
     ("worldgen/biome_placement", "biome_placements"),
+    ("worldgen/generation_extension", "generation_extensions"),
     ("dimension", DIMENSIONS),
     ("dimension_type", DIMENSION_TYPES),
     ("worldgen/biome", "biomes"),
@@ -135,12 +136,23 @@ impl LevelHeight {
 pub struct WorldgenOverrides {
     /// Bundle name → id → the highest pack's JSON text for it.
     entries: BTreeMap<String, BTreeMap<String, String>>,
+    /// World-scoped native generation switches; part of the generator cache key.
+    mods: BTreeMap<String, bool>,
     /// Tag bundle name → (tag id, pack id, tag file text), lowest pack first.
     tags: BTreeMap<String, Vec<(String, String, String)>>,
 }
 impl WorldgenOverrides {
+    pub fn set_mods(&mut self, mods: BTreeMap<String, bool>) {
+        self.mods = mods;
+    }
+    /// Activate native generation hooks even when immutable data is cached.
+    pub fn activate(&self) {}
+
+    pub fn mod_enabled(&self, id: &str) -> bool {
+        self.mods.get(id).copied().unwrap_or(true)
+    }
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty() && self.tags.is_empty()
+        self.entries.is_empty() && self.tags.is_empty() && self.mods.is_empty()
     }
     /// A pack's file for `id` in `bundle`: called for packs from the lowest
     /// to the highest, so the last call for an id wins.
@@ -303,6 +315,12 @@ impl WorldgenOverrides {
         for (id, json) in self.entries(bundle) {
             base.insert(id.to_owned(), json.to_owned());
         }
+        // A content pack can remain loaded for its saved block IDs while a
+        // world created without it keeps its original generation selection.
+        base.retain(|id, _| {
+            id.split_once(':')
+                .is_none_or(|(ns, _)| self.mod_enabled(ns))
+        });
         base
     }
 }
@@ -310,6 +328,19 @@ impl WorldgenOverrides {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn disabled_world_mods_keep_their_generation_entries_out() {
+        let mut ov = WorldgenOverrides::default();
+        ov.set_mods([("forest".into(), false)].into());
+        let entries = [
+            ("forest:trees".into(), "{}".into()),
+            ("minecraft:plains".into(), "{}".into()),
+        ]
+        .into();
+        let result = ov.apply("biomes", entries);
+        assert_eq!(result.len(), 1);
+        assert!(result.contains_key("minecraft:plains"));
+    }
 
     #[test]
     fn the_highest_pack_wins_and_others_join() {

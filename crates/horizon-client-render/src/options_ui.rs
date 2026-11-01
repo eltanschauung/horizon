@@ -1501,6 +1501,8 @@ pub struct OptionsUi {
     /// (`update_pack_infos`) differs from the settings'.
     pack_reselected: bool,
     pub in_world: bool,
+    /// Content registries need rebuilding before entering another world.
+    pub reload_content: bool,
     /// Scroll the selected language into the middle on the next layout.
     center_language: bool,
     pub graphics: crate::graphics_ui::GraphicsUi,
@@ -1558,6 +1560,7 @@ impl Default for OptionsUi {
             pack_focus: Instant::now(),
             pack_reselected: false,
             in_world: false,
+            reload_content: false,
             center_language: false,
             graphics: Default::default(),
             split_profiles: Default::default(),
@@ -2511,7 +2514,9 @@ impl OptionsUi {
                         } else if installed.dev {
                             label = label.append(tr("horizon.mods.dev"));
                         }
-                        let dead = installed.dev || installed.id.is_empty();
+                        let dead = installed.dev
+                            || installed.id.is_empty()
+                            || (self.in_world && installed.native.is_none());
                         // Only native mods with actual settings need a second button.
                         if installed
                             .native
@@ -3852,6 +3857,11 @@ impl OptionsUi {
                         Act::ToggleMod(i) => {
                             s.mods.toggle(i);
                             events.push(Event::Changed);
+                            // Block/biome registries can change safely at the title menu.
+                            if !self.in_world && s.mods.installed[i].native.is_none() {
+                                self.reload_content = true;
+                                events.push(Event::Packs(s.resource_packs.clone()));
+                            }
                         }
                         Act::ModSettings(i) => {
                             events.push(Event::ButtonClick);
@@ -4770,6 +4780,11 @@ impl OptionsUi {
                         Act::ToggleMod(i) => {
                             s.mods.toggle(i);
                             events.push(Event::Changed);
+                            // Block/biome registries can change safely at the title menu.
+                            if !self.in_world && s.mods.installed[i].native.is_none() {
+                                self.reload_content = true;
+                                events.push(Event::Packs(s.resource_packs.clone()));
+                            }
                         }
                         Act::ModSettings(i) => {
                             self.focus = None;
@@ -5319,6 +5334,7 @@ mod tests {
             if i == 0 {
                 assert!(events.contains(&Event::Changed));
                 assert!(events.contains(&Event::ButtonClick));
+                assert!(events.contains(&Event::Packs(s.resource_packs.clone())));
             } else {
                 assert!(events.is_empty());
             }
@@ -5339,6 +5355,21 @@ mod tests {
             false,
         );
         assert!(!s.mods.is_on(0));
+        ui.in_world = true;
+        let widgets = ui.layout(&s, size.0, size.1).0;
+        assert!(
+            widgets
+                .iter()
+                .filter(|w| matches!(
+                    w.kind,
+                    WKind::Button {
+                        act: Act::ToggleMod(_),
+                        ..
+                    }
+                ))
+                .all(|w| matches!(w.kind, WKind::Button { active: false, .. })),
+            "content registries must not change in an open world"
+        );
         assert!(!ui.back(&mut s).contains(&Event::Close));
         assert_eq!(ui.page(), Page::Main);
     }

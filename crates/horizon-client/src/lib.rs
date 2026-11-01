@@ -126,6 +126,7 @@ pub mod title;
 pub mod toasts;
 pub mod ui_theme;
 pub mod vanillagen;
+pub mod worldgen_mods;
 pub mod win_screen;
 pub mod world_spawn;
 pub use horizon_client_core::Result;

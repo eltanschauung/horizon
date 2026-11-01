@@ -52,6 +52,10 @@ pub enum ResolvedBiomeSource {
     Checkerboard(CheckerboardBiomeSource<String>),
     End(EndBiomeSource<String>),
     MultiNoise(MultiNoiseBiomeSource),
+    Replaced(
+        Box<ResolvedBiomeSource>,
+        BTreeMap<String, Vec<(String, u32)>>,
+    ),
 }
 impl BiomeSourceDefinition {
     /// Resolve a decoded definition using immutable, authenticated quantized
@@ -98,6 +102,13 @@ impl ResolvedBiomeSource {
                 source.barrens.as_str(),
             ]
             .into(),
+            Self::Replaced(source, replacements) => {
+                let mut names = source.possible_biomes();
+                for choices in replacements.values() {
+                    names.extend(choices.iter().map(|(id, _)| id.as_str()));
+                }
+                names
+            }
             Self::MultiNoise(source) => source
                 .parameters()
                 .entries()
@@ -118,6 +129,11 @@ impl ResolvedBiomeSource {
             Self::Checkerboard(source) => BiomeSourceResolver::Checkerboard(source),
             Self::End(source) => BiomeSourceResolver::End(source, erosion),
             Self::MultiNoise(source) => BiomeSourceResolver::MultiNoise(source.resolver(climate)),
+            Self::Replaced(source, replacements) => BiomeSourceResolver::Replaced(
+                Box::new(source.resolver(climate, erosion)),
+                replacements,
+                erosion,
+            ),
         }
     }
 }
@@ -127,6 +143,11 @@ pub enum BiomeSourceResolver<'a> {
     Checkerboard(&'a CheckerboardBiomeSource<String>),
     End(&'a EndBiomeSource<String>, &'a dyn DensitySampler),
     MultiNoise(BiomeResolver<'a>),
+    Replaced(
+        Box<BiomeSourceResolver<'a>>,
+        &'a BTreeMap<String, Vec<(String, u32)>>,
+        &'a dyn DensitySampler,
+    ),
 }
 impl<'a> BiomeSourceResolver<'a> {
     pub fn sample(
@@ -139,6 +160,31 @@ impl<'a> BiomeSourceResolver<'a> {
             Self::Checkerboard(source) => source.noise_biome(quart)?.as_str(),
             Self::End(source, erosion) => source.noise_biome(quart, *erosion, context)?.as_str(),
             Self::MultiNoise(source) => source.sample(context, quart)?,
+            Self::Replaced(source, replacements, erosion) => {
+                let base = source.sample(context, quart)?;
+                if let Some(choices) = replacements.get(base) {
+                    let p = [
+                        quart[0].wrapping_mul(4).wrapping_add(16384),
+                        quart[1].wrapping_mul(4),
+                        quart[2].wrapping_mul(4).wrapping_add(16384),
+                    ];
+                    let selector =
+                        (f64::from(erosion.sample_value(context, p)?) * 2.0).tanh() * 0.5 + 0.5;
+                    let total: u32 = choices.iter().map(|(_, weight)| weight).sum();
+                    let mut offset = selector * f64::from(total);
+                    let mut selected = choices.last().unwrap().0.as_str();
+                    for (id, weight) in choices.iter() {
+                        if offset < f64::from(*weight) {
+                            selected = id.as_str();
+                            break;
+                        }
+                        offset -= f64::from(*weight);
+                    }
+                    selected
+                } else {
+                    base
+                }
+            }
         })
     }
     /// Native fixed/checkerboard/End sources do not pre-sample a climate volume.
@@ -151,6 +197,7 @@ impl<'a> BiomeSourceResolver<'a> {
     ) -> Result<Option<ClimateVolume>, BiomeSourceError> {
         match self {
             Self::MultiNoise(source) => Ok(Some(source.prepare_volume(context, minimum, extents)?)),
+            Self::Replaced(source, ..) => source.prepare_volume(context, minimum, extents),
             _ => Ok(None),
         }
     }

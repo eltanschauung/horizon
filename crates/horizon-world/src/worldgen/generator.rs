@@ -168,6 +168,7 @@ pub struct GeneratorData {
     densities: BTreeMap<String, String>,
     rules: BTreeMap<String, String>,
     settings: BTreeMap<String, String>,
+    generation_extensions: BTreeMap<String, String>,
     presets: BTreeMap<String, String>,
     world_presets: BTreeMap<String, String>,
     /// Data packs' level stems (`dimension/<id>.json`), by dimension id:
@@ -346,6 +347,10 @@ fn joined<T>(thread: std::thread::JoinHandle<T>) -> T {
         .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
 }
 impl GeneratorData {
+    /// Resource reloads can keep the same overlay path while changing its tables.
+    pub fn uses_registry(&self, registry: &BlockRegistry) -> bool {
+        std::ptr::eq(self.registry, registry)
+    }
     /// Load a worldgen bundle directory. Required files are JSON objects mapping
     /// resource identifiers to the resource's JSON text: `noises`, `densities`,
     /// `rules` (material rules), `conditions` (material conditions), `settings`
@@ -560,6 +565,8 @@ impl GeneratorData {
             densities: read_bundle(dir, ov, "densities")?,
             rules: read_bundle(dir, ov, "rules")?,
             settings: read_bundle(dir, ov, "settings")?,
+            generation_extensions: read_optional_bundle(dir, ov, "generation_extensions")?
+                .unwrap_or_default(),
             world_presets: read_bundle(dir, ov, "world_presets")?,
             dimensions: ov.apply(overrides::DIMENSIONS, BTreeMap::new()),
             dimension_types: ov.apply(overrides::DIMENSION_TYPES, BTreeMap::new()),
@@ -1119,12 +1126,24 @@ where
                 .collect::<Result<_, GeneratorError>>()?,
             _ => Vec::new(),
         };
-        let source_json = generator["biome_source"].to_string();
+        let mut source_json = generator["biome_source"].to_string();
         let source = data
             .source_catalog
             .decode(&source_json)?
             .resolve(&data.presets)
             .map_err(|e| resource(format!("biome source: {e}")))?;
+        let (rule, source) = super::extensions::compose(
+            rule,
+            source,
+            generator["settings"].as_str().unwrap_or_default(),
+            &data.generation_extensions,
+            &data.biome_ids.keys().cloned().collect(),
+            registry,
+            &mut library,
+        )?;
+        if !data.generation_extensions.is_empty() {
+            source_json.push_str(&format!("{:?}", data.generation_extensions));
+        }
         let climate = router.climate_sampler();
         let mut noises = BTreeMap::new();
         for (name, json) in &data.noises {

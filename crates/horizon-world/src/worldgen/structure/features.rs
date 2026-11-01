@@ -37,6 +37,8 @@ pub struct TemplateFeature {
     templates: WeightedList<(Arc<StructureTemplate>, Vec<Rotation>)>,
     processors: ProcessorList,
     resources: Arc<StructureResources>,
+    offset: [i32; 3],
+    clearance: Option<Arc<crate::worldgen::tree_blocks::TreeBlocks>>,
 }
 impl TemplateFeature {
     pub fn decode(json: &str, bindings: &FeatureBlockBindings<'_>) -> Result<Self, DecodeError> {
@@ -69,6 +71,15 @@ impl TemplateFeature {
             templates,
             processors,
             resources,
+            offset: match value.get("offset") {
+                Some(v) => serde_json::from_value::<[i32; 3]>(v.clone())?,
+                None => [0; 3],
+            },
+            clearance: if value["clearance"].as_bool() == Some(true) {
+                Some(bindings.tree_blocks()?)
+            } else {
+                None
+            },
         })
     }
     pub fn place<W: FeatureWorld + PlacementContext>(
@@ -83,7 +94,7 @@ impl TemplateFeature {
             .next_int_bound(rotations.len() as i32)
             .map_err(invalid)? as usize];
         // rotation.rotate(axis.getNegative()) * (size along axis / 2), for X then Z.
-        let mut pos = origin;
+        let mut pos = std::array::from_fn(|i| origin[i].wrapping_add(self.offset[i]));
         for (axis, negative) in [
             (0, horizon_core::geometry::Direction::West),
             (2, horizon_core::geometry::Direction::North),
@@ -92,6 +103,27 @@ impl TemplateFeature {
             let length = template.size[axis] / 2;
             for i in 0..3 {
                 pos[i] += step[i] * length;
+            }
+        }
+        if let Some(blocks) = &self.clearance {
+            if let Some(palette) = template.palettes().first() {
+                for block in palette.blocks() {
+                    let shifted =
+                        StructureTemplate::transform(block.pos, Mirror::None, rotation, [0; 3]);
+                    let p = std::array::from_fn(|i| pos[i] + shifted[i]);
+                    if p[1] >= origin[1] {
+                        let old = world.block_state(p)?;
+                        if !blocks.valid_tree_pos(old)
+                            && !blocks.has(
+                                old,
+                                crate::worldgen::tree_blocks::WATER_FLUID
+                                    | crate::worldgen::tree_blocks::REPLACEABLE,
+                            )
+                        {
+                            return Ok(false);
+                        }
+                    }
+                }
             }
         }
         let mut settings = PlaceSettings::new(rotation).with_processors(&self.processors);

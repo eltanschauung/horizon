@@ -51,6 +51,13 @@ pub(super) struct StartupMenu {
 }
 
 impl StartupMenu {
+    pub(super) fn resume_mod_options(&mut self, game: &mut Game<'_>) {
+        self.title = game.title.take();
+        self.options = std::mem::take(&mut game.ui.options);
+        self.options.reload_content = false;
+        self.options_open = true;
+    }
+
     pub fn new(options: &Options, pack_error: Option<&str>) -> Result<Self> {
         let pending = if let Some(address) = &options.server {
             Some(PendingWorldEntry::Server {
@@ -516,6 +523,7 @@ impl Loading {
                 }
                 Event::Packs(_) => {
                     self.save_menu_settings();
+                    self.menu.options.reload_content = false;
                     self.menu.reload_packs = true;
                 }
                 Event::OpenPackFolder => {

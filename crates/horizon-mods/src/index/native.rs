@@ -99,6 +99,17 @@ pub fn allowed(rest: &str) -> bool {
 }
 
 impl Bundle {
+    /// A source bundle that deliberately keeps its code available for in-game
+    /// world-scoped switches, rather than requiring a rebuild to turn it on.
+    pub fn runtime_toggle(&self) -> bool {
+        self.files
+            .get(&format!(
+                "mixins/{}/data/runtime-toggle.json",
+                self.manifest.id
+            ))
+            .and_then(|b| serde_json::from_slice::<serde_json::Value>(b).ok())
+            .is_some_and(|v| v["runtime_toggle"].as_bool() == Some(true))
+    }
     pub fn read(path: &Path) -> Result<Self, String> {
         let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
         let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
