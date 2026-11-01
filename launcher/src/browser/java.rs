@@ -113,8 +113,7 @@ pub fn check_project(
 /// Whether mod `id` is on in `horizon-mods.txt`.
 pub fn is_enabled(home: &Path, id: &str) -> bool {
     let key = format!("mod.{id}");
-    fs::read_to_string(home.join(MODS_LIST))
-        .unwrap_or_default()
+    horizon_mods::selections::load(home)
         .lines()
         .filter_map(|l| l.split_once(':'))
         .any(|(k, v)| k.trim() == key && v.trim() == "true")
@@ -123,7 +122,7 @@ pub fn is_enabled(home: &Path, id: &str) -> bool {
 /// Turns mod `id` on (or off) in `horizon-mods.txt`, keeping the other lines.
 pub fn set_enabled(home: &Path, id: &str, on: bool) -> Result<(), String> {
     let path = home.join(MODS_LIST);
-    let text = fs::read_to_string(&path).unwrap_or_default();
+    let text = horizon_mods::selections::load(home);
     let key = format!("mod.{id}");
     let mut lines: Vec<String> = text
         .lines()
@@ -302,6 +301,20 @@ pub fn remove(home: &Path, entry: &Entry) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_selection_survives_toggling_one_mod_and_honors_saved_opt_out() {
+        let home =
+            std::env::temp_dir().join(format!("horizon-default-mods-{}", std::process::id()));
+        fs::create_dir_all(&home).unwrap();
+        assert!(is_enabled(&home, "zoom"));
+        set_enabled(&home, "zoom", false).unwrap();
+        assert!(!is_enabled(&home, "zoom"));
+        assert!(is_enabled(&home, "appleskin"));
+        fs::write(home.join(MODS_LIST), "").unwrap();
+        assert!(!is_enabled(&home, "appleskin"));
+        fs::remove_dir_all(home).unwrap();
+    }
 
     #[test]
     fn the_on_list_keeps_other_lines() {

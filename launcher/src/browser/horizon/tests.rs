@@ -114,6 +114,8 @@ fn searches_by_kind_and_words() {
 fn installs_checked_turns_on_and_removes() {
     let index = sample();
     let home = scratch("install");
+    // This fixture starts with an explicitly empty saved selection.
+    fs::write(home.join("horizon-mods.txt"), "").unwrap();
     let p = hud(&index);
     let e = install_from(&index, true, None, &p, &home, &|_, _| {}).unwrap_err();
     assert_eq!(e, format!("Coordinates HUD {NEEDS_PORT}."));

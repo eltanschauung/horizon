@@ -1390,6 +1390,7 @@ dependencies = [
  "horizon-core",
  "horizon-hdr",
  "horizon-items",
+ "horizon-mods",
  "horizon-narrator",
  "horizon-protocol",
  "horizon-shader-api",

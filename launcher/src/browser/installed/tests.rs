@@ -256,6 +256,8 @@ fn mod_jar(id: &str, files: &[(&str, &str)]) -> Vec<u8> {
 #[test]
 fn java_mods_are_ported_turned_on_refused_on_clashes_and_removed() {
     let home = home("java");
+    // This fixture starts with an explicitly empty saved selection.
+    fs::write(home.join("horizon-mods.txt"), "").unwrap();
     let mut fake = Fake::default();
     for id in ["ruby", "lib", "gem"] {
         let mut p = project(id, Kind::Mod);

@@ -148,7 +148,7 @@ fn parse_built(about: &serde_json::Value) -> Vec<Mod> {
 pub fn fingerprint(home: &Path, version: Option<&str>) -> String {
     let mut out = format!("{}\n{version:?}\n", home.display());
     // The on/off list (`browser::java::is_enabled`).
-    out += &fs::read_to_string(home.join("horizon-mods.txt")).unwrap_or_default();
+    out += &horizon_mods::selections::load(home);
     for path in hnmods(home) {
         let meta = fs::metadata(&path).ok();
         let time = meta.as_ref().and_then(|m| m.modified().ok());

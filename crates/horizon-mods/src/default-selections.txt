@@ -1,0 +1,6 @@
+mod.appleskin:true
+mod.chatheads:true
+mod.eatinganimation:true
+mod.minimap:true
+mod.tectonic_horizon:true
+mod.zoom:true

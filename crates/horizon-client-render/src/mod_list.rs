@@ -1,6 +1,6 @@
 //! Which of the installed Horizon mods are on (`docs/mods.md`), kept in
-//! `horizon-mods.txt` beside `options.txt` as `mod.<id>:true` lines. Every
-//! mod is off until the player turns it on in Options > Mods. A native mod is
+//! `horizon-mods.txt` beside `options.txt` as `mod.<id>:true` lines. A
+//! new folder uses the fork selections until a player saves their choices. A native mod is
 //! built in, so on until turned off (`mod.<id>:false`); the launcher builds
 //! only the native mods whose line is `true`.
 use std::{
@@ -59,9 +59,7 @@ pub struct NativePage {
 
 impl ModList {
     pub fn load(dir: &Path) -> Self {
-        fs::read_to_string(dir.join(FILE))
-            .map(|t| Self::parse(&t))
-            .unwrap_or_default()
+        Self::parse(&horizon_mods::selections::load(dir))
     }
     pub fn parse(text: &str) -> Self {
         let ids = |value: &str| -> BTreeSet<String> {
@@ -109,13 +107,7 @@ impl ModList {
     }
     pub fn save(&self, dir: &Path) {
         let path = dir.join(FILE);
-        if self.enabled.is_empty()
-            && self.disabled.is_empty()
-            && self.keys.is_empty()
-            && !path.exists()
-        {
-            return;
-        }
+        // An empty file is an explicit opt-out from the fork defaults.
         let _ = fs::write(path, self.serialize());
     }
     pub fn is_on(&self, i: usize) -> bool {
@@ -151,6 +143,26 @@ impl ModList {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn new_folder_uses_selected_mods_and_empty_saved_choice_stays_empty() {
+        let dir = std::env::temp_dir().join(format!("horizon-fork-mods-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        assert_eq!(
+            ModList::load(&dir).enabled.into_iter().collect::<Vec<_>>(),
+            [
+                "appleskin",
+                "chatheads",
+                "eatinganimation",
+                "minimap",
+                "tectonic_horizon",
+                "zoom"
+            ]
+        );
+        ModList::default().save(&dir);
+        assert!(ModList::load(&dir).enabled.is_empty());
+        fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn round_trips_and_ignores_the_rest() {
