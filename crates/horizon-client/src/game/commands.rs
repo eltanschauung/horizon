@@ -2974,7 +2974,7 @@ impl Game<'_> {
         };
         let rot = match ctx.get("rotation") {
             Some(Arg::Coords(c)) => c.rotation(self.source_rotation()),
-            _ => [0.0, 0.0],
+            _ => self.source_rotation(),
         };
         // LevelData.setRespawnData: the world's spawn (level.dat `spawn`).
         let old = self.level.world_spawn.replace(pos);

@@ -17,3 +17,6 @@ The regression is `tools/character_sync_e2e.py --worldspawn` with its normal gam
 control executable, prepared-resource and Lunatic archive arguments. It checks
 operator permission, denial for non-operators, the world spawn rather than a bed,
 block centering/rotation, and returning from the Nether on a real dedicated server.
+
+`/setworldspawn` without a rotation saves the executing source's current yaw and
+pitch. An explicit rotation still takes precedence.

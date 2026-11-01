@@ -63,7 +63,8 @@ def main():
             log = open(path / 'test-process.log', 'w+')
             logs.append(log)
             proc = subprocess.Popen([str(args.game), '--resources', str(args.resources), *extra],
-                cwd=path, env=dict(env,HORIZON_HOME=str(path)), stdin=subprocess.PIPE, stdout=log, stderr=subprocess.STDOUT)
+                cwd=path, env=dict(env,HORIZON_HOME=str(path), HORIZON_LAUNCHER_HOME=str(path/'launcher'),
+                    XDG_CONFIG_HOME=str(path/'config'), XDG_DATA_HOME=str(path/'data'), XDG_CACHE_HOME=str(path/'cache')),  stdin=subprocess.PIPE, stdout=log, stderr=subprocess.STDOUT)
             children.append(proc)
             return proc
         def ctl(path, *words):
@@ -89,6 +90,21 @@ def main():
                 state=until(lambda:ctl(path,'status'),lambda s:len(s['server']['characters'])==2)
                 assert {c['id'] for c in state['server']['characters'].values()} == {'lunatic:hakurei_reimu','lunatic:kirisame_marisa'}
                 assert {c['color'] for c in state['server']['characters'].values()} == {'red','yellow'}
+            def sync_counts(path):
+                stats = ctl(path,'status')['server']['character_sync']
+                return stats['sent'], stats['received'], stats['retries']
+            # Wait for the final ack, then span several of the former two-second polls.
+            time.sleep(1)
+            before = {str(path): sync_counts(path) for path in (alice,bob)}
+            time.sleep(8)
+            assert before == {str(path): sync_counts(path) for path in (alice,bob)}, 'Idle character traffic'
+            for i in range(4):
+                ctl(bob,'chat',f'character-sync-proof-{i}')
+                time.sleep(0.5)
+            until(lambda:ctl(alice,'status'),lambda s:any('Kirisame Marisa : character-sync-proof-3' in line for line in s['server']['chat']))
+            assert before == {str(path): sync_counts(path) for path in (alice,bob)}, 'Chat caused character traffic'
+            assert all(counts[2] == 0 for counts in before.values()), 'Unexpected character retry'
+            print('PASS: zero character messages during eight idle seconds and four chat messages; no retries',flush=True)
             ctl(bob,'chat','character-sync-proof')
             until(lambda:ctl(alice,'status'),lambda s:any('Kirisame Marisa : character-sync-proof' in line for line in s['server']['chat']))
             until(lambda:ctl(alice,'status'),lambda s:'Kirisame Marisa' in (s.get('name_tags') or []))
@@ -116,6 +132,16 @@ def main():
                 ctl(alice,'chat','/worldspawn')
                 state=until(lambda:ctl(alice,'status'),near_spawn)
                 assert abs(state['yaw']-90)<0.05
+                ctl(alice,'look','45','10')
+                time.sleep(.5)
+                ctl(alice,'chat','/setworldspawn')
+                time.sleep(.5)
+                console(f'tp Alice 25.5 {spawn_y} 25.5')
+                until(lambda:position(alice),lambda p:abs(p[0]-25.5)<0.05)
+                ctl(alice,'chat','/worldspawn')
+                state=until(lambda:ctl(alice,'status'),near_spawn)
+                assert abs(state['yaw']-45)<.05 and abs(state['pitch']-10)<.05, state
+
                 console('execute in minecraft:the_nether run tp Alice 0 80 0')
                 until(lambda:ctl(alice,'status'),lambda state:state['server']['dimension']=='minecraft:the_nether')
                 ctl(alice,'chat','/worldspawn')
@@ -127,6 +153,14 @@ def main():
             until(lambda:ctl(alice,'status'),lambda s:any(c['id']=='lunatic:cirno' for c in s['server']['characters'].values()))
             saved=json.loads((server/'character-selections.json').read_text())
             assert set(saved.values()) == {'lunatic:hakurei_reimu','lunatic:cirno'}
+            ctl(bob,'quit'); b.wait(timeout=30)
+            until(lambda:ctl(alice,'status'),lambda s:len(s['server']['characters'])==1)
+            saved_time=(server/'character-selections.json').stat().st_mtime_ns
+            bob,b=client('Bob','lunatic:cirno')
+            until(lambda:ctl(bob,'status'),lambda s:len(s['server']['characters'])==2)
+            time.sleep(3)
+            assert sync_counts(bob)[0] <= 1, 'Restored selection retried'
+            assert (server/'character-selections.json').stat().st_mtime_ns == saved_time, 'Unchanged reconnect rewrote preferences'
             print('PASS: two clients, late join, names/colors, chat, nametag, disconnect, changed choice, reconnect and persisted UUID choices')
         finally:
             for proc in children:
