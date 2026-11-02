@@ -45,6 +45,29 @@ pub(super) fn prepare(bundle: &Bundle, source: &Path) -> Result<(), String> {
                 );
                 changed = true;
             }
+            // The pre-CIT Eating Animation helper constructs the old render-state shape.
+            if bundle.id == "eatinganimation"
+                && target == "horizon_client::item_render::ItemRenderer::resolve"
+            {
+                let helper = table
+                    .get("helper")
+                    .and_then(toml::Value::as_str)
+                    .ok_or("Eating Animation helper missing")?;
+                let helper = bundle.dir.join(helper);
+                let original = fs::read_to_string(&helper).map_err(|e| e.to_string())?;
+                if !original.contains("cit_glint:") {
+                    let marker = "Break(ItemRenderState {";
+                    if !original.contains(marker) {
+                        return Err("Unsupported legacy Eating Animation render state".into());
+                    }
+                    let updated = original.replacen(
+                        marker,
+                        "Break(ItemRenderState { cit_glint: None, hdr_tier: 0, hdr_light: 0,",
+                        1,
+                    );
+                    fs::write(helper, updated).map_err(|e| e.to_string())?;
+                }
+            }
             // AppleSkin used the former combined title draw as a once-per-frame HUD hook.
             // Draw after the health/food layer now, rather than on every new HUD layer.
             if bundle.id == "appleskin"

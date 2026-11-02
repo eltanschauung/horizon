@@ -34,8 +34,7 @@ pub const MIXINS_REV: &str = "ddd9700b21997c95d95ac6ee5ecafe3830cf622a";
 const FEATURES: &str = "horizon-client/mods";
 
 /// The Cargo profile a native build compiles with. `Fast` (the workspace's `[profile.fast]`: no
-/// LTO, 16 codegen units, incremental) is the default, so changing a mod recompiles only
-/// `horizon-client`'s changed parts; `Release` is the release's own (thin LTO, one codegen unit):
+/// LTO, 16 codegen units, without incremental caches) is the default; `Release` is the release's own (thin LTO, one codegen unit):
 /// slower to build, slightly faster game. Each has its own folder under `native/target/` and its
 /// own key, so the two never mix.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

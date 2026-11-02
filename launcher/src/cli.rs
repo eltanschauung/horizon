@@ -797,7 +797,7 @@ enum Cmd {
         /// Try incompatible mod pins on the current fork main, without changing game source
         #[arg(long)]
         allow_version_mismatch: bool,
-        /// The Cargo profile: fast (the default: incremental, quick to rebuild) or release
+        /// The Cargo profile: fast (the default: optimized, quick to link) or release
         /// (thin LTO: slower to build, slightly faster game). Default: the native-profile setting
         #[arg(long, value_parser = ["fast", "release"])]
         profile: Option<String>,
@@ -820,7 +820,7 @@ enum Cmd {
     /// system|en|fr|ru|de|zh|es|uk|pl (the window's language; system follows the computer's), accent
     /// violet|blue|teal|green|amber|red|pink, background PATH (a picture behind Home; "default"
     /// shows Horizon's landscape), native-profile fast|release (the Cargo profile native mods
-    /// build with: fast is incremental, release is slower to build and slightly faster to play)
+    /// build with: fast links quickly, release is slower to build and slightly faster to play)
     Settings {
         #[arg(value_parser = SETTING_KEYS)]
         key: Option<String>,
