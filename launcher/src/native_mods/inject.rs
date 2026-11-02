@@ -95,6 +95,7 @@ pub(super) fn prepare(mods: &[Bundle], source: &Path) -> Result<Vec<Injection>, 
         .collect();
     // These are the copied bundles under mods.incoming, never the player's originals.
     for bundle in mods {
+        super::legacy::prepare(bundle, source)?;
         api::strip(bundle)?;
         let path = bundle.dir.join(MANIFEST);
         let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
