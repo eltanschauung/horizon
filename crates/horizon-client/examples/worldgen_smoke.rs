@@ -6,6 +6,7 @@ use horizon_client::{
     mod_content::{self, ContentMod},
     streaming::{ChunkGenerator, Proto},
 };
+use horizon_client_lib as horizon_client;
 use horizon_world::worldgen::{
     generator::{GeneratorData, OverworldGenerator},
     overrides::WorldgenOverrides,

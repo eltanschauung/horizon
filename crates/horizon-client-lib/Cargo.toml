@@ -219,3 +219,7 @@ path = "../horizon-client/tests/tall_column.rs"
 [[test]]
 name = "wide_states"
 path = "../horizon-client/tests/wide_states.rs"
+
+[[example]]
+name = "worldgen_smoke"
+path = "../horizon-client/examples/worldgen_smoke.rs"
