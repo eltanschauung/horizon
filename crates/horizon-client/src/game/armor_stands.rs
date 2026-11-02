@@ -4,6 +4,8 @@
 //! the default pose, the hit wobble and humanoid armor layers.
 use super::{Game, InteractTarget};
 use horizon_client::{
+    cit::{Hand, Kind, Rule},
+    cit_armor,
     entities::ArmorStand,
     items::ItemStack,
     mesher::Vertex,
@@ -154,16 +156,37 @@ impl ArmorStandAssets {
     }
 }
 impl Game<'_> {
+    /// OptiFine CIT: the winning armour or elytra rule (`kind`) of the worn `stack`. No lookup
+    /// without CIT rules.
+    pub(super) fn cit_worn_rule(&self, kind: Kind, stack: &ItemStack) -> Option<&Rule> {
+        let rules = &self.pack.item_renderer.cit.as_ref()?.rules;
+        let item_max = self.items().get(&stack.item).map_or(0, |i| i.max_damage);
+        horizon_client::item_render::cit::worn_rule(rules, kind, stack, item_max)
+            .and_then(|i| rules.rules.get(i))
+    }
+    /// The atlas rect of an armour layer `texture` of equipment asset `asset`, or of the one CIT
+    /// armour rule `cit` puts there when the atlas has it.
+    fn armor_layer_rect(
+        &self,
+        cit: Option<&Rule>,
+        asset: &str,
+        kind: &str,
+        texture: &str,
+    ) -> Option<[f32; 4]> {
+        let sprites = &self.gui.atlas.sprites;
+        let r = cit_armor::worn_layer(cit, asset, kind, texture, |s| sprites.get(s))?;
+        Some([r.u0, r.v0, r.u1, r.v1])
+    }
     /// `HumanoidArmorLayer` for the player: (model, texture rect, colour,
     /// overlay) of each worn piece, head to feet.
-    pub(super) fn player_armor_layers(&self) -> Vec<(&Part, [f32; 4], u32, u32)> {
+    pub(super) fn player_armor_layers(&self) -> Vec<(&Part, [f32; 4], u32, u32, bool)> {
         self.stack_armor_layers(&self.armor)
     }
     /// `HumanoidArmorLayer` for worn stacks (head to feet), trims included.
     pub(super) fn stack_armor_layers(
         &self,
         armor: &[Option<ItemStack>; 4],
-    ) -> Vec<(&Part, [f32; 4], u32, u32)> {
+    ) -> Vec<(&Part, [f32; 4], u32, u32, bool)> {
         self.armor_layers(
             armor
                 .each_ref()
@@ -172,7 +195,7 @@ impl Game<'_> {
     }
     /// `HumanoidArmorLayer` for another player's model: the armour it wears
     /// (`extra.head` .. `extra.feet`).
-    pub(super) fn worn_armor_layers(&self, m: &Mob) -> Vec<(&Part, [f32; 4], u32, u32)> {
+    pub(super) fn worn_armor_layers(&self, m: &Mob) -> Vec<(&Part, [f32; 4], u32, u32, bool)> {
         let e = &m.extra;
         self.armor_layers(
             [
@@ -185,12 +208,18 @@ impl Game<'_> {
         )
     }
     /// The layers of the armour items `worn` (with their stacks when known,
-    /// for trims), head to feet.
+    /// for trims and CIT armour rules), head to feet.
     fn armor_layers(
         &self,
         worn: [Option<(&str, Option<&ItemStack>)>; 4],
-    ) -> Vec<(&Part, [f32; 4], u32, u32)> {
+    ) -> Vec<(&Part, [f32; 4], u32, u32, bool)> {
         let assets = &self.armor_stand_assets;
+        let emissive = self
+            .res
+            .mob_data()
+            .emissive
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut out = Vec::new();
         for (item, layer) in worn
             .into_iter()
@@ -234,23 +263,26 @@ impl Game<'_> {
             };
             // Every layer of the asset, the leather overlay too, then the
             // trim layer over the armour.
+            let cit = stack.and_then(|s| self.cit_worn_rule(Kind::Armor, s));
             for (i, (texture, undyed)) in layers.iter().enumerate() {
-                let Some(r) = self.gui.atlas.sprites.get(texture.as_str()) else {
+                let Some(uv) = self.armor_layer_rect(cit, &asset, kind, texture) else {
                     continue;
                 };
                 let color = layer_color(*undyed, stack);
-                out.push((
-                    part,
-                    [r.u0, r.v0, r.u1, r.v1],
-                    color,
-                    if i == 0 { overlay } else { 0 },
-                ));
+                out.push((part, uv, color, if i == 0 { overlay } else { 0 }, false));
+                // The layer's OptiFine emissive overlay, full bright without the glint.
+                if let Some(g) = emissive
+                    .overlay(texture)
+                    .and_then(|e| self.gui.atlas.sprites.get(e))
+                {
+                    out.push((part, [g.u0, g.v0, g.u1, g.v1], color, 0, true));
+                }
             }
             if let Some(r) = stack
                 .and_then(|s| assets.trim_texture(&asset, kind, s))
                 .and_then(|t| self.gui.atlas.sprites.get(&t.sprite()))
             {
-                out.push((part, [r.u0, r.v0, r.u1, r.v1], 0xFFFF_FFFF, overlay));
+                out.push((part, [r.u0, r.v0, r.u1, r.v1], 0xFFFF_FFFF, overlay, false));
             }
         }
         out
@@ -617,6 +649,9 @@ impl Game<'_> {
                 magic.then_some(id as i32),
             );
         });
+        // Player.onAttack: the hit starts the attack strength again, hurt or
+        // not (skipAttackInteraction only asks mayInteract).
+        self.attack_ticks = 0;
         if hurt {
             self.swing_arm();
         }
@@ -727,20 +762,20 @@ impl Game<'_> {
         true
     }
     pub(super) fn tick_armor_stands(&mut self) {
-        let mut scene = horizon_client::collisions::SceneCollisions {
-            world: &self.world,
-            binding: self.collision,
-            subject: None,
-        };
         let mut dead = Vec::new();
         // ServerLevel.tick: only entities in entity-ticking chunks tick.
         let ticking = self.entity_ticking_area();
-        for (i, a) in self.armor_stands.iter_mut().enumerate() {
-            a.previous = a.position;
-            a.previous_yaw = a.yaw;
-            if !ticking(a.position.x.floor() as i32, a.position.z.floor() as i32) {
+        for i in 0..self.armor_stands.len() {
+            let at = self.armor_stands[i].position;
+            if !ticking(at.x.floor() as i32, at.z.floor() as i32) {
+                self.armor_stands[i].previous = at;
+                self.armor_stands[i].previous_yaw = self.armor_stands[i].yaw;
                 continue;
             }
+            self.armor_stand_location_effects(i, false);
+            let a = &mut self.armor_stands[i];
+            a.previous = a.position;
+            a.previous_yaw = a.yaw;
             let in_water = a.update_fluids(&self.world, &self.res.motion().fluids);
             let (world, registry, facts, collision) = (
                 &self.world,
@@ -748,13 +783,30 @@ impl Game<'_> {
                 self.res.facts(),
                 self.collision,
             );
+            let mut scene = horizon_client::collisions::SceneCollisions {
+                world,
+                binding: collision,
+                subject: None,
+            };
             a.tick(&mut scene, facts, in_water, &mut |bounds, velocity| {
                 horizon_client::motion::bubble_column_push(
                     world, registry, facts, collision, bounds, velocity,
                 );
             });
+            if in_water {
+                a.enchantment_fall_distance = 0.0;
+            } else {
+                a.enchantment_fall_distance += (a.previous.y - a.position.y).max(0.0);
+            }
+            let landed = a.on_ground && a.enchantment_fall_distance > 0.0;
+            if a.on_ground {
+                a.enchantment_fall_distance = 0.0;
+            }
             if !a.environment_tick(&self.world, self.res.facts(), self.pack.assets.registry) {
                 dead.push(i);
+            }
+            if landed {
+                self.armor_stand_location_effects(i, true);
             }
         }
         for i in dead.into_iter().rev() {
@@ -852,6 +904,17 @@ impl Game<'_> {
         let assets = &self.armor_stand_assets;
         let sprites = &self.gui.atlas.sprites;
         let uv_of = |name: &str| sprites.get(name).map(|r| [r.u0, r.v0, r.u1, r.v1]);
+        // A texture's OptiFine emissive overlay. The lock is read per lookup and let go:
+        // `wings_geometry` below reads it too.
+        let glow_of = |texture: &str| {
+            let emissive = self
+                .res
+                .mob_data()
+                .emissive
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            emissive.overlay(texture).and_then(uv_of)
+        };
         let Some(wood) = uv_of("entity/armorstand/armorstand") else {
             return;
         };
@@ -891,6 +954,19 @@ impl Game<'_> {
                 0,
                 out,
             );
+            if let Some(glow) = glow_of("entity/armorstand/armorstand") {
+                let full = horizon_client::mobs::render::FULL_BRIGHT;
+                horizon_client::mobs::render::draw(
+                    model,
+                    base,
+                    &poses,
+                    glow,
+                    0xFFFF_FFFF,
+                    full,
+                    0,
+                    out,
+                );
+            }
         }
         self.armor_stand_items(a, model, base, &posed, packed, out);
         // HumanoidArmorLayer: head, chest, legs, feet.
@@ -941,8 +1017,9 @@ impl Game<'_> {
             apply_pose(&mut layer_poses, &a.pose);
             // EquipmentLayerRenderer: every layer of the asset, the leather overlay
             // too; the shader glint goes on the first layer only (renderShaderGlint).
+            let cit = self.cit_worn_rule(Kind::Armor, stack);
             for (i, (texture, undyed)) in layers.iter().enumerate() {
-                let Some(uv) = uv_of(texture) else {
+                let Some(uv) = self.armor_layer_rect(cit, &asset, kind, texture) else {
                     continue;
                 };
                 let color = layer_color(*undyed, Some(stack));
@@ -956,6 +1033,19 @@ impl Game<'_> {
                     if i == 0 { overlay } else { 0 },
                     out,
                 );
+                // The layer's OptiFine emissive overlay, full bright without the glint.
+                if let Some(glow) = glow_of(texture) {
+                    horizon_client::mobs::render::draw(
+                        part,
+                        base,
+                        &layer_poses,
+                        glow,
+                        color,
+                        horizon_client::mobs::render::FULL_BRIGHT,
+                        0,
+                        out,
+                    );
+                }
             }
             // EquipmentLayerRenderer: the trim layer over the armour.
             if let Some(trim) = assets
@@ -978,6 +1068,7 @@ impl Game<'_> {
         // never crouches or glides, so its wings rest folded.
         self.wings_geometry(
             a.equipment[4].as_ref().map(|s| &*s.item),
+            a.equipment[4].as_ref(),
             None,
             a.small,
             base,
@@ -1225,7 +1316,12 @@ impl Game<'_> {
                     oz / 16.0,
                 ));
             let seed = a.id as i32 + if left { 1 } else { 2 };
-            let state = self.resolve_item(stack, context, Some(&owner), seed);
+            // OptiFine CIT `hand=off` rules: slot 1 is the off hand.
+            let state = if left {
+                self.resolve_item_in_hand(stack, context, Some(&owner), seed, Hand::Off)
+            } else {
+                self.resolve_item(stack, context, Some(&owner), seed)
+            };
             self.submit_item_world(&state, pose, light, out);
         }
         // `CustomHeadLayer`: a worn skull draws the skull model.
@@ -1252,6 +1348,7 @@ impl Game<'_> {
                     self.dim == super::Dim::Nether,
                 )),
                 glint: self.glint(),
+                tier: 0,
             };
             let profile = stack
                 .extra

@@ -64,6 +64,16 @@ fn bounds(p: Vec3) -> Aabb {
         Vec3::new(p.x + h, p.y + SIZE, p.z + h),
     )
 }
+impl Hook {
+    pub(super) fn bounds(&self) -> Aabb {
+        bounds(self.position)
+    }
+    /// `FishingHook.tick` returns before `applyEffectsFromBlocks` while it
+    /// holds an entity.
+    pub(super) fn applies_block_effects(&self) -> bool {
+        !matches!(self.state, State::Hooked(_))
+    }
+}
 /// RandomSource.triangle(mode, deviation).
 fn triangle(r: &mut impl RandomSource, mode: f64, deviation: f64) -> f64 {
     mode + deviation * (f64::from(r.next_float()) - f64::from(r.next_float()))
@@ -87,6 +97,22 @@ impl Game<'_> {
     pub(super) fn use_fishing_rod(&mut self, stack: &ItemStack) -> bool {
         if &*stack.item != "minecraft:fishing_rod" {
             return false;
+        }
+        // The mods hear a server player's cast or reel-in first.
+        if self.player.is_some()
+            && let (Some(uuid), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
+        {
+            let state = match &self.hook {
+                None => 0,
+                Some(h) if matches!(h.state, State::Hooked(_)) => 4,
+                Some(h) if h.nibble > 0 => 2,
+                Some(_) => 3,
+            };
+            let mut cancel = false;
+            self.native_player_fish(uuid, &name, state, &mut cancel);
+            if cancel {
+                return true;
+            }
         }
         let Some(p) = self.player.as_ref() else {
             return false;
@@ -409,6 +435,19 @@ impl Game<'_> {
                     }
                 }
             } else {
+                // The mods hear a server player's fish bite, and may call it
+                // off: the wait starts over.
+                if let (Some(uuid), Some(name)) =
+                    (self.lan_acting_uuid, self.lan_acting_name.clone())
+                {
+                    let mut cancel = false;
+                    self.native_player_fish(uuid, &name, 1, &mut cancel);
+                    if cancel {
+                        h.time_until_lured = 0;
+                        h.time_until_hooked = 0;
+                        return;
+                    }
+                }
                 let pitch =
                     1.0 + (self.world.random.next_float() - self.world.random.next_float()) * 0.4;
                 self.audio.play(
@@ -570,6 +609,12 @@ impl Game<'_> {
                             .map(|i| i.id)
                     });
                 if let Some(id) = hit {
+                    // Projectile.onHit on an entity: PROJECTILE_LAND.
+                    self.projectile_event(
+                        "minecraft:projectile_land",
+                        Some(horizon_client::mobs::Who::Player),
+                        [h.position.x, h.position.y, h.position.z],
+                    );
                     h.state = State::Hooked(id);
                     h.velocity = Vec3::ZERO;
                     self.hook = Some(h);
@@ -595,6 +640,12 @@ impl Game<'_> {
                     shape.clip(h.position, to, p)
                 });
                 if let Some(hit) = hit.ok().flatten() {
+                    // Projectile.onHit on a block: PROJECTILE_LAND.
+                    self.projectile_event(
+                        "minecraft:projectile_land",
+                        Some(horizon_client::mobs::Who::Player),
+                        [hit.location.x, hit.location.y, hit.location.z],
+                    );
                     h.velocity = rebound(h.velocity, hit.location, h.position);
                 }
             }

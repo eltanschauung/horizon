@@ -88,6 +88,7 @@ fn creative_tabs_keep_vanilla_items_missing_from_search() {
         vanilla_items: tab.items.iter().cloned().collect(),
         effects: Vec::new(),
         entity_types: Vec::new(),
+        menu_types: Vec::new(),
         states: 0,
         defaults: BTreeMap::new(),
         sounds: BTreeMap::new(),
@@ -390,7 +391,8 @@ fn ruby_mod(dir: &Path) -> ContentMod {
         (
             "data/ruby/horizon/block/ruby_block.json",
             r##"{"template": "minecraft:iron_block", "properties": {"hardness": 4.0, "light": 3,
-                "sounds": "minecraft:amethyst_block", "map_color": 28, "friction": 0.8},
+                "sounds": "minecraft:amethyst_block", "map_color": 28, "friction": 0.8,
+                "random_ticks": true},
                 "components": {"minecraft:max_stack_size": 16,
                     "minecraft:damage_resistant": {"types": "#minecraft:is_fire"}}}"##,
         ),
@@ -529,11 +531,17 @@ fn content_root_loads_with_every_table() {
         BlockFacts::load_with_behaviours(&root, new, &shared_json).unwrap();
     let independent_behaviours = horizon_world::level::Behaviours::load(new, &root).unwrap();
     let (deferred_facts, gameplay) =
-        BlockFacts::load_with_projection(&root, new, &shared_json).unwrap();
+        BlockFacts::load_with_projection(&root, new, &shared_json, true).unwrap();
     let deferred_behaviours =
         horizon_world::level::Behaviours::load_with_gameplay(new, &root, &shared_json, &gameplay)
             .unwrap();
     assert_eq!(shared_facts.states.len(), facts.states.len());
+    // `random_ticks` makes the block tick randomly although its template (iron) never does; the
+    // sections' counts read the same flag (`random_tick_candidate`).
+    assert!(independent_behaviours.is_randomly_ticking(ruby));
+    assert!(independent_behaviours.random_tick_candidate(ruby));
+    assert!(!independent_behaviours.is_randomly_ticking(iron));
+    assert!(deferred_behaviours.is_randomly_ticking(ruby));
     for state in [ruby, ruby_door, BlockStateId(n + 65)] {
         assert_eq!(shared_facts.get(state).hardness, facts.get(state).hardness);
         assert_eq!(
@@ -745,7 +753,7 @@ fn shared_behaviour_document_matches_independent_loaders() {
     let original = BlockFacts::load(&root, assets.registry).unwrap();
     let (shared, b) = BlockFacts::load_with_behaviours(&root, assets.registry, &doc).unwrap();
     let (deferred_facts, projection) =
-        BlockFacts::load_with_projection(&root, assets.registry, &doc).unwrap();
+        BlockFacts::load_with_projection(&root, assets.registry, &doc, true).unwrap();
     let deferred = horizon_world::level::Behaviours::load_with_gameplay(
         assets.registry,
         &root,
@@ -1418,6 +1426,54 @@ fn content_root_registers_a_mod_entity_type() {
     ] {
         assert!(ids.as_array().unwrap().contains(&"example:bolt".into()));
     }
+    // its size and eyes are the snowball's, for `execute anchored eyes` and spawners.
+    let types: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.join("entity-types.json")).unwrap()).unwrap();
+    assert!(types["minecraft:snowball"].is_object());
+    assert_eq!(types["example:bolt"], types["minecraft:snowball"]);
+    // the rewritten table keeps vanilla's floats to the bit (a zombie's speed).
+    let speed = |root: &Path| {
+        let attributes =
+            crate::mobs::exact_attributes(&fs::read(root.join("entity-types.json")).unwrap());
+        attributes["minecraft:zombie"]["minecraft:movement_speed"]
+    };
+    assert_eq!(speed(&root).to_bits(), speed(&base).to_bits());
+    assert!(root.join(crate::content_identity::MARKER).exists());
+    let identity = crate::content_identity::identity;
+    assert_ne!(identity(&root).unwrap(), identity(&base).unwrap());
+    fs::remove_dir_all(&scratch).unwrap();
+}
+
+/// a mod's menu type gets the menu network id after vanilla's last, and it
+/// changes the content identity.
+#[test]
+#[ignore = "full content root: CI and pr_ready run it"]
+fn content_root_registers_a_mod_menu_type() {
+    let Some(base) = prepared() else {
+        return;
+    };
+    let scratch = std::env::temp_dir().join(format!("horizon-mod-menu-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&scratch);
+    let m = folder_mod(
+        &scratch.join("example"),
+        &[
+            ("horizon-mod.toml", &manifest("example", "")),
+            (
+                "data/example/horizon/menu/press.json",
+                r#"{"slots": 9, "data_slots": 2, "results": [7, 8]}"#,
+            ),
+        ],
+    );
+    let root = resource_root(&base, std::slice::from_ref(&m), &scratch.join("cache")).unwrap();
+    let report = |root: &Path| {
+        horizon_protocol::registry::Builtin::load(&root.join("registries.json")).unwrap()
+    };
+    let (vanilla, ids) = (report(&base), report(&root));
+    let vanilla = vanilla.get("minecraft:menu").unwrap();
+    let ids = ids.get("minecraft:menu").unwrap();
+    let count = (0..).take_while(|&i| vanilla.name(i).is_some()).count() as i32;
+    assert_eq!(ids.id("example:press"), Some(count));
+    assert_eq!(ids.id("minecraft:furnace"), vanilla.id("minecraft:furnace"));
     assert!(root.join(crate::content_identity::MARKER).exists());
     let identity = crate::content_identity::identity;
     assert_ne!(identity(&root).unwrap(), identity(&base).unwrap());
@@ -2554,6 +2610,98 @@ fn content_block_state_properties_fan_out_its_states() {
     fs::remove_dir_all(base.parent().unwrap().join("mod0")).ok();
 }
 
+/// A declared property whose name sorts before the template's goes in vanilla's order
+/// (`StateDefinition`): all the names sorted, the first slowest, so `alpha` varies slower than the
+/// template's `axis`. A state table that read the rows in the other order stopped the game at
+/// load ("registry state order differs from vanilla's state definition").
+#[test]
+fn content_block_state_properties_follow_vanilla_name_order() {
+    let (base, mods) = block_base(
+        "block-name-order",
+        &[r#"{"template":"minecraft:test","item":false,
+           "state_properties":{"alpha":{"type":"boolean"}}}"#],
+    );
+    let plan = Plan::new(&base, &mods).unwrap();
+    let facts = fs::read_to_string(base.join("facts.json")).unwrap();
+    let mut doc: J = serde_json::from_str(&facts).unwrap();
+    plan.json("facts.json", &mut doc).unwrap();
+    let Some(J::Arr(rows)) = doc.get("states") else {
+        panic!("no states")
+    };
+    assert_eq!(rows.len(), 2 + 4);
+    let properties = |i: usize| -> (String, String) {
+        let J::Arr(row) = &rows[i] else {
+            panic!("row {i} is not a state")
+        };
+        let Some(J::Obj(state)) = row.get(4) else {
+            panic!("row {i} has no state")
+        };
+        let Some((_, J::Obj(p))) = state.iter().find(|(k, _)| k == "properties") else {
+            panic!("row {i} has no properties")
+        };
+        let value = |name: &str| match p.iter().find(|(k, _)| k == name) {
+            Some((_, J::Str(s))) => s.clone(),
+            _ => panic!("row {i} has no {name}"),
+        };
+        (value("alpha"), value("axis"))
+    };
+    let own = |a: &str, b: &str| (a.to_owned(), b.to_owned());
+    // `alpha` slowest, then `axis`: the first name varies slowest, as in vanilla.
+    assert_eq!(
+        (2..6).map(properties).collect::<Vec<_>>(),
+        [
+            own("false", "x"),
+            own("false", "y"),
+            own("true", "x"),
+            own("true", "y")
+        ]
+    );
+    // The default is the template's default state with every declared property at its default.
+    assert_eq!(
+        doc.get("defaults").unwrap().get("testmod:test"),
+        Some(&J::Num(2.into()))
+    );
+    fs::remove_dir_all(&base).unwrap();
+    fs::remove_dir_all(base.parent().unwrap().join("mod0")).ok();
+}
+
+/// `state_order` over the template's and the declared properties together.
+#[test]
+fn block_states_are_laid_out_in_vanilla_order() {
+    let p = |name: &str, len: u32| (name.to_owned(), len);
+    // Every declared name after the template's: the template's states times the combinations,
+    // as before, so ids of existing blocks do not move.
+    let order = state_order(&[p("axis", 2)], &[p("lit", 2)]);
+    assert_eq!(order, [(0, 0), (0, 1), (1, 0), (1, 1)]);
+    // No declared property, or no template property: the identity, whichever side it is on.
+    assert_eq!(state_order(&[p("axis", 3)], &[]), [(0, 0), (1, 0), (2, 0)]);
+    assert_eq!(state_order(&[], &[p("lit", 2)]), [(0, 0), (0, 1)]);
+    assert_eq!(state_order(&[], &[]), [(0, 0)]);
+    // `bites` (4 values) before `facing` (4 values): the declared one slowest.
+    let order = state_order(&[p("facing", 4)], &[p("bites", 4)]);
+    assert_eq!(order.len(), 16);
+    assert!(
+        order
+            .iter()
+            .enumerate()
+            .all(|(j, &(s, c))| (s, c) == (j as u32 % 4, j as u32 / 4))
+    );
+    // Interleaved: `b` between the template's `a` and `c`. a (2), b (2), c (3), a slowest.
+    let order = state_order(&[p("a", 2), p("c", 3)], &[p("b", 2)]);
+    assert_eq!(order.len(), 12);
+    // Template state = a * 3 + c, combo = b.
+    assert_eq!(order[0], (0, 0));
+    assert_eq!(order[1], (1, 0));
+    assert_eq!(order[3], (0, 1));
+    assert_eq!(order[6], (3, 0));
+    assert_eq!(order[11], (5, 1));
+    // Every pair appears once.
+    let mut seen = order.clone();
+    seen.sort_unstable();
+    seen.dedup();
+    assert_eq!(seen.len(), 12);
+}
+
 /// The declared default comes first in the run, so its id is the block's
 /// default with no arithmetic of its own.
 #[test]
@@ -3406,4 +3554,99 @@ fn content_biomes_join_bundles_tags_and_modifiers_without_replacing_terrain() {
     assert!(bundle("biome_tags")["climatepack:forests"].contains("climatepack:woodland"));
     assert!(!out.join("worldgen/densities.json").exists());
     fs::remove_dir_all(scratch).unwrap();
+}
+
+#[test]
+#[ignore = "full content root: CI and pr_ready run it"]
+fn blocks_and_items_declared_in_code_get_ids() {
+    use horizon_mods::content::{Block, Item};
+    let Some(base) = prepared() else {
+        return;
+    };
+    let scratch = std::env::temp_dir().join(format!("horizon-mod-declared-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&scratch);
+    let known = known_components(&base).unwrap();
+    let block = |id: &str| Block {
+        id: id.into(),
+        template: "minecraft:oak_log".into(),
+        item: true,
+        ..Block::default()
+    };
+    let wrench = Item {
+        id: "gears:wrench".into(),
+        template: "minecraft:stick".into(),
+        max_stack_size: Some(1),
+        ..Item::default()
+    };
+    let mut mods = vec![ruby_mod(&scratch.join("ruby"))];
+    let errors = accept_declared(
+        &mut mods,
+        &[block("ruby:ruby_log"), block("gears:shaft")],
+        &[wrench],
+        &known,
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+    assert_eq!(mods.len(), 2);
+    assert!(
+        mods[0]
+            .content
+            .blocks
+            .iter()
+            .any(|b| b.id == "ruby:ruby_log")
+    );
+    assert_eq!(mods[1].id, "gears");
+    // A namespace another mod owns, and a clash with a file's block, are refused whole.
+    let refused = accept_declared(
+        &mut mods,
+        &[block("ruby:ruby_block"), block("ruby:ruby_post")],
+        &[],
+        &known,
+    );
+    assert_eq!(refused.len(), 1, "{refused:?}");
+    assert!(
+        !mods[0]
+            .content
+            .blocks
+            .iter()
+            .any(|b| b.id == "ruby:ruby_post")
+    );
+
+    let root = resource_root(&base, &mods, &scratch.join("cache")).unwrap();
+    let vanilla = Assets::load(&base).unwrap();
+    let assets = Assets::load(&root).unwrap();
+    let n = vanilla.registry.len() as u32;
+    let log_states = (0..n)
+        .filter(|&s| vanilla.registry.state(BlockStateId(s)).unwrap().name == "minecraft:oak_log")
+        .count() as u32;
+    // Sorted by mod, then block: gears:shaft, then ruby's ruby_block, ruby_door, ruby_glass, ruby_log.
+    let shaft = (n..assets.registry.len() as u32)
+        .find(|&s| assets.registry.state(BlockStateId(s)).unwrap().name == "gears:shaft")
+        .unwrap();
+    assert_eq!(shaft, n);
+    assert!(assets.registry.default_state("ruby:ruby_log").is_some());
+    assert_eq!(
+        assets.registry.len() as u32,
+        n + log_states + 1 + 64 + 1 + log_states
+    );
+    let ids = horizon_protocol::registry::Builtin::load(&root.join("registries.json")).unwrap();
+    for item in ["gears:shaft", "gears:wrench", "ruby:ruby_log"] {
+        assert!(
+            ids.get("minecraft:item").unwrap().id(item).is_some(),
+            "{item}"
+        );
+    }
+    let facts = BlockFacts::load(&root, assets.registry).unwrap();
+    let items = Items::load(&root, assets.registry, &facts, &PackOverlay::NONE).unwrap();
+    assert_eq!(items.items["gears:wrench"].max_stack, 1);
+    assert!(items.items["gears:shaft"].block.is_some());
+    // The same declarations reuse the root; others build a new one.
+    assert_eq!(
+        resource_root(&base, &mods, &scratch.join("cache")).unwrap(),
+        root
+    );
+    let stamp = fs::read(root.join(STAMP)).unwrap();
+    mods[1].content.items[0].max_stack_size = Some(2);
+    resource_root(&base, &mods, &scratch.join("cache")).unwrap();
+    assert_ne!(fs::read(root.join(STAMP)).unwrap(), stamp);
+    let _ = fs::remove_dir_all(&scratch);
 }

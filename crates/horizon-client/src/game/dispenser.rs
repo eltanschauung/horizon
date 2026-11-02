@@ -13,6 +13,8 @@ use horizon_client::{
     particles::{ParticleOptions, ParticleType},
     projectiles::{Projectile, ProjectileKind},
 };
+// Its old home, for mixin code that names it here.
+pub(super) use horizon_client::mod_api::NativeDispensed;
 use horizon_core::{
     geometry::{Aabb, Direction, Vec3},
     position::BlockPos,
@@ -98,10 +100,6 @@ fn shrink(mut stack: ItemStack) -> Option<ItemStack> {
 }
 /// A dispenser's answer: the slot's new content and the level event played.
 type Dispensed = (Option<ItemStack>, i32);
-
-/// A dispenser hook's answer: the slot's remainder (None empties it) and the
-/// level event to play, `CLICK` (1000), `FAIL` (1001) or 0 for none.
-pub(super) type NativeDispensed = (Option<ItemStack>, i32);
 
 /// None keeps vanilla's behaviour; an explicit empty remainder consumes the stack.
 fn mod_dispensed(answer: Option<NativeDispensed>) -> Option<Dispensed> {
@@ -1377,7 +1375,7 @@ impl Game<'_> {
             );
         } else if &*name == "minecraft:tnt" {
             if self.ui.rules.bool("tnt_explodes") {
-                self.spawn_primed_tnt(target_pos, false);
+                self.spawn_primed_tnt(target_pos, false, None, None);
                 self.with_level(|b, level, ticks| b.remove_block(level, ticks, target_pos, false));
                 self.process_level_events()?;
             } else {
@@ -1441,7 +1439,7 @@ impl Game<'_> {
         // new PrimedTnt(level, x + 0.5, y, z + 0.5, null), its sound and ENTITY_PLACE.
         let target = Self::pos_of(front);
         let rot = self.world.random.next_double() * f64::from(std::f32::consts::TAU);
-        self.add_primed_tnt(target, rot, 80);
+        self.add_primed_tnt(target, rot, 80, None, None);
         self.audio.play(
             "minecraft:entity.tnt.primed",
             Some([

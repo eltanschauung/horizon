@@ -57,8 +57,8 @@ pub(super) struct Boat {
     above_bubble_column: bool,
     /// `AbstractBoat.bubbleColumnDirectionIsDown`.
     bubble_down: bool,
-    /// A bubble column's drag asked a rider the server can't move itself (a
-    /// player) to get out: `guest_vehicle_tick` takes it (`ejectPassengers`).
+    /// The server asked a rider whose client moves it (a player) to get out:
+    /// `guest_vehicle_tick` honors it (`Entity.ejectPassengers`).
     pub eject_riders: bool,
     /// `Entity.tickCount`, counted where the wobble is (a client's tick).
     tick_count: i32,
@@ -70,6 +70,8 @@ pub(super) struct Boat {
     pub hurt_time: i32,
     pub hurt_dir: i32,
     pub damage: f32,
+    /// `Entity.noGravity` (`NoGravity` in its save).
+    pub no_gravity: bool,
     pub paddles: [f32; 2],
     pub paddling: [bool; 2],
     /// left, right, up, down
@@ -101,6 +103,17 @@ pub(super) const BUBBLE_UP_EVENT: i8 = 72;
 pub(super) const WIDTH: f64 = 1.375;
 pub(super) const HEIGHT: f64 = 0.5625;
 impl Boat {
+    /// `AbstractBoat.tick`: passengers lose control after 60 consecutive
+    /// underwater ticks; any other status resets the counter.
+    fn tick_submersion(&mut self) {
+        self.out_of_control =
+            if matches!(self.status, Status::UnderWater | Status::UnderFlowingWater) {
+                self.out_of_control + 1.0
+            } else {
+                0.0
+            };
+    }
+
     pub fn new(id: u32, wood: Arc<str>, position: Vec3, yaw: f32) -> Self {
         Self {
             id,
@@ -127,6 +140,7 @@ impl Boat {
             hurt_time: 0,
             hurt_dir: 1,
             damage: 0.0,
+            no_gravity: false,
             paddles: [0.0; 2],
             paddling: [false; 2],
             input: [false; 4],
@@ -559,19 +573,26 @@ impl Game<'_> {
         }
         b.old_status = b.status;
         b.status = self.boat_status(&mut b);
-        b.out_of_control = if matches!(b.status, Status::UnderWater | Status::UnderFlowingWater) {
-            b.out_of_control + 1.0
-        } else {
-            0.0
-        };
+        b.tick_submersion();
         b.hurt_time = (b.hurt_time - 1).max(0);
         b.damage = (b.damage - 1.0).max(0.0);
         if !controlled {
             b.paddling = [false; 2];
             b.input = [false; 4];
         }
+        // `Entity.baseTick`: the boat is immersed and pushed by the current it
+        // sits in (`isPushedByFluid`), before `floatBoat` scales the velocity.
+        let _ = horizon_client::entities::update_entity_fluids(
+            b.bounds(),
+            b.position,
+            b.position.y + HEIGHT,
+            &mut b.velocity,
+            &self.world,
+            &self.res.motion().fluids,
+        );
         // floatBoat
-        let mut vspeed = -0.04;
+        // `-getGravity()`: none with NoGravity.
+        let mut vspeed = if b.no_gravity { 0.0 } else { -0.04 };
         let mut buoyancy = 0.0;
         let inv_friction: f32;
         let obstacles = self.boat_move_obstacles(&b);
@@ -713,50 +734,94 @@ impl Game<'_> {
     pub(super) fn tick_boats(&mut self) {
         // ServerLevel.tick: only entities in entity-ticking chunks tick.
         let ticking = self.entity_ticking_area();
+        let mut round = self.native_tick_round();
         // A server player's boat is driven by its client (lan_vehicles.rs).
         let driven = self.guest_vehicles();
-        for i in 0..self.boats.len() {
-            let p = self.boats[i].position;
-            if Some(self.boats[i].id) == self.riding
-                || driven.contains(&self.boats[i].id)
-                || !ticking(p.x.floor() as i32, p.z.floor() as i32)
-            {
-                // Its rider's client moves it, but the lead still ticks.
-                if ticking(p.x.floor() as i32, p.z.floor() as i32) && self.remote.is_none() {
-                    let mut b = self.boats[i].clone();
-                    self.tick_boat_leash(&mut b);
-                    self.boats[i] = b;
-                }
-                continue;
-            }
-            let b = self.boats[i].clone();
-            self.boats[i] = self.tick_boat(b, false);
-        }
-        // AbstractBoat.tick's applyEffectsFromBlocks, on the server for every
-        // boat, the client-driven ones too.
+        // EntityTickEvent.Post comes once AbstractBoat.tick is over, after the
+        // passes of `boat_server_passes` (lava, ejection, bubbles, contacts),
+        // and before the next boat ticks, as `ServerLevel.tickNonPassenger`.
+        // A pass (lava breaks a boat) or a mod's hook may remove boats: the next one is found
+        // after this one by its id, so none is skipped or ticked twice.
         let mut i = 0;
         while i < self.boats.len() {
-            let p = self.boats[i].position;
-            let skip = Some(self.boats[i].id) == self.riding
-                || !ticking(p.x.floor() as i32, p.z.floor() as i32);
-            if skip || !self.boat_lava_tick(i) {
-                i += 1;
+            let id = self.boats[i].id;
+            'boat: {
+                let p = self.boats[i].position;
+                if Some(id) == self.riding
+                    || driven.contains(&id)
+                    || !ticking(p.x.floor() as i32, p.z.floor() as i32)
+                {
+                    // Its rider's client moves it, but the lead still ticks.
+                    if ticking(p.x.floor() as i32, p.z.floor() as i32) && self.remote.is_none() {
+                        let mut b = self.boats[i].clone();
+                        self.tick_boat_leash(&mut b);
+                        self.boats[i] = b;
+                    }
+                    self.boat_server_passes(id, &driven, &ticking, &round);
+                    break 'boat;
+                }
+                let kind = if round.listening() {
+                    self.boats[i].entity_type()
+                } else {
+                    String::new()
+                };
+                if !self.native_tick_pre_one(&mut round, id, &kind) {
+                    self.boat_server_passes(id, &driven, &ticking, &round);
+                    break 'boat;
+                }
+                // The hook may have removed boats.
+                let Some(i) = Some(i)
+                    .filter(|&i| self.boats.get(i).is_some_and(|b| b.id == id))
+                    .or_else(|| self.boats.iter().position(|b| b.id == id))
+                else {
+                    break 'boat;
+                };
+                let b = self.boats[i].clone();
+                self.boats[i] = self.tick_boat(b, false);
+                self.boat_server_passes(id, &driven, &ticking, &round);
+                self.native_tick_post_one(&round, id, &kind);
             }
+            i = match self.boats.get(i) {
+                Some(b) if b.id == id => i + 1,
+                _ => self
+                    .boats
+                    .iter()
+                    .position(|b| b.id == id)
+                    .map_or(i, |k| k + 1),
+            };
         }
-        // The rest of AbstractBoat.tick on the server, for every boat: the
-        // passengers of one under water too long get out, and it picks up or
-        // pushes what it touches.
-        for i in 0..self.boats.len() {
-            let p = self.boats[i].position;
-            if !ticking(p.x.floor() as i32, p.z.floor() as i32) {
-                continue;
-            }
-            if self.boats[i].out_of_control >= 60.0 {
-                self.eject_boat_mobs(i, false);
-            }
-            self.boat_bubble_tick(i);
-            self.boat_contacts(i);
+    }
+    /// The rest of `AbstractBoat.tick` on the server, for every boat, the
+    /// client-driven ones too: `applyEffectsFromBlocks` (lava breaks a boat
+    /// at once), the passengers of one under water too long get out, and it
+    /// picks up or pushes what it touches.
+    fn boat_server_passes(
+        &mut self,
+        id: u32,
+        driven: &[u32],
+        ticking: &impl Fn(i32, i32) -> bool,
+        round: &super::native_ticks::TickRound,
+    ) {
+        let Some(i) = self.boats.iter().position(|b| b.id == id) else {
+            return;
+        };
+        let p = self.boats[i].position;
+        if !ticking(p.x.floor() as i32, p.z.floor() as i32) || round.canceled(id) {
+            return;
         }
+        if Some(id) != self.riding && self.boat_lava_tick(i) {
+            return;
+        }
+        // `AbstractBoat.tick` counts submersion on the server even when
+        // its controlling client owns the boat's movement.
+        if driven.contains(&id) {
+            self.refresh_boat_status(i);
+        }
+        if self.boats[i].out_of_control >= 60.0 {
+            self.eject_boat_riders(i);
+        }
+        self.boat_bubble_tick(i);
+        self.boat_contacts(i);
     }
     /// `Entity.canSimulateMovement`: for a boat (`AUTHORITATIVE_SIDE`) a
     /// server leaves the boat its player drives to that player's client, and a
@@ -776,6 +841,7 @@ impl Game<'_> {
         let mut probe = Boat::new(b.id, b.wood.clone(), b.position, b.yaw);
         let status = self.boat_status(&mut probe);
         self.boats[i].status = status;
+        self.boats[i].tick_submersion();
     }
     /// `BubbleColumnBlock.entityInside`: the bubble columns boat `i` touches
     /// (its box deflated by 1e-5 as `Entity.checkInsideBlocks` does), in x, y,
@@ -882,8 +948,8 @@ impl Game<'_> {
             v.y = 0.6;
         }
     }
-    /// `Entity.ejectPassengers`: for a down column the mobs get out here, this
-    /// window's player gets out, and a server's player is asked to
+    /// `Entity.ejectPassengers`: the mobs get out here, this window's player
+    /// gets out, and a server's player is asked to
     /// (`guest_vehicle_tick` lets it out through its client).
     fn eject_boat_riders(&mut self, i: usize) {
         self.eject_boat_mobs(i, false);
@@ -918,10 +984,6 @@ impl Game<'_> {
     /// window is its own client.
     fn boat_bubble_tick(&mut self, i: usize) {
         let id = self.boats[i].id;
-        // The boat a server's player drives is not ticked here: its status is.
-        if self.guest_vehicles().contains(&id) {
-            self.refresh_boat_status(i);
-        }
         // An ejection nobody took (its player left the boat first) is void.
         if !self.guest_rides(id) {
             self.boats[i].eject_riders = false;
@@ -1037,7 +1099,18 @@ impl Game<'_> {
     /// `getDismountLocationForPassenger`: in front of the player if there is
     /// floor there, else on top of the boat.
     pub(super) fn dismount(&mut self, i: usize) {
+        let id = self.boats[i].id;
+        if self.riding == Some(id) && !self.native_may_leave(id) {
+            return;
+        }
         self.riding = None;
+        // `AbstractBoat.tick`'s non-authoritative branch: the copy of a boat
+        // that no player of this side drives drops its cached motion
+        // (`setDeltaMovement(Vec3.ZERO)`, `deltaRotation = 0`) and is not
+        // moved, so a boat is at a standstill when its rider gets out instead
+        // of coasting on the velocity of the ride that just ended.
+        self.boats[i].velocity = Vec3::ZERO;
+        self.boats[i].delta_rotation = 0.0;
         let target = self.boat_dismount_target(i, 0.6, self.yaw);
         if let Some(p) = self.player.as_mut() {
             p.position = target;
@@ -1119,7 +1192,7 @@ impl Game<'_> {
             if let Some((h, _)) = self.fluid_height_of(x, y, z, None)
                 && p[1] <= f64::from(y) + f64::from(h)
             {
-                fluid = Some(([p[0], f64::from(y) + f64::from(h), p[2]], t));
+                fluid = Some((fluid_hit_point(p, y, h), t));
                 break;
             }
             t += 0.05;
@@ -1226,6 +1299,9 @@ impl Game<'_> {
         {
             return false;
         }
+        if !self.native_may_board(self.boats[i].id) {
+            return true;
+        }
         self.riding = Some(self.boats[i].id);
         self.yaw = self.boats[i].yaw;
         // ServerPlayer.startRiding.
@@ -1291,6 +1367,8 @@ impl Game<'_> {
         let (damage, _, _, magic) = self.melee_damage(&kind, false);
         self.hurt_boat(i, damage, self.creative);
         self.vehicle_attack_sounds(area, magic.then_some(id));
+        // Player.onAttack: the hit starts the attack strength again.
+        self.attack_ticks = 0;
         self.swing_arm();
         true
     }
@@ -1454,9 +1532,35 @@ impl Game<'_> {
     }
 }
 
+/// Where a fluid pick lands in the cell the ray sample `p` is in. Vanilla's
+/// `ClipContext.Fluid.ANY` clips against the fluid shape: a full-height cell
+/// (the same fluid above it) is a full cube, so the hit is the ray's own
+/// point and a boat placed under water stays at the eye; a partial cell is
+/// clipped to its surface.
+fn fluid_hit_point(p: [f64; 3], y: i32, h: f32) -> [f64; 3] {
+    if h >= 1.0 {
+        p
+    } else {
+        [p[0], f64::from(y) + f64::from(h), p[2]]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `VoxelShape.clip` on a full-cube fluid cell keeps the true hit point
+    /// (a ray starting inside hits at `from + delta * 0.001`); only a partial
+    /// cell is clipped to its surface.
+    #[test]
+    fn a_full_height_fluid_cell_keeps_the_ray_point_and_a_partial_one_snaps_to_its_surface() {
+        let eye = [0.5, 3.62, 0.5];
+        assert_eq!(fluid_hit_point(eye, 3, 1.0), eye);
+        assert_eq!(
+            fluid_hit_point(eye, 3, 8.0 / 9.0),
+            [0.5, 3.0 + f64::from(8.0f32 / 9.0), 0.5]
+        );
+    }
 
     fn boat() -> Boat {
         Boat::new(1, Arc::from("oak"), Vec3::ZERO, 0.0)

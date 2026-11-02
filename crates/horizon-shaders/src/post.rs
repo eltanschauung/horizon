@@ -210,6 +210,8 @@ pub struct PostProgram {
     pub flips: Vec<(u32, bool)>,
     /// How a gbuffers program's output blends into its buffers; `None` writes them.
     pub blend: Option<Blend>,
+    /// Per-buffer blend overrides, keyed by colortex index (not output location).
+    pub buffer_blends: Vec<(u32, Option<Blend>)>,
     /// Bit n: `colortex<n>MipmapEnabled` in its fragment stage, so buffer n's mip chain is
     /// regenerated right before it (6.1.7; not for gbuffers programs).
     pub mipmaps: u16,
@@ -385,6 +387,7 @@ pub struct Post {
     pub entities_translucent: Option<PostProgram>,
     /// What draws particles.
     pub particles: Option<PostProgram>,
+    pub damaged_block: Option<PostProgram>,
     /// What draws the game's clouds.
     pub clouds: Option<PostProgram>,
     /// What draws rain and snow, after deferred.
@@ -482,6 +485,7 @@ pub fn load_post(
         block: None,
         entities_translucent: None,
         particles: None,
+        damaged_block: None,
         clouds: None,
         weather: None,
         hand: None,
@@ -508,6 +512,7 @@ pub fn load_post(
         config: Config::default(),
         notes: Vec::new(),
     };
+    let options = crate::with_options(pack, macros);
     for e in &properties.entries {
         if let Some(n) = e.key.strip_prefix("bufferObject.") {
             match (n.parse(), BufferObject::parse(&e.value)) {
@@ -517,7 +522,7 @@ pub fn load_post(
             continue;
         }
         if let Some(name) = e.key.strip_prefix("image.") {
-            match CustomImage::parse(name, &e.value) {
+            match CustomImage::parse(name, &options.expand(&e.value)) {
                 Some(i) => post.images.push(i),
                 None => post.notes.push(format!("`{}`: not an image", e.key)),
             }
@@ -542,7 +547,7 @@ pub fn load_post(
         properties,
         macros,
         switches: crate::switches_on(pack),
-        options: crate::with_options(pack, macros),
+        options,
         geometry: None,
         post: &mut post,
     };
@@ -608,6 +613,19 @@ pub fn load_post(
         ),
         None => (None, None),
     };
+    let damaged_block = inputs
+        .entities
+        .as_ref()
+        .and_then(|i| gbuffers(&["gbuffers_damagedblock"], Group::Gbuffers, i))
+        .map(|mut p| {
+            p.blend = blend(properties, &p.name).unwrap_or(Some([
+                Factor::DstColor,
+                Factor::SrcColor,
+                Factor::One,
+                Factor::Zero,
+            ]));
+            p
+        });
     // Translucent entities and particles blend (OQ-23). Particles keep vanilla's alpha cut at
     // 0.1; translucent entities lose only fully transparent texels (a shadow fades out).
     let translucent =
@@ -681,6 +699,7 @@ pub fn load_post(
     loader.post.block = block;
     loader.post.entities_translucent = entities_translucent;
     loader.post.particles = particles;
+    loader.post.damaged_block = damaged_block;
     loader.post.clouds = clouds;
     loader.post.weather = weather;
     loader.post.hand = hand;
@@ -722,6 +741,7 @@ fn load_shadow(
         &post.block,
         &post.entities_translucent,
         &post.particles,
+        &post.damaged_block,
         &post.clouds,
         &post.weather,
         &post.hand,
@@ -859,6 +879,7 @@ impl Loader<'_> {
             }
             let compute = self.compute(&name);
             return (!compute.is_empty()).then(|| PostProgram {
+                buffer_blends: buffer_blends(self.properties, &name),
                 flips: flips(self.properties, &name),
                 name,
                 group,
@@ -944,6 +965,7 @@ impl Loader<'_> {
             _ => Vec::new(),
         };
         Some(PostProgram {
+            buffer_blends: buffer_blends(self.properties, &name),
             flips: flips(self.properties, &name),
             name,
             group,
@@ -1042,6 +1064,7 @@ impl Loader<'_> {
             .unwrap_or(buffers.len());
         buffers.truncate(kept);
         Some(PostProgram {
+            buffer_blends: buffer_blends(self.properties, &name),
             flips: flips(self.properties, &name),
             name,
             group,
@@ -1166,6 +1189,23 @@ fn blend(properties: &Properties, program: &str) -> Option<Option<Blend>> {
     Some(Some(factors.try_into().ok()?))
 }
 
+/// Blend overrides apply to buffer names even when DRAWBUFFERS remaps locations.
+fn buffer_blends(properties: &Properties, program: &str) -> Vec<(u32, Option<Blend>)> {
+    let prefix = format!("blend.{program}.");
+    properties
+        .entries
+        .iter()
+        .filter_map(|e| {
+            let buffer = config::buffer_index(e.key.strip_prefix(&prefix)?)?;
+            let value = blend(
+                properties,
+                &format!("{program}.{}", e.key.strip_prefix(&prefix)?),
+            )?;
+            Some((buffer as u32, value))
+        })
+        .collect()
+}
+
 /// `flip.<program>.<buffer>=<bool>` keys of one program.
 fn flips(properties: &Properties, program: &str) -> Vec<(u32, bool)> {
     let prefix = format!("flip.{program}.");
@@ -1187,6 +1227,54 @@ fn flips(properties: &Properties, program: &str) -> Vec<(u32, bool)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn image_dimensions_expand_default_and_chosen_options() {
+        let bytes =
+            crate::pack::tests::zip(&[("shaders/options.glsl", "#define SIZE 16 // [8 16]\n")]);
+        for (choice, expected) in [(None, [16, 16]), (Some("8"), [8, 8])] {
+            let mut pack = Pack::from_zip_bytes("image.zip", bytes.clone()).unwrap();
+            if let Some(value) = choice {
+                pack = pack.with_chosen(std::collections::BTreeMap::from([(
+                    "SIZE".into(),
+                    value.into(),
+                )]));
+            }
+            let macros = Macros::standard();
+            let properties = Properties::parse(
+                "image.grid = none RGBA RGBA8 BYTE false false SIZE SIZE",
+                &macros,
+            );
+            let post = load_post(&pack, "", &properties, &macros, &GameInputs::default());
+            assert!(post.notes.is_empty(), "{:?}", post.notes);
+            assert_eq!(post.images.len(), 1);
+            assert_eq!(post.images[0].size, ImageSize::Absolute(expected));
+        }
+    }
+
+    #[test]
+    fn image_dimensions_keep_literals_and_reject_unknown_macros() {
+        let pack = Pack::from_zip_bytes(
+            "image.zip",
+            crate::pack::tests::zip(&[("shaders/placeholder.glsl", "")]),
+        )
+        .unwrap();
+        let macros = Macros::standard();
+        let properties = Properties::parse(
+            "image.grid = none RGBA RGBA8 BYTE false false 8 16",
+            &macros,
+        );
+        let post = load_post(&pack, "", &properties, &macros, &GameInputs::default());
+        assert!(post.notes.is_empty(), "{:?}", post.notes);
+        assert_eq!(post.images[0].size, ImageSize::Absolute([8, 16]));
+        let properties = Properties::parse(
+            "image.grid = none RGBA RGBA8 BYTE false false UNKNOWN UNKNOWN",
+            &macros,
+        );
+        let post = load_post(&pack, "", &properties, &macros, &GameInputs::default());
+        assert!(post.images.is_empty());
+        assert!(!post.notes.is_empty());
+    }
     use crate::pack::tests::zip;
 
     const VSH: &str = "#version 120\nvarying vec2 uv;\nvoid main() {\n\
@@ -1589,6 +1677,35 @@ mod tests {
         assert_eq!(
             post.config.buffers[2].format,
             crate::Format::parse("RGBA16F").unwrap()
+        );
+    }
+}
+
+#[cfg(test)]
+mod buffer_blend_tests {
+    use super::*;
+    #[test]
+    fn buffer_blends_use_colortex_numbers_and_preserve_explicit_off() {
+        let props = Properties::parse(
+            "blend.gbuffers_water=off\nblend.gbuffers_water.colortex13=ONE ONE_MINUS_SRC_ALPHA ONE ONE_MINUS_SRC_ALPHA\nblend.gbuffers_water.colortex2=off\n",
+            &Macros::standard(),
+        );
+        let overrides = buffer_blends(&props, "gbuffers_water");
+        assert_eq!(blend(&props, "gbuffers_water"), Some(None));
+        assert_eq!(
+            overrides,
+            vec![
+                (
+                    13,
+                    Some([
+                        Factor::One,
+                        Factor::OneMinusSrcAlpha,
+                        Factor::One,
+                        Factor::OneMinusSrcAlpha
+                    ])
+                ),
+                (2, None)
+            ]
         );
     }
 }

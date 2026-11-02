@@ -508,6 +508,15 @@ impl Chunk {
         }
         previous
     }
+    /// Section `s`'s block states replaced whole (a bulk edit): its storage
+    /// compacted, and the heightmaps built again on their next read.
+    pub fn replace_blocks(&mut self, s: usize, values: &[u32; 4096]) {
+        let section = Arc::make_mut(&mut self.sections[s]);
+        section.blocks = Section::from_blocks(values);
+        section.compact();
+        self.surface = OnceLock::new();
+        self.motion_blocking = OnceLock::new();
+    }
     /// `getHeight(Heightmap.Types.WORLD_SURFACE, x, z)` (`x`, `z` within the
     /// chunk): one above the highest block that isn't `air`, or the column's
     /// minimum Y.
@@ -635,6 +644,10 @@ impl RolledLoot {
 /// Save data loaded with a chunk that Horizon keeps but does not simulate.
 #[derive(Clone, Debug, Default)]
 pub struct ChunkExtras {
+    /// Server-owned mod data attached to this chunk.
+    pub attachments: horizon_world::attachments::Attachments,
+    /// Attachment maps of the chunk's block entities, on a save snapshot.
+    pub block_entity_attachments: Vec<((i32, i32, i32), horizon_world::attachments::Attachments)>,
     /// Chunk root keys written back as loaded (structures, PostProcessing,
     /// InhabitedTime, blending data, ...).
     pub root: Compound,

@@ -47,7 +47,7 @@ pub(crate) mod environment;
 mod fluids;
 pub use fluids::{
     BubbleColumn, FluidResources, FluidTags, LAVA, PlayerFluids, RiddenBoat, WATER,
-    bubble_column_at, bubble_column_push,
+    bubble_column_at, bubble_column_push, bubble_column_push_over, bubble_column_surfaces,
 };
 
 pub struct MotionResources {
@@ -344,6 +344,10 @@ pub struct PlayerMotion {
     pub local_crouching: bool,
     pub pose: crate::pose::Pose,
     pub dimensions: crate::pose::Dimensions,
+    /// The `minecraft:scale` the dimensions were last built with
+    /// (`Entity.refreshDimensions`), for the poses the body takes before it
+    /// next refreshes.
+    pub scale: f32,
     pub speed: f32,
     /// `LocalPlayer.itemUseSpeedMultiplier` while using an item (not riding).
     pub item_use_speed: Option<f32>,
@@ -559,6 +563,7 @@ impl PlayerMotion {
             local_crouching: false,
             pose: crate::pose::Pose::Standing,
             dimensions: crate::pose::Pose::Standing.dimensions(1.0),
+            scale: 1.0,
             swimming: false,
             is_passenger: false,
             fire_ticks: -20,
@@ -717,6 +722,18 @@ impl PlayerMotion {
     /// player's `attributes` list (LivingEntity.addAdditionalSaveData), each
     /// instance's id, base and permanent modifiers.
     pub fn saved_attributes(&self) -> horizon_world::nbt::Tag {
+        self.packed_attributes(true)
+    }
+    /// `ServerPlayer.restoreFrom`: the attributes a player's new body takes
+    /// over from the old one. A body that comes back from a death takes the
+    /// base values only (`assignBaseValues`); the same player in another
+    /// level (`ServerPlayer.teleport`) is the same entity, with its permanent
+    /// modifiers too (`restoreAll`, `assignPermanentModifiers`). A scale of
+    /// 0.1 is still 0.1 after a respawn or a trip through a portal (#3684).
+    pub fn carried_attributes(&self, restore_all: bool) -> horizon_world::nbt::Tag {
+        self.packed_attributes(restore_all)
+    }
+    fn packed_attributes(&self, modifiers: bool) -> horizon_world::nbt::Tag {
         use horizon_client_core::nbt_value::string;
         use horizon_world::nbt::Tag;
         let list = self
@@ -729,7 +746,7 @@ impl PlayerMotion {
                     ("base", Tag::Double(packed.base.to_bits())),
                 ];
                 // `modifiers` is an optional field whose default is the empty list.
-                if !packed.modifiers.is_empty() {
+                if modifiers && !packed.modifiers.is_empty() {
                     let modifiers = packed
                         .modifiers
                         .iter()
@@ -1716,8 +1733,13 @@ impl MotionWorld<'_, '_, '_> {
                     // HoneyBlock.entityInside: a server's player slides too, so
                     // its fall distance resets (its client moves it).
                     "minecraft:honey_block" => self.honey_block_inside(p)?,
-                    // PowderSnowBlock.entityInside's FREEZE.
-                    "minecraft:powder_snow" if damage_only => entered.push((step, p)),
+                    // PowderSnowBlock.entityInside's FREEZE and its server
+                    // snowflake (`ServerLevel.sendParticles`). The slowing is
+                    // the client's (`makeStuckInBlock`).
+                    "minecraft:powder_snow" if damage_only => {
+                        self.powder_snow_snowflake(p);
+                        entered.push((step, p));
+                    }
                     _ => {}
                 }
                 if damage_only {
@@ -1884,6 +1906,24 @@ impl MotionWorld<'_, '_, '_> {
             return Ok(());
         }
         self.make_stuck_in_block(Vec3::new(f64::from(0.9_f32), 1.5, f64::from(0.9_f32)));
+        // `ServerLevel.sendParticles` is server-only (`!level.isClientSide()`).
+        if !self.player.client_side {
+            self.powder_snow_snowflake(p);
+        }
+        Ok(())
+    }
+    /// `PowderSnowBlock.entityInside`'s server particle: one snowflake at
+    /// the top of `p` when the player moved horizontally this tick.
+    fn powder_snow_snowflake(&mut self, p: BlockPos) {
+        let feet = BlockPos::containing(self.player.position);
+        if !self
+            .assets
+            .registry
+            .state(self.block(feet))
+            .is_some_and(|s| s.name == "minecraft:powder_snow")
+        {
+            return;
+        }
         // ServerPlayer.getKnownMovement: this tick's movement.
         let known = self.player.position.subtract(self.player.old_position);
         let random = &mut self.scene.random;
@@ -1900,7 +1940,6 @@ impl MotionWorld<'_, '_, '_> {
                 velocity: Vec3::new(f64::from(xa), f64::from(0.05_f32), f64::from(za)),
             });
         }
-        Ok(())
     }
     pub fn jump_from_ground(&mut self) -> Result<()> {
         living_motion::jump_from_ground(self)?;
@@ -3256,6 +3295,98 @@ mod tests {
         .controlled_simulation_tick(Default::default())
         .unwrap();
         assert_eq!(roses(&away), 0);
+    }
+
+    #[test]
+    fn walking_through_powder_snow_asks_for_a_snowflake() {
+        let root = std::env::var_os("HORIZON_TEST_RESOURCES")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../.local/horizon-client")
+                    .join(horizon_core::VANILLA_VERSION)
+            });
+        if !root.join("movement-properties.nbt").exists() {
+            return;
+        }
+        let assets = Assets::load(&root).unwrap();
+        let render = assets.reload(&root).unwrap();
+        let binding = crate::collisions::load(&root, assets.registry).unwrap();
+        let resources = MotionResources::load(&root, &assets).unwrap();
+        let mut scene = World::test_scene(&assets, &render, 1).unwrap();
+        let snow = assets
+            .registry
+            .default_state("minecraft:powder_snow")
+            .unwrap();
+        scene.set(20, 4, 20, snow).unwrap();
+        let at = Vec3::new(20.5, 4.0, 20.5);
+        let from = at.subtract(Vec3::new(0.2, 0.0, 0.0));
+        let snowflakes = |player: &PlayerMotion| {
+            player
+                .events
+                .iter()
+                .filter(|e| matches!(e, MotionEvent::Snowflake { .. }))
+                .count()
+        };
+        let mut player = PlayerMotion::new(&resources, at).unwrap();
+        let mut found = 0;
+        for seed in 0..64 {
+            scene.random = horizon_core::random::LegacyRandom::new(seed);
+            player.events.clear();
+            MotionWorld {
+                entities: &[],
+                player: &mut player,
+                scene: &mut scene,
+                assets: &assets,
+                collision_binding: &binding,
+                resources: &resources,
+            }
+            .server_block_damage(from)
+            .unwrap();
+            found = snowflakes(&player);
+            if found > 0 {
+                break;
+            }
+        }
+        assert!(
+            found > 0,
+            "a server's player walking through powder snow must send a snowflake"
+        );
+        if let MotionEvent::Snowflake { position, velocity } = &player
+            .events
+            .iter()
+            .find(|e| matches!(e, MotionEvent::Snowflake { .. }))
+            .unwrap()
+        {
+            assert_eq!(position.y, 5.0);
+            assert_eq!(velocity.y, f64::from(0.05_f32));
+        }
+        player.events.clear();
+        scene.random = horizon_core::random::LegacyRandom::new(1);
+        MotionWorld {
+            entities: &[],
+            player: &mut player,
+            scene: &mut scene,
+            assets: &assets,
+            collision_binding: &binding,
+            resources: &resources,
+        }
+        .server_block_damage(at)
+        .unwrap();
+        assert_eq!(snowflakes(&player), 0);
+        player.client_side = true;
+        player.events.clear();
+        MotionWorld {
+            entities: &[],
+            player: &mut player,
+            scene: &mut scene,
+            assets: &assets,
+            collision_binding: &binding,
+            resources: &resources,
+        }
+        .controlled_simulation_tick(Default::default())
+        .unwrap();
+        assert_eq!(snowflakes(&player), 0);
     }
 
     #[test]

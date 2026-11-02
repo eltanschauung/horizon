@@ -26,6 +26,7 @@ use horizon_core::{
     position::{BlockPos, ChunkPos},
     ticks::{SavedTick, TickPriority, TickTypeId},
 };
+use horizon_world::attachments::{ATTACHMENTS_KEY, attachment_compound};
 use horizon_world::{
     DATA_VERSION,
     chunk::BlockState,
@@ -184,7 +185,8 @@ impl SessionLock {
 /// (`FileFixerUpper`), then the DataFixers upgrades of every chunk, entity chunk,
 /// POI chunk, player, saved data, advancements and statistics file. Vanilla runs
 /// the latter as it reads each file; Horizon runs them all on opening, which reads
-/// the same data. Worlds older than the ported fixes (1.17) are refused.
+/// the same data, and region records still older in a world whose level.dat is
+/// current are upgraded as they are read (`upgrade_record`).
 pub fn upgrade_older_world(world: &Path) -> Result<()> {
     upgrade_older_world_with(
         world,
@@ -884,12 +886,15 @@ fn decode_mod_block_entity(id: String, tag: &Tag) -> Option<crate::containers::M
     } else {
         items.clear();
     }
-    Some(crate::containers::ModBlockEntity {
-        id,
-        nbt,
-        items,
-        data: Vec::new(),
-    })
+    Some(
+        crate::containers::ModBlockEntityFields {
+            id,
+            nbt,
+            items,
+            data: Vec::new(),
+        }
+        .into(),
+    )
 }
 pub fn decode_block_entity(tag: &Tag) -> Option<((i32, i32, i32), crate::containers::BlockEntity)> {
     use crate::containers::BlockEntity;
@@ -1442,6 +1447,18 @@ pub fn encode_with(
                 None => current,
             };
             let mut saved = crate::block_entity_nbt::canonical(&merged).unwrap_or(merged);
+            if let Some((_, attachments)) =
+                extras.and_then(|e| e.block_entity_attachments.iter().find(|(pos, _)| pos == p))
+                && let Tag::Compound(map) = &mut saved
+                && attachment_compound(map.get(&ATTACHMENTS_KEY.into())).is_ok()
+            {
+                let data = attachments.to_nbt();
+                if data.is_empty() {
+                    map.remove(&ATTACHMENTS_KEY.into());
+                } else {
+                    map.insert(ATTACHMENTS_KEY.into(), Tag::Compound(data));
+                }
+            }
             if let Some(r) = extras.and_then(|x| x.rolled_loot.iter().find(|r| r.pos == *p))
                 && let Tag::Compound(map) = &mut saved
                 && !r.restore(map)
@@ -1486,6 +1503,16 @@ pub fn encode_with(
         put(&mut root, key, value);
     }
     if let Some(Tag::Compound(map)) = Some(&mut root) {
+        if let Some(extras) = extras
+            && attachment_compound(map.get(&ATTACHMENTS_KEY.into())).is_ok()
+        {
+            let attachments = extras.attachments.to_nbt();
+            if attachments.is_empty() {
+                map.remove(&ATTACHMENTS_KEY.into());
+            } else {
+                map.insert(ATTACHMENTS_KEY.into(), Tag::Compound(attachments));
+            }
+        }
         map.entry("InhabitedTime".into()).or_insert(Tag::Long(0));
         map.entry("structures".into()).or_insert_with(|| {
             Tag::compound([
@@ -1702,6 +1729,12 @@ fn decode_column(
             }
             match decode_block_entity(e) {
                 Some(mut be) => {
+                    if let Ok(Some(data)) = attachment_compound(e.get(ATTACHMENTS_KEY)) {
+                        extras.block_entity_attachments.push((
+                            be.0,
+                            horizon_world::attachments::Attachments::from_nbt(data.clone()),
+                        ));
+                    }
                     if let Some(name) = text(e.get("CustomName")) {
                         chunk.block_names.push((be.0, name));
                     }
@@ -1716,6 +1749,9 @@ fn decode_column(
         }
     }
     if let Tag::Compound(map) = tag {
+        if let Ok(Some(data)) = attachment_compound(map.get(&ATTACHMENTS_KEY.into())) {
+            extras.attachments = horizon_world::attachments::Attachments::from_nbt(data.clone());
+        }
         extras.root = map
             .iter()
             .filter(|(k, _)| !GENERATED_KEYS.contains(&k.to_string_lossy().as_str()))
@@ -2154,10 +2190,18 @@ fn resolve_poi(
     let Record::Poi(chunk, tables) = record else {
         return Some(record.clone());
     };
-    let old = read_region_record(root, cache, "poi", x, z).unwrap_or_else(|e| {
-        log::warn!("Horizon: could not read the poi record of chunk {x} {z}: {e}");
-        None
-    });
+    let old = read_region_record(root, cache, "poi", x, z)
+        .and_then(|old| {
+            old.map(|mut old| {
+                upgrade_record(Folder::Poi, &mut old, || None)?;
+                Ok(old)
+            })
+            .transpose()
+        })
+        .unwrap_or_else(|e| {
+            log::warn!("Horizon: could not read the poi record of chunk {x} {z}: {e}");
+            None
+        });
     let tag = match (encode_poi(chunk, tables), old) {
         (Some(mut tag), Some(old)) => {
             keep_claims(&mut tag, &old);
@@ -2189,6 +2233,73 @@ fn read_region_record(
         Some(r) => Some(r.nbt(Limits::saved())?),
         None => None,
     })
+}
+/// The `__context` the chunk fixes read: the dimension and its generator type
+/// (`ChunkMap.getChunkDataFixContextTag`).
+struct DatafixContext {
+    dimension: String,
+    generator: Option<String>,
+}
+impl DatafixContext {
+    /// From a dimension folder made by [`dimension_dir`] and the world's
+    /// `world_gen_settings.dat`; None for a folder outside a world's `dimensions/`.
+    fn of(root: &Path) -> Option<Self> {
+        let mut parts = Vec::new();
+        let mut at = root;
+        while at.file_name()? != "dimensions" {
+            parts.push(at.file_name()?.to_str()?);
+            at = at.parent()?;
+        }
+        let world = at.parent()?;
+        let namespace = parts.pop()?;
+        if parts.is_empty() {
+            return None;
+        }
+        parts.reverse();
+        let dimension = format!("{namespace}:{}", parts.join("/"));
+        let generator = horizon_world::datafix::files::generators(world)
+            .ok()
+            .and_then(|g| g.into_iter().find(|(d, _)| *d == dimension))
+            .map(|(_, g)| g);
+        Some(Self {
+            dimension,
+            generator,
+        })
+    }
+}
+/// `SimpleRegionStorage.upgradeChunkTag`, as `ChunkMap.upgradeChunkTag` (chunks),
+/// `EntityStorage` and `SectionStorage.PackedChunk.parse` (POI) call it on every
+/// record they read: a world 26.3 has opened keeps the chunks nobody loaded since
+/// an older version in that version's format, and `upgrade_older_world` only runs
+/// for an older level.dat. A record without a DataVersion counts as -1 (POI: 1945).
+/// `context` is needed only for an older chunk; without one it stays as saved.
+fn upgrade_record<'a>(
+    folder: Folder,
+    record: &mut NamedTag,
+    context: impl FnOnce() -> Option<&'a DatafixContext>,
+) -> Result<()> {
+    use horizon_world::datafix::{self, schema::Ty};
+    let default = if folder == Folder::Poi { 1945 } else { -1 };
+    if number(record.tag.get("DataVersion")).unwrap_or(default) >= i64::from(DATA_VERSION) {
+        return Ok(());
+    }
+    let context = match folder {
+        Folder::Region => match context() {
+            Some(c) => Some(c),
+            None => return Ok(()),
+        },
+        _ => None,
+    };
+    let tag = &mut record.tag;
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match (folder, context) {
+        (Folder::Region, Some(c)) => {
+            datafix::update_chunk(tag, &c.dimension, c.generator.as_deref());
+        }
+        (Folder::Entities, _) => datafix::update_region_tag(Ty::EntityChunk, tag),
+        (Folder::Poi, _) => datafix::update_region_tag(Ty::PoiChunk, tag),
+        (Folder::Region, None) => {}
+    }))
+    .map_err(|_| "upgrading an older record failed".into())
 }
 /// Chunk and entity records waiting for the writer thread, by (entities?,
 /// x, z): reads see them before the region files do.
@@ -2252,6 +2363,8 @@ pub struct SaveDir {
     /// Saved chunks decoded for far terrain, shared by its sampling threads
     /// (`lod_surfaces_shared`), oldest first.
     lod_decoded: Mutex<LodDecoded>,
+    /// What older chunks are upgraded with, found on the first one read.
+    datafix_context: OnceLock<Option<DatafixContext>>,
 }
 fn is_forced_ticket(ticket: &Tag) -> bool {
     matches!(ticket.get("type"), Some(Tag::String(t)) if *t == JavaString::from("minecraft:forced"))
@@ -2275,6 +2388,59 @@ struct LodRegion {
 /// it was read show in the far view this long after.
 const LOD_REGION_TTL: std::time::Duration = std::time::Duration::from_secs(10);
 impl SaveDir {
+    /// This dimension's server-owned mod attachments: `data/horizon/attachments.dat`, Horizon's
+    /// own namespace. A file that doesn't read is moved aside to `attachments.dat.corrupt`, with
+    /// a warning, and the level opens without them (as vanilla's `SavedDataStorage` starts a
+    /// saved data over when its file is broken), so the next save can't overwrite it.
+    pub fn load_attachments(&self) -> horizon_world::attachments::Attachments {
+        let path = self.attachments_path();
+        let data = match try_read_dat(&path) {
+            Err(DatIssue::Missing) => return Default::default(),
+            Ok(root) => match root.get("data") {
+                Some(Tag::Compound(data)) => Ok(data.clone()),
+                _ => Err("no data compound".to_owned()),
+            },
+            Err(DatIssue::Unreadable(why)) => Err(why),
+        };
+        data.map(horizon_world::attachments::Attachments::from_nbt)
+            .unwrap_or_else(|why| {
+                let aside = path.with_extension("dat.corrupt");
+                log::warn!(
+                    "{}: {why}; mod attachments start over, the file is kept as {}",
+                    path.display(),
+                    aside.display()
+                );
+                let _ = fs::rename(&path, &aside);
+                Default::default()
+            })
+    }
+
+    /// Save this dimension's server-owned mod attachments; nothing while it has none and never had.
+    pub fn save_attachments(
+        &self,
+        attachments: &horizon_world::attachments::Attachments,
+    ) -> Result<()> {
+        let path = self.attachments_path();
+        let data = attachments.to_nbt();
+        if data.is_empty() && !path.exists() {
+            return Ok(());
+        }
+        write_dat(
+            &path,
+            Tag::compound([
+                ("data", Tag::Compound(data)),
+                ("DataVersion", Tag::Int(DATA_VERSION)),
+            ]),
+        )
+    }
+
+    fn attachments_path(&self) -> PathBuf {
+        self.root
+            .join("data")
+            .join("horizon")
+            .join("attachments.dat")
+    }
+
     /// The saves of a level of `shape` at `root` (its dimension folder).
     pub fn new(root: PathBuf, shape: LevelShape) -> Self {
         Self {
@@ -2290,6 +2456,7 @@ impl SaveDir {
             shape,
             lod_regions: Default::default(),
             lod_decoded: Default::default(),
+            datafix_context: OnceLock::new(),
         }
     }
     /// 26.3's TicketStorage: persistent tickets live in each dimension's
@@ -2384,7 +2551,8 @@ impl SaveDir {
         let present: Vec<ChunkPos> = region.chunks().map(|(pos, _)| pos).collect();
         drop(region);
         for pos in present {
-            let Some(root) = self.read_record("region", pos.x, pos.z) else {
+            // `IOWorker` reads the record as saved, before any upgrade.
+            let Some(root) = self.read_record_raw("region", pos.x, pos.z) else {
                 continue;
             };
             let old = match root.tag.get("DataVersion") {
@@ -2398,7 +2566,7 @@ impl SaveDir {
         }
         bits
     }
-    /// A saved chunk as the region file keeps it, for the readers of its
+    /// A saved chunk brought to the current version, for the readers of its
     /// fields that `load` does not decode (`blending_data`).
     pub fn raw_chunk(&self, x: i32, z: i32) -> Option<NamedTag> {
         self.read_record("region", x, z)
@@ -2421,7 +2589,8 @@ impl SaveDir {
             _ => 0,
         }
     }
-    fn read_record(&self, folder: &str, x: i32, z: i32) -> Option<NamedTag> {
+    /// A record as saved: the pending write first, then the region file.
+    fn read_record_raw(&self, folder: &str, x: i32, z: i32) -> Option<NamedTag> {
         let pending = self
             .pending
             .lock()
@@ -2443,6 +2612,24 @@ impl SaveDir {
                 None
             }
         }
+    }
+    /// A record brought to the current version (`upgrade_record`).
+    fn read_record(&self, folder: &str, x: i32, z: i32) -> Option<NamedTag> {
+        let mut record = self.read_record_raw(folder, x, z)?;
+        match self.upgrade_record(Folder::of(folder), &mut record) {
+            Ok(()) => Some(record),
+            Err(e) => {
+                crate::chunk_io::report_load_failure(&self.root, x, z, &e);
+                None
+            }
+        }
+    }
+    fn upgrade_record(&self, folder: Folder, record: &mut NamedTag) -> Result<()> {
+        upgrade_record(folder, record, || {
+            self.datafix_context
+                .get_or_init(|| DatafixContext::of(&self.root))
+                .as_ref()
+        })
     }
     pub fn load(&self, x: i32, z: i32, registry: &BlockRegistry, biomes: &Biomes) -> Option<Chunk> {
         let root = self.read_record("region", x, z)?;
@@ -2473,11 +2660,13 @@ impl SaveDir {
                 return None;
             }
             let mut region = RegionFile::open(self.region_path("region", x >> 5, z >> 5)).ok()?;
-            region
+            let mut root = region
                 .read(ChunkPos::new(x, z))
                 .ok()??
                 .nbt(Limits::default())
-                .ok()?
+                .ok()?;
+            self.upgrade_record(Folder::Region, &mut root).ok()?;
+            root
         };
         let tables = self.tables.get().map(|t| &**t);
         let mut chunk = decode_with(&root, registry, biomes, tables, self.shape.column())?;
@@ -3238,16 +3427,19 @@ impl Default for WorldGen {
 }
 /// Writes a new world's `world_gen_settings` (seed, options and dimensions).
 pub fn write_world_gen_settings(dir: &Path, seed: i64, options: WorldGen) -> Result<()> {
-    write_world_gen_settings_with(dir, seed, options, None)
+    write_world_gen_settings_with(dir, seed, options, None, None)
 }
 /// [`write_world_gen_settings`] with a flat overworld's own generator
 /// settings (FlatLevelGeneratorSettings, as `flatgen::settings_from_json`
-/// reads them) instead of the Superflat preset's classic layers.
+/// reads them) instead of the Superflat preset's classic layers, and with the
+/// biome the single-biome preset fixes (`CreateBuffetWorldScreen`'s choice,
+/// `minecraft:plains` when none was made).
 pub fn write_world_gen_settings_with(
     dir: &Path,
     seed: i64,
     options: WorldGen,
     flat_settings: Option<Tag>,
+    single_biome: Option<&str>,
 ) -> Result<()> {
     fs::create_dir_all(dir)?;
     // worldgen/world_preset/flat.json's overworld: the classic flat layers.
@@ -3324,7 +3516,7 @@ pub fn write_world_gen_settings_with(
             "minecraft:overworld",
             Tag::compound([
                 ("type", string("minecraft:fixed")),
-                ("biome", string("minecraft:plains")),
+                ("biome", string(single_biome.unwrap_or("minecraft:plains"))),
             ]),
         ),
         WorldPreset::Normal => dimension(
@@ -3456,6 +3648,8 @@ pub struct Level {
     pub food_tick_timer: i32,
     /// Abilities.flying: whether creative/spectator flight is active.
     pub flying: bool,
+    /// Abilities.flyingSpeed, when the file has one (vanilla's is 0.05).
+    pub fly_speed: Option<f32>,
     /// The vehicle the player rides, by UUID (`ServerPlayer.saveParentVehicle`'s
     /// "RootVehicle"), so the ride comes back on the next login.
     pub root_vehicle: Option<[i32; 4]>,
@@ -3613,8 +3807,9 @@ impl Level {
             rain_level: if raining { (1.0, 1.0) } else { (0.0, 0.0) },
             thunder_level: if thundering { (1.0, 1.0) } else { (0.0, 0.0) },
         };
-        // The player: players/data/<singleplayer_uuid>.dat, the newest player
-        // file of a server world, or the legacy Data.Player.
+        // The player: players/data/<singleplayer_uuid>.dat, or the legacy Data.Player. With no
+        // `singleplayer_uuid` (a world from a server, a Realms download) the owner loads their
+        // own file, not another player's (`PlayerList.loadPlayerData`): `load_owner` does.
         let uuid = uuid_from_tag(data.get("singleplayer_uuid"));
         let player_dir = dir.join("players").join("data");
         // PlayerDataStorage.load: the player's file, else its .dat_old.
@@ -3624,18 +3819,7 @@ impl Level {
                 .or_else(|| read_dat(&player_dir.join(format!("{name}.dat_old"))))
         });
         level.singleplayer_file = owner.is_some();
-        let player = owner
-            .or_else(|| {
-                fs::read_dir(&player_dir)
-                    .ok()
-                    .and_then(|d| {
-                        d.flatten()
-                            .filter(|e| e.path().extension().is_some_and(|x| x == "dat"))
-                            .max_by_key(|e| e.metadata().and_then(|m| m.modified()).ok())
-                    })
-                    .and_then(|e| read_dat(&e.path()))
-            })
-            .or_else(|| data.get("Player").cloned());
+        let player = owner.or_else(|| data.get("Player").cloned());
         level.player_uuid = uuid_from_tag(player.as_ref().and_then(|p| p.get("UUID"))).or(uuid);
         let spawn = level
             .world_spawn
@@ -3696,6 +3880,10 @@ impl Level {
             .get("abilities")
             .and_then(|a| number(a.get("flying")))
             .is_some_and(|v| v != 0);
+        self.fly_speed = p
+            .get("abilities")
+            .and_then(|a| float(a.get("flySpeed")))
+            .map(|v| v as f32);
         if let Some(d) = text(p.get("Dimension")) {
             self.dimension = d;
         }
@@ -3845,6 +4033,9 @@ impl Level {
         }
         if let Tag::Compound(map) = &mut abilities {
             map.entry("mayBuild".into()).or_insert(Tag::Byte(1));
+            if let Some(speed) = self.fly_speed {
+                map.insert("flySpeed".into(), Tag::Float(speed.to_bits()));
+            }
             map.entry("flySpeed".into())
                 .or_insert(Tag::Float(0.05f32.to_bits()));
             map.entry("walkSpeed".into())
@@ -4655,11 +4846,13 @@ impl SaveDir {
             }
             // Far-only reads must not populate the gameplay region cache across the whole view.
             let mut region = RegionFile::open(self.region_path("region", x >> 5, z >> 5)).ok()?;
-            region
+            let mut root = region
                 .read(ChunkPos::new(x, z))
                 .ok()??
                 .nbt(Limits::default())
-                .ok()?
+                .ok()?;
+            self.upgrade_record(Folder::Region, &mut root).ok()?;
+            root
         };
         // Proto saves may still be missing decoration from their neighbors.
         if text(root.tag.get("Status"))
@@ -4972,6 +5165,82 @@ mod tests {
             record([9, 71, 9], "minecraft:home", Some(1)),
         ]);
         assert_eq!(saved.tag, expected.tag);
+    }
+
+    #[test]
+    fn level_attachments_survive_save_and_load() {
+        use horizon_world::attachments::{
+            AttachmentCodec, AttachmentError, AttachmentType, Attachments,
+        };
+        let dir =
+            std::env::temp_dir().join(format!("horizon-level-attachments-{}", std::process::id()));
+        let save = SaveDir::new(dir.clone(), LevelShape::OVERWORLD);
+        let key = AttachmentType {
+            namespace: "test",
+            name: "counter",
+            default: || 0,
+            codec: Some(AttachmentCodec {
+                encode: |n: &i32| Ok([("count".into(), Tag::Int(*n))].into()),
+                decode: |c: &Compound| match c.get(&"count".into()) {
+                    Some(Tag::Int(n)) => Ok(*n),
+                    _ => Err(AttachmentError::Decode),
+                },
+            }),
+            copy_on_death: false,
+        };
+        let mut map = Attachments::default();
+        map.set(&key, 7).unwrap();
+        save.save_attachments(&map).unwrap();
+        assert_eq!(save.load_attachments().get(&key), Ok(7));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn chunk_attachments_survive_save_and_load() {
+        use horizon_world::attachments::{AttachmentCodec, AttachmentError, AttachmentType};
+        let Some(root) = std::env::var_os("HORIZON_TEST_RESOURCES") else {
+            return;
+        };
+        let root = PathBuf::from(root);
+        let assets = crate::assets::Assets::load(&root).expect("assets");
+        let biomes = Biomes::load(&root).expect("biomes");
+        let key = AttachmentType {
+            namespace: "test",
+            name: "counter",
+            default: || 0,
+            codec: Some(AttachmentCodec {
+                encode: |n: &i32| Ok([("count".into(), Tag::Int(*n))].into()),
+                decode: |c: &Compound| match c.get(&"count".into()) {
+                    Some(Tag::Int(n)) => Ok(*n),
+                    _ => Err(AttachmentError::Decode),
+                },
+            }),
+            copy_on_death: false,
+        };
+        let mut chunk = Chunk::empty(2, 3);
+        let mut extras = ChunkExtras::default();
+        extras.attachments.set(&key, 42).unwrap();
+        let mut block_data = horizon_world::attachments::Attachments::default();
+        block_data.set(&key, 21).unwrap();
+        let pos = (33, 64, 50);
+        let chest = assets.registry.default_state("minecraft:chest").unwrap();
+        chunk.set(1, 64, 2, chest.0);
+        chunk
+            .block_entities
+            .push((pos, crate::containers::BlockEntity::Chest(vec![None; 27])));
+        extras.block_entity_attachments.push((pos, block_data));
+        chunk.saved = Some(Arc::new(extras));
+        let saved = encode(&chunk, assets.registry, &biomes);
+        let mut loaded = decode(&saved, assets.registry, &biomes).expect("chunk");
+        assert_eq!(
+            Arc::make_mut(loaded.saved.as_mut().unwrap())
+                .attachments
+                .get(&key),
+            Ok(42)
+        );
+        let extras = Arc::make_mut(loaded.saved.as_mut().unwrap());
+        assert_eq!(extras.block_entity_attachments[0].0, pos);
+        assert_eq!(extras.block_entity_attachments[0].1.get(&key), Ok(21));
     }
 
     #[test]
@@ -6832,6 +7101,33 @@ mod tests {
     }
 
     #[test]
+    fn mod_attachments_save_in_horizons_namespace_only_when_some() {
+        use horizon_world::attachments::Attachments;
+        let root = std::env::temp_dir().join(format!("horizon-attach-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let save = SaveDir::new(root.clone(), LevelShape::OVERWORLD);
+        let file = root.join("data/horizon/attachments.dat");
+        save.save_attachments(&Attachments::default()).unwrap();
+        assert!(
+            !root.join("data").exists(),
+            "a level without mod data writes nothing"
+        );
+        let data = Compound::from_iter([("example:count".into(), Tag::Int(3))]);
+        save.save_attachments(&Attachments::from_nbt(data.clone()))
+            .unwrap();
+        assert!(file.is_file());
+        assert_eq!(save.load_attachments().to_nbt(), data);
+        fs::write(&file, b"not nbt").unwrap();
+        assert!(save.load_attachments().to_nbt().is_empty());
+        assert_eq!(
+            fs::read(root.join("data/horizon/attachments.dat.corrupt")).unwrap(),
+            b"not nbt"
+        );
+        assert!(!file.exists());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
     fn forced_chunks_survive_dimension_restarts_and_removals() {
         let root = std::env::temp_dir().join(format!("horizon-forced-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
@@ -6936,5 +7232,217 @@ mod tests {
             assert_eq!(preset.next().prev(), preset);
             assert_eq!(preset.prev().next(), preset);
         }
+    }
+    /// A region record of the dimension folder `save` at chunk (0, 0), written
+    /// as an older version left it.
+    fn write_old_record(save: &SaveDir, folder: &str, tag: Tag) {
+        let record = Record::Tag(Arc::new(NamedTag {
+            name: "".into(),
+            tag,
+        }));
+        let cache = match Folder::of(folder) {
+            Folder::Region => &save.regions,
+            Folder::Entities => &save.entity_regions,
+            Folder::Poi => &save.poi_regions,
+        };
+        super::write_region_records(&save.root, cache, folder, &[((0, 0), &record)]).unwrap();
+    }
+
+    #[test]
+    fn older_records_of_a_current_world_upgrade_as_they_are_read() {
+        let world = std::env::temp_dir().join(format!("horizon-lazy-dv-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&world);
+        let save = SaveDir::new(
+            super::dimension_dir(&world, "minecraft:overworld"),
+            LevelShape::OVERWORLD,
+        );
+        // A 1.20.1 chunk (DataVersion 3465): 1.20.3 renamed its grass to short_grass.
+        let section = Tag::compound([
+            ("Y", Tag::Byte(-4)),
+            (
+                "block_states",
+                Tag::compound([(
+                    "palette",
+                    Tag::List(vec![Tag::compound([("Name", string("minecraft:grass"))])]),
+                )]),
+            ),
+            (
+                "biomes",
+                Tag::compound([("palette", Tag::List(vec![string("minecraft:plains")]))]),
+            ),
+        ]);
+        write_old_record(
+            &save,
+            "region",
+            Tag::compound([
+                ("DataVersion", Tag::Int(3465)),
+                ("xPos", Tag::Int(0)),
+                ("zPos", Tag::Int(0)),
+                ("yPos", Tag::Int(-4)),
+                ("Status", string("minecraft:full")),
+                ("sections", Tag::List(vec![section])),
+            ]),
+        );
+        let chunk = save.raw_chunk(0, 0).expect("the chunk reads");
+        assert_eq!(
+            number(chunk.tag.get("DataVersion")),
+            Some(i64::from(DATA_VERSION))
+        );
+        let Some(Tag::List(sections)) = chunk.tag.get("sections") else {
+            panic!("no sections: {:?}", chunk.tag);
+        };
+        let Some(Tag::List(palette)) = sections[0]
+            .get("block_states")
+            .and_then(|b| b.get("palette"))
+        else {
+            panic!("no palette");
+        };
+        assert_eq!(
+            text(palette[0].get("id")).as_deref(),
+            Some("minecraft:short_grass")
+        );
+        // Decoded, it keeps its blocks: read raw, the 26.x decoder finds no `id` in a
+        // 1.20 palette (`Name`) and the whole column is air.
+        if let Some(root) = std::env::var_os("HORIZON_TEST_RESOURCES") {
+            let root = PathBuf::from(root);
+            let assets = crate::assets::Assets::load(&root).expect("assets");
+            let biomes = Biomes::load(&root).expect("biomes");
+            let grass = assets
+                .registry
+                .default_state("minecraft:short_grass")
+                .unwrap();
+            let loaded = save
+                .load(0, 0, assets.registry, &biomes)
+                .expect("the chunk loads");
+            assert_eq!(loaded.get(3, -60, 7), grass.0);
+        }
+        // A 1.20.1 item entity: 1.20.5 made its stack `count` (an int) from `Count`.
+        write_old_record(
+            &save,
+            "entities",
+            Tag::compound([
+                ("DataVersion", Tag::Int(3465)),
+                ("Position", Tag::IntArray(vec![0, 0])),
+                (
+                    "Entities",
+                    Tag::List(vec![Tag::compound([
+                        ("id", string("minecraft:item")),
+                        (
+                            "Item",
+                            Tag::compound([
+                                ("id", string("minecraft:stone")),
+                                ("Count", Tag::Byte(3)),
+                            ]),
+                        ),
+                    ])]),
+                ),
+            ]),
+        );
+        let entities = save.load_entities(0, 0);
+        let item = entities[0].get("Item").expect("the item stack");
+        assert_eq!(item.get("count"), Some(&Tag::Int(3)));
+        assert!(item.get("Count").is_none());
+        let _ = std::fs::remove_dir_all(&world);
+    }
+
+    #[test]
+    fn old_chunks_are_found_in_the_saved_records_and_old_poi_upgrade() {
+        let world = std::env::temp_dir().join(format!("horizon-lazy-old-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&world);
+        let nether = SaveDir::new(
+            super::dimension_dir(&world, "minecraft:the_nether"),
+            LevelShape::NETHER,
+        );
+        // A 1.20.1 Nether chunk: upgraded it has no `blending_data` (only Overworld
+        // chunks blend) and the current DataVersion, so only the saved record says
+        // it is older than blending (4997), as `IOWorker.isOldChunk` reads it.
+        write_old_record(
+            &nether,
+            "region",
+            Tag::compound([
+                ("DataVersion", Tag::Int(3465)),
+                ("xPos", Tag::Int(0)),
+                ("zPos", Tag::Int(0)),
+                ("yPos", Tag::Int(0)),
+                ("Status", string("minecraft:full")),
+                ("sections", Tag::List(Vec::new())),
+            ]),
+        );
+        let upgraded = nether.raw_chunk(0, 0).expect("the chunk reads");
+        assert!(upgraded.tag.get("blending_data").is_none());
+        assert_ne!(nether.old_chunk_bits(0, 0)[0] & 1, 0);
+        // A POI record of before 1.14.4 (no DataVersion, read as 1945): its
+        // sections at the root, which 1946 moved under `Sections`.
+        let overworld = SaveDir::new(
+            super::dimension_dir(&world, "minecraft:overworld"),
+            LevelShape::OVERWORLD,
+        );
+        write_old_record(
+            &overworld,
+            "poi",
+            Tag::compound([(
+                "0",
+                Tag::compound([("Valid", Tag::Byte(1)), ("Records", Tag::List(Vec::new()))]),
+            )]),
+        );
+        let poi = overworld.read_record("poi", 0, 0).expect("the POI reads");
+        assert!(poi.tag.get("Sections").and_then(|s| s.get("0")).is_some());
+        assert_eq!(
+            number(poi.tag.get("DataVersion")),
+            Some(i64::from(DATA_VERSION))
+        );
+        let _ = std::fs::remove_dir_all(&world);
+    }
+
+    #[test]
+    fn a_chunk_from_before_1_18_is_brought_to_the_current_layout() {
+        let world = std::env::temp_dir().join(format!("horizon-lazy-117-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&world);
+        let save = SaveDir::new(
+            super::dimension_dir(&world, "minecraft:overworld"),
+            LevelShape::OVERWORLD,
+        );
+        // A 1.17.1 chunk (DataVersion 2730), its fields under `Level`: section 0 all stone.
+        let section = Tag::compound([
+            ("Y", Tag::Byte(0)),
+            (
+                "Palette",
+                Tag::List(vec![
+                    Tag::compound([("Name", string("minecraft:air"))]),
+                    Tag::compound([("Name", string("minecraft:stone"))]),
+                ]),
+            ),
+            (
+                "BlockStates",
+                Tag::LongArray(vec![0x1111_1111_1111_1111; 256]),
+            ),
+        ]);
+        write_old_record(
+            &save,
+            "region",
+            Tag::compound([
+                ("DataVersion", Tag::Int(2730)),
+                (
+                    "Level",
+                    Tag::compound([
+                        ("xPos", Tag::Int(0)),
+                        ("zPos", Tag::Int(0)),
+                        ("Status", string("full")),
+                        ("Biomes", Tag::IntArray(vec![1; 1024])),
+                        ("Sections", Tag::List(vec![section])),
+                    ]),
+                ),
+            ]),
+        );
+        let chunk = save.raw_chunk(0, 0).expect("the chunk reads");
+        assert!(
+            chunk.tag.get("Level").is_none(),
+            "still wrapped: {:?}",
+            chunk.tag
+        );
+        assert_eq!(number(chunk.tag.get("xPos")), Some(0));
+        // 1.18's height fix: an Overworld chunk older than the new heights blends with them.
+        assert!(chunk.tag.get("blending_data").is_some());
+        let _ = std::fs::remove_dir_all(&world);
     }
 }

@@ -9,6 +9,7 @@ use horizon_assets::item_model::{
 };
 use horizon_client::{
     block_entity_render::{diffuse_lights, vertex_light},
+    cit::{Hand as CitHand, Kind as CitKind},
     hud::{HudBatch, Rect},
     item_render::{self, ItemRenderState, SpecialHost, WorldSink},
     items::ItemStack,
@@ -268,10 +269,13 @@ impl Game<'_> {
             && self.stack_in(slot) == Some(stack)
         {
             let view = item_render::stack_view(stack);
-            let duration = use_duration(&self.pack.item_renderer.models.components(&view));
+            let mut duration = use_duration(&self.pack.item_renderer.models.components(&view));
+            self.native_use_duration(stack, &mut duration);
             owner.using_this_item = true;
             owner.use_duration = duration;
-            owner.use_item_remaining_ticks = duration - ticks as i32;
+            // getUseItemRemainingTicks: the duration the use started with,
+            // as LivingEntityUseItemEvent.Start and .Tick left it (`game/item_use.rs`).
+            owner.use_item_remaining_ticks = self.use_duration - ticks as i32;
             owner.crossbow_charge_duration = Self::charge_ticks(stack).max(1) as i32;
         }
         owner.fishing_cast_with_this_item = stack
@@ -290,15 +294,76 @@ impl Game<'_> {
         owner: Option<&OwnerState>,
         seed: i32,
     ) -> ItemRenderState {
+        self.resolve_item_in_hand(stack, display, owner, seed, CitHand::Main)
+    }
+    /// `ItemStack.hasFoil`, with the item's default glint.
+    fn has_foil(&self, stack: &ItemStack) -> bool {
+        let item_glint = self
+            .res
+            .items()
+            .enchantments
+            .props
+            .get(&*stack.item)
+            .is_some_and(|p| p.glint);
+        stack.has_foil(item_glint)
+    }
+    /// [`Self::resolve_item`] of a stack held in `hand`, which OptiFine CIT rules can test
+    /// (GUI items count as the main hand).
+    pub(super) fn resolve_item_in_hand(
+        &self,
+        stack: &ItemStack,
+        display: DisplayContext,
+        owner: Option<&OwnerState>,
+        seed: i32,
+        hand: CitHand,
+    ) -> ItemRenderState {
         let level = self.item_level();
-        self.pack.item_renderer.resolve(
+        let renderer = &self.pack.item_renderer;
+        let (rule, glint) = renderer.cit.as_ref().map_or((None, None), |cit| {
+            let item_max = self
+                .res
+                .items()
+                .get(&stack.item)
+                .map_or(0, |i| i.max_damage);
+            let max_damage = item_render::cit::stack_max_damage(stack, item_max);
+            (
+                cit.rules.select(CitKind::Item, stack, hand, max_damage),
+                cit.rules
+                    .glint(stack, hand, max_damage, self.has_foil(stack)),
+            )
+        });
+        let mut state = renderer.resolve_with_rule(
             &item_render::stack_view(stack),
             display,
             owner,
             Some(&level),
             seed,
             &self.item_env(),
-        )
+            rule,
+        );
+        if let Some(glint) = glint {
+            // The pack's enchantment rules replace vanilla's glint unless one keeps it, so far
+            // only in the GUI, where their own layers draw: held, dropped and framed items keep
+            // vanilla's until theirs do. The pack's `useGlint=false` removes it everywhere.
+            let gui = display == DisplayContext::Gui;
+            let pack_keeps = renderer
+                .cit
+                .as_ref()
+                .is_none_or(|c| c.rules.global.use_glint);
+            if !glint.vanilla && (gui || !pack_keeps) {
+                for layer in &mut state.layers {
+                    layer.foil = horizon_assets::item_model::FoilType::None;
+                }
+            }
+            if gui && !glint.is_empty() {
+                state.cit_glint = Some(glint);
+            }
+        }
+        state.hdr_tier = self.luminance().hdr_tier(&stack.item);
+        if state.hdr_tier > 0 && self.renderer.as_ref().is_some_and(|r| r.hdr_on()) {
+            state.hdr_light = self.luminance().of(&stack.item);
+        }
+        state
     }
     /// `GuiGraphics.renderItem(player, level, stack, x, y, 0)`.
     pub(super) fn draw_item_model(&self, batch: &mut HudBatch, stack: &ItemStack, x: f32, y: f32) {
@@ -359,9 +424,10 @@ impl Game<'_> {
     ) {
         let mut sink = WorldSink {
             out,
-            light,
-            lights: Some(lights),
+            light: item_hdr_light(state, light),
+            lights: (state.hdr_light == 0).then_some(lights),
             glint: self.glint(),
+            tier: state.hdr_tier,
         };
         state.submit(
             &self.pack.item_renderer,
@@ -381,9 +447,10 @@ impl Game<'_> {
     ) {
         let mut sink = WorldSink {
             out,
-            light,
+            light: item_hdr_light(state, light),
             lights: None,
             glint: self.glint(),
+            tier: state.hdr_tier,
         };
         state.submit(
             &self.pack.item_renderer,
@@ -418,6 +485,7 @@ impl Game<'_> {
         });
         for (item, at, partial, entity) in live.chain(taken) {
             let entity_start = out.len();
+            self.mark_motion(entity_start, (2 << 32) | u64::from(item.id));
             let q = item.position;
             let pos = glam::DVec3::from_array(at) - camera;
             if pos.length_squared() > 64.0 * 64.0 {
@@ -476,6 +544,13 @@ impl Game<'_> {
             }
         }
     }
+}
+
+/// The packed light of an item (sky low, block above it: `vertex_light`, entity.wgsl), its block
+/// light raised to what it glows with in HDR output.
+fn item_hdr_light(state: &ItemRenderState, light: u32) -> u32 {
+    let block = ((light >> 8) & 0xff).max(u32::from(state.hdr_light) * 16);
+    (light & !0xff00) | block << 8
 }
 
 #[cfg(test)]

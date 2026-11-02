@@ -53,6 +53,8 @@ impl Loading {
             delivered: false,
             handle: Some(loader),
             shown: true,
+            ui_at: None,
+            title_drawn: false,
             menu,
             error: None,
         })

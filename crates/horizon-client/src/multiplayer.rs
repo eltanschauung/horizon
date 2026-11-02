@@ -157,7 +157,16 @@ fn centered_x(width: f32, text_width: f32) -> f32 {
     half(width) - half(text_width)
 }
 
+/// The server list, beside `saves/`; with `--player-dir`, the player's own.
 pub fn servers_file(saves: &Path) -> PathBuf {
+    servers_file_of(crate::logging::player_dir_override(), saves)
+}
+
+/// [`servers_file`] for a given `--player-dir`.
+fn servers_file_of(player: Option<&Path>, saves: &Path) -> PathBuf {
+    if let Some(player) = player {
+        return player.join("servers.dat");
+    }
     saves
         .parent()
         .map_or_else(|| PathBuf::from("servers.dat"), |p| p.join("servers.dat"))
@@ -1627,6 +1636,60 @@ impl Screen {
         Outcome::None
     }
     /// The mouse wheel over the server list (`scrollRate`: half a row).
+    /// Up or Down on the list (`AbstractSelectionList.nextEntry`): the next
+    /// server or LAN game, the first (Down) or last (Up) with none selected, and
+    /// none past the ends. With Shift a saved server swaps with its neighbour
+    /// (`OnlineServerEntry.keyPressed`) and stays selected. False when the screen
+    /// is not the list or has no entries.
+    pub fn arrow(&mut self, up: bool, shift: bool, size: (f32, f32), saves: &Path) -> bool {
+        let Self::List {
+            servers,
+            selected,
+            lan,
+            scroll,
+            ..
+        } = self
+        else {
+            return false;
+        };
+        let total = servers.len() + lan.games().len();
+        if total == 0 {
+            return false;
+        }
+        let next = match *selected {
+            Some(k) if shift => {
+                // A LAN game has no place to move to.
+                let to = if up { k.checked_sub(1) } else { Some(k + 1) };
+                if let Some(to) = to.filter(|&to| k < servers.len() && to < servers.len()) {
+                    servers.swap(k, to);
+                    save_servers(&servers_file(saves), servers);
+                    Some(to)
+                } else {
+                    Some(k)
+                }
+            }
+            Some(k) if up => Some(k.saturating_sub(1)),
+            Some(k) => Some((k + 1).min(total - 1)),
+            None if shift => None,
+            None => Some(if up { total - 1 } else { 0 }),
+        };
+        *selected = next;
+        if let Some(k) = next {
+            // scrollToEntry: the row, with the LAN header between the servers
+            // and the games, into view.
+            let row = if k < servers.len() { k } else { k + 1 };
+            let (top, bottom, _) = list_area(size.0.ceil(), size.1.ceil());
+            let content = content_height(servers.len(), lan.games().len());
+            let (row_top, view) = (2.0 + row as f32 * ROW_HEIGHT, bottom - top);
+            if row_top < scroll.amount {
+                scroll.amount = row_top;
+            } else if row_top + ROW_HEIGHT > scroll.amount + view {
+                scroll.amount = row_top + ROW_HEIGHT - view;
+            }
+            scroll.clamp(top, bottom, content);
+        }
+        true
+    }
     pub fn wheel(&mut self, delta: f32, cursor: (f32, f32), size: (f32, f32)) {
         if let Self::List {
             servers,
@@ -1670,10 +1733,12 @@ impl Screen {
     pub fn focused_box(&self, (w, _h): (f32, f32)) -> Option<[f32; 4]> {
         let y = match self {
             Self::Edit { focus: 0, .. } => 66.0,
-            Self::Edit { .. } => 106.0,
+            Self::Edit { focus: 1, .. } => 106.0,
+            Self::Edit { .. } => return None,
             Self::Direct { .. } => 116.0,
             Self::Friend { focus: 0, .. } => 64.0,
-            Self::Friend { .. } => 105.0,
+            Self::Friend { focus: 1, .. } => 105.0,
+            Self::Friend { .. } => return None,
             _ => return None,
         };
         Some([(w / 2.0).floor() - 100.0, y, 200.0, 20.0])
@@ -1685,11 +1750,20 @@ impl Screen {
                 address,
                 focus,
                 ..
-            } => Some(if *focus == 0 { name } else { address }),
+            } => match *focus {
+                0 => Some(name),
+                1 => Some(address),
+                // A button has the focus.
+                _ => None,
+            },
             Self::Direct { address } => Some(address),
             Self::Friend {
                 code, relay, focus, ..
-            } => Some(if *focus == 0 { code } else { relay }),
+            } => match *focus {
+                0 => Some(code),
+                1 => Some(relay),
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -1770,9 +1844,31 @@ impl Screen {
             128
         }
     }
-    pub fn tab(&mut self) {
-        if let Self::Edit { focus, .. } | Self::Friend { focus, .. } = self {
-            *focus = (*focus + 1) % 2;
+    /// Tab (`reverse`: Shift+Tab) through the focus order of `ManageServerScreen`
+    /// and the friend screen: the text fields, then the enabled `buttons`, then
+    /// round to the first field. `button` is the focused button, if any; a field
+    /// has the focus (`focus` below 2) only while no button does.
+    pub fn tab_dir(&mut self, reverse: bool, buttons: &[u8], button: &mut Option<u8>) {
+        let (Self::Edit { focus, .. } | Self::Friend { focus, .. }) = self else {
+            return;
+        };
+        let stops = 2 + buttons.len();
+        let at = match *button {
+            Some(id) => buttons.iter().position(|&b| b == id).map(|i| 2 + i),
+            None => Some(usize::from(*focus).min(1)),
+        }
+        .unwrap_or(0);
+        let next = if reverse {
+            (at + stops - 1) % stops
+        } else {
+            (at + 1) % stops
+        };
+        if next < 2 {
+            *focus = next as u8;
+            *button = None;
+        } else {
+            *focus = 2;
+            *button = Some(buttons[next - 2]);
         }
     }
     /// Escape: back to the list, or out of it (true).
@@ -1837,6 +1933,19 @@ pub fn wrap(text: &str, width: f32, atlas: &HudAtlas) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn servers_dat_is_beside_saves_or_in_the_player_dir() {
+        let saves = Path::new("/games/shared/saves");
+        assert_eq!(
+            servers_file_of(None, saves),
+            Path::new("/games/shared/servers.dat")
+        );
+        assert_eq!(
+            servers_file_of(Some(Path::new("/games/players/alex")), saves),
+            Path::new("/games/players/alex/servers.dat")
+        );
+    }
 
     #[test]
     fn only_discovered_entries_get_lan_authentication() {
@@ -2203,6 +2312,55 @@ mod tests {
         offered_before(&[ServerEntry::new("Test", "horizon.bunchy7s.dev:25570")]);
         add_official_server(&dir).unwrap();
         assert_eq!(ips(), ["horizon.bunchy7s.dev:25570"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn arrow_keys_select_servers_and_shift_moves_them() {
+        let dir = std::env::temp_dir().join(format!("horizon-mp-keys-{}", std::process::id()));
+        let saves = dir.join("saves");
+        std::fs::create_dir_all(&saves).unwrap();
+        let file = servers_file(&saves);
+        let list: Vec<ServerEntry> = ["a", "b", "c"]
+            .iter()
+            .map(|n| ServerEntry::new(n, "127.0.0.1:2"))
+            .collect();
+        servers::save(&file, &list).unwrap();
+        let mut screen = Screen::list(&saves);
+        let size = (427.0, 240.0);
+        let state = |screen: &Screen| match screen {
+            Screen::List {
+                servers, selected, ..
+            } => (
+                servers.iter().map(|s| s.name.clone()).collect::<Vec<_>>(),
+                *selected,
+            ),
+            _ => unreachable!(),
+        };
+        let abc = vec!["a".to_owned(), "b".into(), "c".into()];
+        // None selected: Down takes the first, as vanilla's nextEntry does.
+        assert!(screen.arrow(false, false, size, &saves));
+        assert_eq!(state(&screen), (abc.clone(), Some(0)));
+        // Up at the top stays; Down walks; the last stays.
+        screen.arrow(true, false, size, &saves);
+        assert_eq!(state(&screen).1, Some(0));
+        screen.arrow(false, false, size, &saves);
+        screen.arrow(false, false, size, &saves);
+        screen.arrow(false, false, size, &saves);
+        assert_eq!(state(&screen).1, Some(2));
+        // Shift+Up moves "c" above "b", keeps it selected and saves the order.
+        screen.arrow(true, true, size, &saves);
+        assert_eq!(
+            state(&screen),
+            (vec!["a".to_owned(), "c".into(), "b".into()], Some(1))
+        );
+        let saved: Vec<String> = servers::load(&file).into_iter().map(|s| s.name).collect();
+        assert_eq!(saved, ["a", "c", "b"]);
+        // Nothing moves past the first server.
+        screen.arrow(true, true, size, &saves);
+        screen.arrow(true, true, size, &saves);
+        assert_eq!(state(&screen).1, Some(0));
+        assert_eq!(state(&screen).0[0], "c");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

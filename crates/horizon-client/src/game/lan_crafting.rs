@@ -130,6 +130,7 @@ impl Game<'_> {
         let equipped = std::mem::take(&mut menu.equipped);
         let brewed = std::mem::take(&mut menu.brewed);
         let crafted = std::mem::take(&mut menu.crafted);
+        let item_crafted = std::mem::take(&mut menu.item_crafted);
         menu.drops.clear();
         store_player(menu, &mut host.hub.guests[gi]);
         if !brewed.is_empty() {
@@ -145,6 +146,15 @@ impl Game<'_> {
             self.as_guest(host, conn, |g| {
                 for (recipe, ingredients) in &crafted {
                     g.trigger_recipe_crafted(recipe, ingredients);
+                }
+            });
+        }
+        if !item_crafted.is_empty() {
+            let conn = host.hub.guests[gi].conn;
+            self.as_guest(host, conn, |g| {
+                let player = g.native_acting_id();
+                for (recipe, stack) in &item_crafted {
+                    g.native_item_crafted(player, recipe, stack);
                 }
             });
         }
@@ -208,8 +218,9 @@ impl Game<'_> {
 
     /// A click on the guest's open furnace, blast furnace, smoker or brewing stand:
     /// the host's `AbstractFurnaceMenu` (fuel slot, take-only result, quick moves by
-    /// recipe and fuel) or `BrewingStandMenu` (one bottle per slot, ingredient and
-    /// blaze powder slots) over the block entity's slots. False for other windows.
+    /// recipe and fuel), `BrewingStandMenu` (one bottle per slot, ingredient and
+    /// blaze powder slots) or a content mod's menu type (`Kind::Mod`) over the
+    /// block entity's slots. False for other windows.
     pub(super) fn lan_machine_click(
         &mut self,
         host: &mut LanHost,
@@ -219,12 +230,12 @@ impl Game<'_> {
         let Some(gi) = host.hub.guests.iter().position(|g| g.conn == conn) else {
             return false;
         };
-        let Some(pos) = host.hub.guests[gi]
+        let Some((pos, mod_type, hidden)) = host.hub.guests[gi]
             .menu
             .as_ref()
             .filter(|m| p.container != 0 && m.window == p.container)
             .and_then(|m| match m.slots {
-                Slots::Block(pos) => Some(pos),
+                Slots::Block(pos) => Some((pos, m.mod_type, m.hidden.clone())),
                 _ => None,
             })
         else {
@@ -241,6 +252,15 @@ impl Game<'_> {
             }
             Some(BlockEntity::Brewing(b)) => (Kind::Brewing, b.items.to_vec()),
             Some(BlockEntity::Crafter(c)) => (Kind::CrafterBlock, c.items.to_vec()),
+            // A content mod's menu type, with its slots' rules.
+            Some(BlockEntity::Mod(m)) => match mod_type {
+                Some(t) => {
+                    let mut items = m.items.clone();
+                    items.resize(t.slots, None);
+                    (Kind::Mod(t), items)
+                }
+                None => return false,
+            },
             _ => return false,
         };
         let furnace = matches!(kind, Kind::Furnace(_));
@@ -262,8 +282,11 @@ impl Game<'_> {
             .crafting
             .machine
             .take()
-            .filter(|(window, _)| *window == p.container)
+            .filter(|(window, m)| *window == p.container && m.kind() == kind)
             .map_or_else(|| Box::new(Menu::new(kind)), |(_, m)| m);
+        for &slot in &hidden {
+            menu.hide_slot(slot);
+        }
         let changed = self.guest_menu_op(host, gi, &mut menu, |menu, env| {
             for (k, s) in items.iter().enumerate() {
                 menu.set_slot(env, k, s.clone());
@@ -295,6 +318,16 @@ impl Game<'_> {
             Some(BlockEntity::Brewing(b)) => {
                 for k in 0..5 {
                     b.items[k] = menu.slot(k).cloned();
+                }
+            }
+            // The mod's items past its menu's slots stay as they were.
+            Some(BlockEntity::Mod(m)) => {
+                let n = items.len();
+                if m.items.len() < n {
+                    m.items.resize(n, None);
+                }
+                for (k, slot) in m.items.iter_mut().take(n).enumerate() {
+                    *slot = menu.slot(k).cloned();
                 }
             }
             // CrafterBlockEntity.setItem: filling a disabled slot enables it.

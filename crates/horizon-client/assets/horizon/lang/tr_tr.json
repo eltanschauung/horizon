@@ -140,10 +140,7 @@
   "%s per frame": "Kare başına %s",
   "%s MiB/frame": "Kare başına %s MiB",
   "%s KiB/frame": "Kare başına %s KiB",
-  "%s nits": "%s nit",
   "Auto (%s)": "Otomatik (%s)",
-  "Auto (%s nits)": "Otomatik (%s nit)",
-  "%.2f nits": "%.2f nit",
   "Full-detail terrain range. LOD Distance can extend local worlds farther.": "Arazinin tam ayrıntıyla görüntülendiği mesafe. LOD Mesafesi, yerel dünyalarda bu mesafeyi daha da artırabilir.",
   "Coarse distant terrain in local worlds. Integrated GPUs stop at 128 chunks.": "Yerel dünyalarda uzaktaki arazileri daha düşük ayrıntıyla görüntüler. Tümleşik GPU'larda sınır 128 parçadır.",
   "Reduced draws far terrain coarser: faster on this integrated GPU.": "Düşük ayarı, uzak arazileri daha düşük ayrıntıyla görüntüler. Bu tümleşik GPU'da daha yüksek performans sağlar.",
@@ -196,5 +193,11 @@
   "Threads that generate, light and mesh chunks. Next start.": "Parçaları oluşturan, aydınlatan ve ağ verilerini hazırlayan iş parçacıklarının sayısı. Değişiklikler sonraki başlatmada uygulanır.",
   "Vulkan, then DirectX 12 (Windows) or OpenGL (Linux) where it fails. Next start.": "Önce Vulkan kullanılır. Çalışmazsa Windows'ta DirectX 12, Linux'ta OpenGL denenir. Değişiklikler sonraki başlatmada uygulanır.",
   "Mesh data sent to the GPU per frame. Lower is smoother while loading.": "Her karede GPU'ya gönderilen ağ verisi miktarı. Daha düşük değerler yükleme sırasında daha akıcı bir deneyim sağlar.",
-  "Frame rate and frame times over the game, with a graph.": "Oyun ekranında FPS değerini ve kare sürelerini grafikle birlikte gösterir."
+  "Frame rate and frame times over the game, with a graph.": "Oyun ekranında FPS değerini ve kare sürelerini grafikle birlikte gösterir.",
+  "horizon.pages.shader_options": "Gölgelendirici Seçenekleri",
+  "horizon.pages.split_profiles": "Kim oynuyor?",
+  "horizon.pages.split_profiles.tooltip": "Kim oynuyor: bu oyun klasöründe tutulan bir profil.",
+  "horizon.shader_options.open": "Gölgelendirici Seçenekleri…",
+  "horizon.shader_options.profile": "Profil",
+  "horizon.shader_options.loading": "Gölgelendirici paketinin seçenekleri okunuyor…"
 }

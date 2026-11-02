@@ -26,6 +26,10 @@ local game installs select the plain fork.
 
 ## Rules
 
+- Keep total build artifacts under 5 GB; at 5 GB or more, purge all but the most recent build.
+
+- At the end of each turn, report the current launcher version ID (for example, `native-*`).
+
 - Never commit tokens, Minecraft JARs/assets, prepared files, logs or player data.
 - Test with temporary game/launcher/XDG homes; keep tests away from real worlds and accounts.
 - Run relevant tests, `git diff --check` and `python3 tools/check_public_tree.py` before committing.

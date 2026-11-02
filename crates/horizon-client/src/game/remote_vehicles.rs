@@ -237,9 +237,17 @@ impl Game<'_> {
             cart
         };
         if let Some(p) = self.player.as_mut() {
-            self.previous_position = p.position;
+            // The tick a rider takes its seat is a teleport (`Entity.moveTo`,
+            // which sets the old position too): the camera must not sweep from
+            // where the player stood to the cushion, boat or cart. The ticks
+            // after it move with the vehicle and interpolate as usual.
+            let first = self.posed_rider != self.riding;
+            self.posed_rider = self.riding;
             if let Some(v) = seat {
+                self.previous_position = if first { v } else { p.position };
                 p.position = v;
+            } else {
+                self.previous_position = p.position;
             }
             p.velocity = Vec3::ZERO;
             p.fall_distance = 0.0;
@@ -322,6 +330,10 @@ impl Game<'_> {
         for i in 0..self.boats.len() {
             let driven = self.riding == Some(self.boats[i].id);
             if !driven {
+                // `AbstractBoat.tick`: the non-authoritative copy carries no
+                // cached motion into the next time this player drives it.
+                self.boats[i].velocity = Vec3::ZERO;
+                self.boats[i].delta_rotation = 0.0;
                 self.refresh_boat_status(i);
             }
             let touches = self.boat_bubble_columns(i);

@@ -2671,6 +2671,7 @@ name = "horizon-launcher"
 version = "0.2.0"
 dependencies = [
  "base64",
+ "chacha20poly1305",
  "chrono",
  "clap",
  "clap_complete",
@@ -2698,8 +2699,10 @@ dependencies = [
  "oo7",
  "proc-macro2",
  "pulldown-cmark",
+ "quote",
  "raw-window-handle",
  "security-framework 3.7.0",
+ "semver",
  "serde",
  "serde_json",
  "sha1",
@@ -2710,6 +2713,7 @@ dependencies = [
  "toml 1.1.8+spec-1.1.0",
  "trash",
  "ureq",
+ "windows-sys 0.61.2",
  "winresource",
  "zip",
 ]
@@ -2758,6 +2762,7 @@ dependencies = [
 name = "horizon-protocol"
 version = "0.1.0"
 dependencies = [
+ "aes",
  "flate2",
  "getrandom 0.3.4",
  "horizon-core",
@@ -2782,6 +2787,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "naga",
+ "png 0.18.1",
  "serde",
  "serde_json",
  "sha2",
