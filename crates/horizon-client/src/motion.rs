@@ -514,8 +514,18 @@ impl PlayerMotion {
             next,
         )
         .map_err(attribute_error)?;
-        Ok(Self {
-            health: crate::health::PlayerHealth::new(&resources.health, &mut attributes)?,
+        let health = crate::health::PlayerHealth::new(&resources.health, &mut attributes)?;
+        Ok(Self::from_attribute_state(position, attributes, health))
+    }
+    // Keep construction separate from fallible resource setup so native mods can
+    // attach per-body state without rewriting error propagation.
+    fn from_attribute_state(
+        position: Vec3,
+        attributes: LiveAttributes<Box<dyn horizon_world::attributes::live::Identities>>,
+        health: crate::health::PlayerHealth,
+    ) -> Self {
+        Self {
+            health,
             status: crate::effects::StatusFlags::default(),
             impulse: ImpulseContext::default(),
             spawn_extra_particles_on_fall: false,
@@ -603,7 +613,7 @@ impl PlayerMotion {
             hurt_log: Vec::new(),
             attack_log: Vec::new(),
             border: None,
-        })
+        }
     }
     /// LivingEntity.aiStep: speeds too small to matter stop.
     fn drop_tiny_velocity(&mut self) {

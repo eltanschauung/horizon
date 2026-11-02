@@ -14,11 +14,50 @@ pub enum Model {
     Slim,
 }
 
+/// A plain stack or a random draw from a pool, resolved by the server once.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct StartingItem {
+    #[serde(default)]
+    pub item: String,
+    #[serde(default)]
+    pub choices: Vec<String>,
+    #[serde(default = "one_count")]
+    pub count: u32,
+    #[serde(default)]
+    pub min_count: Option<u32>,
+    #[serde(default)]
+    pub max_count: Option<u32>,
+    #[serde(default = "one_count")]
+    pub rolls: u32,
+}
+fn one_count() -> u32 {
+    1
+}
+fn default_size() -> f32 {
+    1.0
+}
+fn character_size<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f32, D::Error> {
+    let size = f32::deserialize(d)?;
+    Ok(if size.is_finite() {
+        size.clamp(0.7, 1.2)
+    } else {
+        1.0
+    })
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Character {
     pub id: String,
     pub name: String,
     pub texture: String,
+    /// Comma-separated race tags; abilities match complete trimmed tags.
+    #[serde(default)]
+    pub race: String,
+    #[serde(default = "default_size", deserialize_with = "character_size")]
+    pub size: f32,
+    #[serde(default)]
+    pub starting_items: Vec<StartingItem>,
     #[serde(default)]
     pub model: Model,
     #[serde(default)]
@@ -28,6 +67,14 @@ pub struct Character {
 }
 
 impl Character {
+    pub fn has_race(&self, race: &str) -> bool {
+        !race.is_empty()
+            && self
+                .race
+                .split(',')
+                .any(|tag| tag.trim().eq_ignore_ascii_case(race))
+    }
+
     pub fn display_name(&self) -> crate::text::Text {
         crate::scoreboard::comp_text(&serde_json::json!({"text": self.name, "color": self.color}))
     }
@@ -143,6 +190,23 @@ pub fn save(instance: &Path, character: &Character) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn races_use_whole_tags_and_sizes_have_safe_defaults_and_bounds() {
+        let base = serde_json::json!({"id":"lunatic:cirno", "name":"Cirno", "texture":"lunatic:entity/character/cirno"});
+        let c: Character = serde_json::from_value(base.clone()).unwrap();
+        assert_eq!(c.size, 1.0);
+        assert!(!c.has_race("fairy"));
+        for (size, expected) in [(0.1, 0.7), (1.0, 1.0), (9.0, 1.2)] {
+            let mut data = base.clone();
+            data["size"] = serde_json::json!(size);
+            data["race"] = serde_json::json!("youkai, Fairy ,ice_fairy,");
+            let c: Character = serde_json::from_value(data).unwrap();
+            assert_eq!(c.size, expected);
+            assert!(c.has_race("fairy"));
+            assert!(!c.has_race("air"));
+            assert!(!c.has_race("flower_fairy"));
+        }
+    }
     #[test]
     fn character_chat_is_opt_in_and_treats_names_and_messages_as_text() {
         let mut c: Character = serde_json::from_value(serde_json::json!({

@@ -217,6 +217,7 @@ impl Screen {
                     bounds,
                     cursor,
                     seconds,
+                    character.size,
                 );
             }
         } else {
@@ -242,6 +243,7 @@ fn draw_preview(
     bounds: [f32; 4],
     cursor: (f32, f32),
     seconds: f32,
+    character_size: f32,
 ) {
     let Some(texture) = atlas.sprites.get(skin) else {
         return;
@@ -260,7 +262,7 @@ fn draw_preview(
         "head",
         ((cursor.1 - (top + bottom) / 2.0) / 160.0).clamp(-0.2, 0.2),
     );
-    let size = ((bottom - top) / 2.2).min((right - left) / 1.8);
+    let size = ((bottom - top) / 2.2).min((right - left) / 1.8) * character_size;
     let transform = glam::Mat4::from_translation(glam::Vec3::new(cx, bottom - 2.0, 0.0))
         * glam::Mat4::from_scale(glam::Vec3::new(size, size, -size))
         * glam::Mat4::from_rotation_x(-0.08)
