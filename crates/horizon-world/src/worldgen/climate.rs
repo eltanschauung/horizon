@@ -57,12 +57,20 @@ impl TargetPoint {
 }
 #[derive(Clone, Debug)]
 pub struct ClimateSampler {
+    pub region_seed: i64,
     samplers: [Arc<dyn DensitySampler>; 6],
 }
 impl ClimateSampler {
     /// Temperature, humidity, continentalness, erosion, depth, weirdness.
     pub fn new(samplers: [Arc<dyn DensitySampler>; 6]) -> Self {
-        Self { samplers }
+        Self {
+            samplers,
+            region_seed: 0,
+        }
+    }
+    pub fn with_region_seed(mut self, seed: i64) -> Self {
+        self.region_seed = seed;
+        self
     }
     /// Coordinates are biome quart positions, converted with wrapped << 2.
     /// Every child uses the same context and runs in field declaration order.

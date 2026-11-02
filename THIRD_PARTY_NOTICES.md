@@ -115,3 +115,13 @@ licensed under the MIT license:
 > NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
 > DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 > OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+## Region-selection verification
+
+The seeded region-weight/zoom behavior is checked against TerraBlender's 26.3
+Java layer classes (Glitchfiend/TerraBlender, commit
+7d7a778ab9c14d0091581ed51ada0821e69761b8, LGPL-3.0). The engine's integer cell
+implementation is separate from the Java development fixture. No TerraBlender
+classes are included in game packages. `tools/test_region_weights_parity.py`
+uses a local source checkout and the user's private Minecraft test classpath;
+its checked-in reference data contains only numeric input/output vectors.

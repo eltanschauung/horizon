@@ -498,7 +498,10 @@ impl GeneratorData {
         }
         super::biome_placement::extend_presets(
             &mut presets,
-            &read_optional_bundle(dir, ov, "biome_placements")?.unwrap_or_default(),
+            &super::placement_config::configured(
+                &read_optional_bundle(dir, ov, "biome_placements")?.unwrap_or_default(),
+                ov.config_root(),
+            )?,
             &biome_set,
         )?;
         let source_catalog =
@@ -1144,7 +1147,7 @@ where
         if !data.generation_extensions.is_empty() {
             source_json.push_str(&format!("{:?}", data.generation_extensions));
         }
-        let climate = router.climate_sampler();
+        let climate = router.climate_sampler().with_region_seed(seed);
         let mut noises = BTreeMap::new();
         for (name, json) in &data.noises {
             let noise: Arc<dyn Noise> = Arc::new(

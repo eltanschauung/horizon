@@ -52,7 +52,10 @@ pub fn extend_presets(
             if let Some(group) = doc["group"].as_str() {
                 identifier(group)?;
                 let weight = doc["weight"].as_f64().unwrap_or(1.0);
-                if !weight.is_finite() || weight <= 0.0 {
+                if !weight.is_finite()
+                    || weight < 0.0
+                    || (weight == 0.0 && doc["region_order"].is_null())
+                {
                     return Err(DecodeError::Field("biome group weight"));
                 }
                 let selector = doc["selector"].as_str().unwrap_or("weirdness");
@@ -70,6 +73,11 @@ pub fn extend_presets(
                 candidate["horizon:selector_axis"] = json!(axis);
                 candidate["horizon:group"] = json!(group);
                 candidate["horizon:weight"] = json!(weight);
+                if !doc["region_order"].is_null() {
+                    for key in ["region_order", "region_zooms", "vanilla_weight"] {
+                        candidate[format!("horizon:{key}")] = doc[key].clone();
+                    }
+                }
             }
             table.push(candidate);
         }
@@ -96,6 +104,106 @@ mod tests {
         [("minecraft:overworld".into(), json!([{
             "biome":"minecraft:plains", "coordinates":[[0,0],[-10000,10000],[-10000,10000],[-10000,10000],[-10000,10000],[-10000,10000]], "offset":0
         }]).to_string())].into()
+    }
+    #[test]
+    fn java_region_choices_match_scalar_and_prepared_biomes() {
+        use crate::worldgen::climate::ClimateSampler;
+        use horizon_core::density::{ConstantSampler, DensitySampler, SamplerContext};
+        use std::sync::Arc;
+        let names = [
+            "minecraft:plains",
+            "example:primary",
+            "example:secondary",
+            "example:rare",
+        ];
+        let mut files = BTreeMap::new();
+        let mut presets = base();
+        for (i, w) in [(1, 10), (2, 8), (3, 2)] {
+            let mut d: Value = serde_json::from_str(&contribution(names[i], 0.)).unwrap();
+            d["group"] = json!(names[i]);
+            d["weight"] = json!(w);
+            d["region_order"] = json!(i);
+            d["region_zooms"] = json!(3);
+            d["vanilla_weight"] = json!(10);
+            files.insert(names[i].into(), d.to_string());
+        }
+        extend_presets(&mut presets, &files, &names.map(String::from).into()).unwrap();
+        let source =
+            MultiNoiseBiomeSource::from_quantized_json(&presets["minecraft:overworld"]).unwrap();
+        for seed in [0, 1, -1] {
+            let climate = ClimateSampler::new(std::array::from_fn(|_| {
+                Arc::new(ConstantSampler(0.)) as Arc<dyn DensitySampler>
+            }))
+            .with_region_seed(seed);
+            let mut resolver = source.resolver(&climate);
+            let mut context = SamplerContext::cached();
+            let volume = resolver
+                .prepare_volume(&mut context, [-16, 0, -16], [32, 1, 32])
+                .unwrap();
+            for line in include_str!("../../tests/fixtures/region_weights.csv")
+                .lines()
+                .rev()
+            {
+                let n: Vec<i64> = line.split(',').map(|s| s.parse().unwrap()).collect();
+                if n[0] != seed || n[1] != 0 || n[2] < -16 || n[2] >= 16 || n[3] < -16 || n[3] >= 16
+                {
+                    continue;
+                }
+                let q = [n[2] as i32, 0, n[3] as i32];
+                assert_eq!(
+                    resolver.sample(&mut context, q).unwrap(),
+                    names[n[4] as usize],
+                    "{line}"
+                );
+                assert_eq!(
+                    resolver.sample_prepared(&volume, q).unwrap(),
+                    names[n[4] as usize],
+                    "{line}"
+                );
+            }
+        }
+    }
+    #[test]
+    fn java_regions_include_vanilla_and_allow_zero_weight() {
+        use crate::worldgen::climate::ClimateSampler;
+        use horizon_core::density::{ConstantSampler, DensitySampler, SamplerContext};
+        use std::sync::Arc;
+        let mut presets = base();
+        let mut doc: Value = serde_json::from_str(&contribution("example:cold", 0.)).unwrap();
+        doc["group"] = json!("example:primary");
+        doc["weight"] = json!(0);
+        doc["region_order"] = json!(1);
+        doc["region_zooms"] = json!(3);
+        doc["vanilla_weight"] = json!(10);
+        extend_presets(
+            &mut presets,
+            &[("example:primary".into(), doc.to_string())].into(),
+            &["minecraft:plains".into(), "example:cold".into()].into(),
+        )
+        .unwrap();
+        let source =
+            MultiNoiseBiomeSource::from_quantized_json(&presets["minecraft:overworld"]).unwrap();
+        let climate = ClimateSampler::new(std::array::from_fn(|_| {
+            Arc::new(ConstantSampler(0.)) as Arc<dyn DensitySampler>
+        }))
+        .with_region_seed(123);
+        let mut resolver = source.resolver(&climate);
+        let mut context = SamplerContext::cached();
+        let volume = resolver
+            .prepare_volume(&mut context, [-8, 0, -8], [16, 1, 16])
+            .unwrap();
+        for x in -8..8 {
+            for z in -8..8 {
+                assert_eq!(
+                    resolver.sample(&mut context, [x, 0, z]).unwrap(),
+                    "minecraft:plains"
+                );
+                assert_eq!(
+                    resolver.sample_prepared(&volume, [x, 0, z]).unwrap(),
+                    "minecraft:plains"
+                );
+            }
+        }
     }
     #[test]
     fn weighted_groups_use_host_selector_and_are_query_order_independent() {

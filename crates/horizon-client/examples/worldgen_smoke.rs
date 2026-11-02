@@ -6,6 +6,7 @@ use horizon_client::{
     mod_content::{self, ContentMod},
     streaming::{ChunkGenerator, Proto},
 };
+use horizon_client_lib as horizon_client;
 use horizon_world::worldgen::{
     generator::{GeneratorData, OverworldGenerator},
     overrides::WorldgenOverrides,
@@ -83,6 +84,12 @@ fn check(a: &[String]) -> horizon_client::Result<()> {
         println!("PASS custom block tint sources");
     }
     let mut ov = WorldgenOverrides::default();
+    ov.set_config_root(
+        std::env::var_os("HORIZON_HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from(a[1].clone()))
+            .join("config"),
+    );
     ov.set_mods([("tectonic_horizon".into(), a[3] == "true")].into());
     ov.activate();
     if let Some(id) = a.get(4) {

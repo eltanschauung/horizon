@@ -65,6 +65,7 @@ pub fn apply(world: Option<&Path>, ov: &mut WorldgenOverrides) -> Result<(), Str
         None => current(),
     };
     ov.set_mods(selection.mods);
+    ov.set_config_root(crate::logging::game_home().join("config"));
     Ok(())
 }
 

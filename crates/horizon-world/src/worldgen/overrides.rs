@@ -134,6 +134,7 @@ impl LevelHeight {
 /// Replacement and added bundle entries, and tag files, from data packs.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct WorldgenOverrides {
+    config_root: Option<std::path::PathBuf>,
     /// Bundle name → id → the highest pack's JSON text for it.
     entries: BTreeMap<String, BTreeMap<String, String>>,
     /// World-scoped native generation switches; part of the generator cache key.
@@ -142,6 +143,12 @@ pub struct WorldgenOverrides {
     tags: BTreeMap<String, Vec<(String, String, String)>>,
 }
 impl WorldgenOverrides {
+    pub fn set_config_root(&mut self, root: std::path::PathBuf) {
+        self.config_root = Some(root);
+    }
+    pub fn config_root(&self) -> Option<&std::path::Path> {
+        self.config_root.as_deref()
+    }
     pub fn set_mods(&mut self, mods: BTreeMap<String, bool>) {
         self.mods = mods;
     }
@@ -152,7 +159,10 @@ impl WorldgenOverrides {
         self.mods.get(id).copied().unwrap_or(true)
     }
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty() && self.tags.is_empty() && self.mods.is_empty()
+        self.entries.is_empty()
+            && self.tags.is_empty()
+            && self.mods.is_empty()
+            && self.config_root.is_none()
     }
     /// A pack's file for `id` in `bundle`: called for packs from the lowest
     /// to the highest, so the last call for an id wins.

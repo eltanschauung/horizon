@@ -57,6 +57,7 @@ pub struct MultiNoiseBiomeSource {
     baseline: Option<ClimateIndex<String>>,
     groups: Vec<(f64, ClimateIndex<String>)>,
     selector_axis: usize,
+    regions: Option<(Vec<u32>, u8)>,
 }
 impl MultiNoiseBiomeSource {
     pub fn new(entries: Vec<(ParameterPoint, String)>) -> Result<Self, BiomeError> {
@@ -70,6 +71,7 @@ impl MultiNoiseBiomeSource {
             baseline: None,
             groups: Vec::new(),
             selector_axis: 5,
+            regions: None,
         })
     }
     /// Horizon's quantized import format, not the vanilla biome definition
@@ -81,6 +83,8 @@ impl MultiNoiseBiomeSource {
         let mut additions = Vec::new();
         let mut baseline = Vec::new();
         let mut selector_axis = None;
+        let mut region_options = None;
+        let mut orders = std::collections::BTreeMap::new();
         let mut groups =
             std::collections::BTreeMap::<String, (f64, Vec<(ParameterPoint, String)>)>::new();
         for entry in input
@@ -123,12 +127,43 @@ impl MultiNoiseBiomeSource {
                 }
                 selector_axis = Some(axis);
                 let weight = entry["horizon:weight"].as_f64().unwrap_or(1.0);
-                if !weight.is_finite() || weight <= 0.0 {
+                let region = entry["horizon:region_order"].as_u64();
+                if let Some(order) = region {
+                    let zooms = entry["horizon:region_zooms"]
+                        .as_u64()
+                        .filter(|v| *v <= 6)
+                        .ok_or(DecodeError::Field("region zooms"))?
+                        as u8;
+                    let vanilla = entry["horizon:vanilla_weight"]
+                        .as_u64()
+                        .filter(|v| *v <= i32::MAX as u64)
+                        .ok_or(DecodeError::Field("vanilla region weight"))?
+                        as u32;
+                    if order == 0
+                        || order > 65535
+                        || region_options.is_some_and(|v| v != (vanilla, zooms))
+                    {
+                        return Err(DecodeError::Field("inconsistent region declarations").into());
+                    }
+                    region_options = Some((vanilla, zooms));
+                    if let Some(previous) = orders.insert(group.to_owned(), order) {
+                        if previous != order {
+                            return Err(DecodeError::Field("inconsistent region order").into());
+                        }
+                    }
+                    if weight.fract() != 0.0 || weight > i32::MAX as f64 {
+                        return Err(DecodeError::Field("integer region weight").into());
+                    }
+                }
+                if !weight.is_finite() || weight < 0.0 || (weight == 0.0 && region.is_none()) {
                     return Err(DecodeError::Field("biome group weight").into());
                 }
                 let group = groups
                     .entry(group.to_owned())
                     .or_insert_with(|| (weight, Vec::new()));
+                if group.0 != weight {
+                    return Err(DecodeError::Field("inconsistent region weight").into());
+                }
                 group.1.push((point, identifier(biome)?));
             } else if entry["horizon:additive"].as_bool() == Some(true) {
                 additions.push((point, identifier(biome)?));
@@ -145,6 +180,25 @@ impl MultiNoiseBiomeSource {
             source.baseline = Some(ClimateIndex::new(baseline)?);
         }
         source.selector_axis = selector_axis.unwrap_or(5);
+        let mut groups: Vec<_> = groups.into_iter().collect();
+        if let Some((vanilla, zooms)) = region_options {
+            if orders.len() != groups.len()
+                || orders
+                    .values()
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .len()
+                    != orders.len()
+            {
+                return Err(DecodeError::Field("mixed or duplicate region orders").into());
+            }
+            groups.sort_by_key(|(id, _)| orders[id]);
+            let weights: Vec<_> = std::iter::once(vanilla)
+                .chain(groups.iter().map(|(_, (w, _))| *w as u32))
+                .collect();
+            super::region_weights::RegionWeights::new(0, weights.clone(), zooms)
+                .map_err(DecodeError::Field)?;
+            source.regions = Some((weights, zooms));
+        }
         for (_, (weight, points)) in groups {
             source.groups.push((weight, ClimateIndex::new(points)?));
         }
@@ -162,6 +216,14 @@ impl MultiNoiseBiomeSource {
                 .unwrap_or(&self.parameters)
                 .searcher(),
             additions: self.additions.as_ref().map(ClimateIndex::searcher),
+            regions: self.regions.as_ref().map(|(weights, zooms)| {
+                super::region_weights::RegionWeights::new(
+                    climate.region_seed,
+                    weights.clone(),
+                    *zooms,
+                )
+                .expect("validated region weights")
+            }),
             selector_axis: self.selector_axis,
             groups: self
                 .groups
@@ -173,6 +235,7 @@ impl MultiNoiseBiomeSource {
 }
 #[derive(Debug)]
 pub struct BiomeResolver<'a> {
+    regions: Option<super::region_weights::RegionWeights>,
     climate: &'a ClimateSampler,
     search: ClimateSearch<'a, String>,
     additions: Option<ClimateSearch<'a, String>>,
@@ -185,7 +248,7 @@ impl<'a> BiomeResolver<'a> {
         context: &mut SamplerContext,
         quart: [i32; 3],
     ) -> Result<&'a str, BiomeError> {
-        self.resolve(self.climate.sample(context, quart)?)
+        self.resolve(self.climate.sample(context, quart)?, quart)
     }
     pub fn prepare_volume(
         &self,
@@ -202,10 +265,21 @@ impl<'a> BiomeResolver<'a> {
         quart: [i32; 3],
     ) -> Result<&'a str, BiomeError> {
         let target = volume.target(quart).ok_or(BiomeError::OutsideVolume)?;
-        self.resolve(target)
+        self.resolve(target, quart)
     }
-    fn resolve(&mut self, target: super::climate::TargetPoint) -> Result<&'a str, BiomeError> {
+    fn resolve(
+        &mut self,
+        target: super::climate::TargetPoint,
+        quart: [i32; 3],
+    ) -> Result<&'a str, BiomeError> {
         let (point, name) = self.search.find_entry(target)?;
+        if let Some(regions) = &mut self.regions {
+            let index = regions.sample(quart[0], quart[2]);
+            if index == 0 {
+                return Ok(name.as_str());
+            }
+            return Ok(self.groups[index - 1].1.find_entry(target)?.1.as_str());
+        }
         if !self.groups.is_empty() {
             let total: f64 = self.groups.iter().map(|(weight, _)| weight).sum();
             // Reuse the host's coherent climate field. No coordinate hash or
