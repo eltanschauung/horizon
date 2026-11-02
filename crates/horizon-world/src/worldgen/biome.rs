@@ -272,14 +272,14 @@ impl<'a> BiomeResolver<'a> {
         target: super::climate::TargetPoint,
         quart: [i32; 3],
     ) -> Result<&'a str, BiomeError> {
-        let (point, name) = self.search.find_entry(target)?;
         if let Some(regions) = &mut self.regions {
             let index = regions.sample(quart[0], quart[2]);
             if index == 0 {
-                return Ok(name.as_str());
+                return Ok(self.search.find_entry(target)?.1.as_str());
             }
             return Ok(self.groups[index - 1].1.find_entry(target)?.1.as_str());
         }
+        let (point, name) = self.search.find_entry(target)?;
         if !self.groups.is_empty() {
             let total: f64 = self.groups.iter().map(|(weight, _)| weight).sum();
             // Reuse the host's coherent climate field. No coordinate hash or
