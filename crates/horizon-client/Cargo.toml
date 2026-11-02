@@ -11,6 +11,7 @@ autoexamples = false
 autotests = false
 
 [dependencies]
+rusqlite = { version = "0.37", features = ["bundled"] }
 horizon-client-lib = { path = "../horizon-client-lib", default-features = false }
 horizon-assets = { path = "../horizon-assets" }
 horizon-client-core = { path = "../horizon-client-core" }

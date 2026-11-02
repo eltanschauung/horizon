@@ -1068,6 +1068,7 @@ impl Game<'_> {
             "spawnpoint" => self.cmd_spawnpoint(ctx),
             "setworldspawn" => self.cmd_setworldspawn(ctx),
             "worldspawn" => self.cmd_worldspawn(),
+            "feedback" => self.cmd_feedback(ctx),
             "clear" => self.cmd_clear(ctx),
             "item" => self.cmd_item(ctx),
             "item.modify" => self.cmd_item_modify(ctx),
@@ -3090,6 +3091,27 @@ impl Game<'_> {
         Ok(targets.len() as i32)
     }
     /// Fork's operator shortcut to the global Overworld spawn, not a bed/anchor.
+    fn cmd_feedback(&mut self, ctx: &Context) -> R<i32> {
+        let Some(Arg::Str(message)) = ctx.get("message") else { return Err(err("command.failed", &[])); };
+        if message.trim().is_empty() {
+            self.system_message(Text::literal("Usage: /feedback <message>"));
+            return Ok(0);
+        }
+        let result = (|| -> Result<(), Box<dyn std::error::Error>> {
+            let home = crate::logging::game_home();
+            std::fs::create_dir_all(&home)?;
+            let db = rusqlite::Connection::open(home.join("feedback.sqlite3"))?;
+            db.busy_timeout(std::time::Duration::from_secs(5))?;
+            db.execute_batch("CREATE TABLE IF NOT EXISTS feedback (time TEXT NOT NULL, message TEXT NOT NULL);")?;
+            db.execute("INSERT INTO feedback (time, message) VALUES (strftime('%Y-%m-%dT%H:%M:%fZ','now'), ?1)", [message])?;
+            Ok(())
+        })();
+        match result {
+            Ok(()) => { self.system_message(Text::literal("Feedback saved. Thank you!")); Ok(1) }
+            Err(error) => { log::error!("Could not save feedback: {error}"); self.system_message(Text::literal("Could not save feedback. Please try again.")); Ok(0) }
+        }
+    }
+
     fn cmd_worldspawn(&mut self) -> R<i32> {
         let target = self
             .source_entity()

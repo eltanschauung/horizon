@@ -609,6 +609,9 @@ pub(crate) fn game_tree(dev: bool, horizon: bool, dedicated: bool) -> &'static D
             let spawn = d.literal(0, "worldspawn");
             d.requires(spawn, GAMEMASTERS);
             d.executes(spawn, "worldspawn");
+            let feedback = d.literal(0, "feedback");
+            let message = d.argument(feedback, "message", ArgType::Greedy);
+            d.executes(message, "feedback");
             if horizon {
                 horizon_commands(&mut d, 0);
             }

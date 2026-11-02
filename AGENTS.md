@@ -35,3 +35,5 @@ local game installs select the plain fork.
 - Run relevant tests, `git diff --check` and `python3 tools/check_public_tree.py` before committing.
 - Add an agent `Co-Authored-By:` trailer to commits. Don't post upstream issues/PRs unless asked.
 - Code map: `docs/architecture.md`. Gameplay conventions and checks: `CONTRIBUTING.md`.
+
+- `/feedback <message>` is available to all players. Bug reports live on the receiving server in `<HORIZON_HOME>/feedback.sqlite3` (desktop default `~/.local/share/horizon/feedback.sqlite3`), table `feedback`, columns `time` (UTC ISO timestamp) and `message`. Query: `SELECT time, message FROM feedback ORDER BY time DESC;`.

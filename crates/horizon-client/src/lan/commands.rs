@@ -115,6 +115,7 @@ impl CommandTree {
                 "permission": {"type": "minecraft:command_level", "level": "gamemasters"}
             }
         });
+        extra["children"]["feedback"] = serde_json::json!({"type":"literal", "children":{"message":{"type":"argument","parser":"brigadier:string","properties":{"type":"greedy"},"executable":true}}});
         self.packet_with(level, dedicated, builtin, &extra)
     }
 
