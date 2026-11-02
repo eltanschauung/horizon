@@ -132,7 +132,13 @@ fn check(a: &[String]) -> horizon_client::Result<()> {
             unsupported.len()
         );
         if !mods.is_empty() && a.get(4).is_none() {
-            assert!(bop > 0, "BOP must be reachable in {dimension}");
+            if std::env::var_os("HORIZON_TEST_BOP_REGIONS_OFF").is_some()
+                && dimension != "minecraft:the_end"
+            {
+                assert_eq!(bop, 0, "disabled BOP regions must be absent in {dimension}");
+            } else {
+                assert!(bop > 0, "BOP must be reachable in {dimension}");
+            }
         }
     }
     let terrain = horizon_client::vanillagen::VanillaTerrain::for_world_with(
