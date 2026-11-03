@@ -261,6 +261,10 @@ impl Game<'_> {
         hit: Hit,
         victim: Victim,
     ) -> Result<()> {
+        let mut bypass = false;
+        self.native_projectile_damage_cooldown(p, &mut bypass);
+        let _cooldown = horizon_client::health::ProjectileCooldownGuard::new(bypass);
+
         let Hit::Entity { at, .. } = hit else {
             return Ok(());
         };

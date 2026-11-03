@@ -6,6 +6,8 @@
 //! Horizon's own HUD extras do, and keep a mod's settings where the
 //! WebAssembly mod of the same id kept them.
 //!
+//! API 155 adds a per-projectile damage-cooldown policy (`native_projectile_damage_cooldown`).
+//!
 //! API 154 adds client-side render transforms for item-based projectiles (`native_projectile_item_pose`).
 //!
 //! API 153 adds a player starting or stopping flight, cancellable (`native_player_toggle_flight`).
@@ -525,7 +527,7 @@ pub(super) use horizon_world::level::flags;
 /// The hook points' API version. The launcher reads this line from the
 /// source it builds; keep its form.
 #[allow(dead_code)]
-pub(crate) const NATIVE_HOOKS_API: u32 = 154;
+pub(crate) const NATIVE_HOOKS_API: u32 = 155;
 
 impl GameLevel<'_> {
     /// An authoritative server committed a changed state through `Level.setBlock`.
@@ -1351,6 +1353,11 @@ impl Game<'_> {
     ) {
         let _ = (projectile, partial, pose);
     }
+    /// Server-side policy for a projectile's thrown damage only. Other damage,
+    /// armor, shields, creative immunity and PvP rules remain in force. API 155.
+    pub(super) fn native_projectile_damage_cooldown(
+        &self, projectile: &horizon_client::projectiles::Projectile, bypass: &mut bool,
+    ) { let _ = (projectile, bypass); }
     /// At most 32 pairs of already-loaded base and transparent overlay sprites.
     /// Per-pixel alpha in the overlay marks full-bright material, without
     /// illuminating the surrounding block or changing gameplay light.

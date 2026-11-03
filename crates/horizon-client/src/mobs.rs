@@ -2849,7 +2849,8 @@ impl Mob {
         // Wolf.actuallyHurt: wolf armor takes the damage instead of the wolf.
         let absorbed = self.wolf_armor_absorbs(&source);
         let mut knock = true;
-        let dealt = if self.invulnerable as f32 > 10.0 {
+        let dealt = if self.invulnerable as f32 > 10.0
+            && !(source.kind == DamageKind::Thrown && crate::health::projectile_bypasses_cooldown()) {
             if amount <= self.last_hurt {
                 return false;
             }

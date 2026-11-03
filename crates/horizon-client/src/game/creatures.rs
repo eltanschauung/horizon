@@ -4030,6 +4030,10 @@ impl Game<'_> {
         }
     }
     pub(super) fn projectile_hit(&mut self, p: &Projectile, hit: Hit) -> Result<()> {
+        let mut bypass = false;
+        self.native_projectile_damage_cooldown(p, &mut bypass);
+        let _cooldown = horizon_client::health::ProjectileCooldownGuard::new(bypass);
+
         // Projectile.onHitBlock: BlockState.onProjectileHit, for every
         // projectile (a wind charge out of the world's top has no face).
         if let Hit::Block { pos, at, face } = hit
