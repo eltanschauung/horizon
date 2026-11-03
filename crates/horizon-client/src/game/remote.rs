@@ -9384,7 +9384,7 @@ impl Game<'_> {
                 *m.entry(t.kind.as_str()).or_default() += 1;
                 m
             }),
-            "characters": self.character_sync.client.peers.iter().filter_map(|(u,i)| Some((format!("{u:032x}"), self.pack.character_catalog.get(*i)?))).collect::<std::collections::BTreeMap<_,_>>(),
+            "characters": self.character_sync.client.peers.iter().filter_map(|(u,_)| Some((format!("{u:032x}"), self.character_for(*u)?))).collect::<std::collections::BTreeMap<_,_>>(),
             "character_sync": self.character_sync.client.stats,
             "players": r.players.values().collect::<Vec<_>>(),
             // Where the other players' entities are (harnesses check movement).
