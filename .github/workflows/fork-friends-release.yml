@@ -46,10 +46,13 @@ jobs:
             source
             launcher
           shared-key: fork-friends-${{ matrix.platform }}
+          cache-on-failure: true
       - name: Fetch the exact patched prebuild source and curated payload
         run: |
           gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern prebuild-source.tar.gz
           tar xzf prebuild-source.tar.gz
+          test -f source/native-hooks.json
+          test -f source/tools/native-hook-fragments/render_hand_pose.json
         env:
           RELEASE_TAG: ${{ inputs.tag }}
       - name: Linux build libraries
