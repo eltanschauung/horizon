@@ -117,7 +117,7 @@ impl Character {
         crate::scoreboard::comp_text(&serde_json::json!({"text": self.name, "color": self.color}))
     }
 
-    /// Content mods opt into character-labelled chat without changing account identity.
+    /// Character-labelled chat is the default; definitions may opt out without changing account identity.
     pub fn chat_line(&self, content: &serde_json::Value) -> Option<crate::text::Text> {
         self.character_chat.then(|| {
             let mut line = crate::text::Text::empty();
@@ -292,11 +292,15 @@ mod tests {
         }
     }
     #[test]
-    fn character_chat_is_opt_in_and_treats_names_and_messages_as_text() {
+    fn character_defaults_and_chat_overrides_preserve_plain_text() {
         let mut c: Character = serde_json::from_value(serde_json::json!({
-            "id":"lunatic:reimu", "name":"Hakurei Reimu", "texture":"lunatic:entity/character/reimu"
+            "id":"lunatic:reimu", "name":"Hakurei Reimu"
         }))
         .unwrap();
+        assert_eq!(c.texture, "lunatic:entity/character/reimu");
+        assert_eq!(c.model, Model::Slim);
+        assert!(c.character_chat);
+        c.character_chat = false;
         assert!(c.chat_line(&serde_json::json!("hello")).is_none());
         c.character_chat = true;
         c.color = Some("red".into());
