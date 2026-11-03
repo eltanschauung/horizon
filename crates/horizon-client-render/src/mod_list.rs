@@ -65,7 +65,34 @@ impl ModList {
         row.native.as_ref().or_else(|| self.pages.get(&row.id))
     }
     pub fn load(dir: &Path) -> Self {
-        Self::parse(&horizon_mods::selections::load(dir))
+        let mut list = Self::parse(&horizon_mods::selections::load(dir));
+        // Native hooks default to on unless explicitly disabled. Their content must
+        // use the same state, even when an older selection file omits the mod.
+        // Read the running image's build record, not the installed .hnmod files:
+        // installing a bundle alone does not mean its native code is compiled in.
+        if let Some(built) = std::env::current_exe()
+            .ok()
+            .and_then(|exe| fs::read_to_string(exe.with_file_name("native-mods.json")).ok())
+        {
+            list.include_built_native_mods(&built);
+        }
+        list
+    }
+    fn include_built_native_mods(&mut self, built: &str) {
+        let Ok(record) = serde_json::from_str::<serde_json::Value>(built) else {
+            return;
+        };
+        let Some(mods) = record.get("mods").and_then(serde_json::Value::as_array) else {
+            return;
+        };
+        for id in mods
+            .iter()
+            .filter_map(|m| m.get("id").and_then(serde_json::Value::as_str))
+        {
+            if !id.is_empty() && !self.disabled.contains(id) {
+                self.enabled.insert(id.to_owned());
+            }
+        }
     }
     pub fn parse(text: &str) -> Self {
         let mut flags = BTreeMap::new();
@@ -176,6 +203,8 @@ mod tests {
             ModList::load(&dir).enabled.into_iter().collect::<Vec<_>>(),
             [
                 "appleskin",
+                "arcadiandream",
+                "biomesoplenty",
                 "chatheads",
                 "eatinganimation",
                 "lunatic",
@@ -187,6 +216,56 @@ mod tests {
         ModList::default().save(&dir);
         assert!(ModList::load(&dir).enabled.is_empty());
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn omitted_native_selection_enables_its_content_and_round_trips() {
+        let mut list = ModList::parse("mod.lunatic:true\nkey.arcadiandream.fire:key.keyboard.r\n");
+        list.include_built_native_mods(r#"{"mods":[{"id":"arcadiandream"},{"id":"lunatic"}]}"#);
+        list.installed.push(Installed {
+            id: "arcadiandream".into(),
+            title: String::new(),
+            description: String::new(),
+            problem: None,
+            dev: false,
+            native: Some(NativePage::default()),
+        });
+        assert!(list.is_on(0));
+        assert!(list.enabled.contains("arcadiandream"));
+        assert_eq!(list.keys_of("arcadiandream"), [("fire", "key.keyboard.r")]);
+        let saved = ModList::parse(&list.serialize());
+        assert_eq!(saved.enabled, list.enabled);
+        list.toggle(0);
+        list.include_built_native_mods(r#"{"mods":[{"id":"arcadiandream"}]}"#);
+        assert!(!list.is_on(0));
+        assert!(!list.enabled.contains("arcadiandream"));
+    }
+
+    #[test]
+    fn native_content_defaults_preserve_disabled_and_content_only_choices() {
+        let mut list =
+            ModList::parse("mod.arcadiandream:false\nmod.biomesoplenty:false\nmod.other:true\n");
+        list.include_built_native_mods(r#"{"mods":[{"id":"arcadiandream"},{"id":"zoom"}]}"#);
+        assert!(!list.enabled.contains("arcadiandream"));
+        assert!(!list.enabled.contains("biomesoplenty"));
+        assert!(list.enabled.contains("zoom"));
+        assert!(list.enabled.contains("other"));
+        assert!(list.disabled.contains("arcadiandream"));
+    }
+
+    #[test]
+    fn invalid_build_records_do_not_change_selections() {
+        let mut list = ModList::parse("mod.lunatic:true\n");
+        let before = list.clone();
+        for record in [
+            "invalid",
+            "{}",
+            r#"{"mods":{}}"#,
+            r#"{"mods":[{}, {"id":null}, {"id":""}]}"#,
+        ] {
+            list.include_built_native_mods(record);
+            assert_eq!(list, before);
+        }
     }
 
     #[test]

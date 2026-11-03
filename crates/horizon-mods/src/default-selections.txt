@@ -1,4 +1,6 @@
 mod.appleskin:true
+mod.arcadiandream:true
+mod.biomesoplenty:true
 mod.chatheads:true
 mod.eatinganimation:true
 mod.minimap:true

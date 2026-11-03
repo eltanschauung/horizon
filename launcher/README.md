@@ -13,9 +13,9 @@ Existing options and graphics files take precedence. The profiles in
 `crates/horizon-client-render/src/defaults/` contain no account, server history, device identifiers
 or consent choices.
 
-Without a saved mod selection file, AppleSkin, ChatHeads, Eating Animation, Lunatic, Minimap,
-Tectonic Horizon and Zoom are selected by default. Saved selections (including an empty selection) win.
-This does not download packages or compile native mods; install them and use launcher Build.
+Without a saved mod selection file, AppleSkin, Arcadian Dream, Biomes O’ Plenty, ChatHeads,
+Eating Animation, Lunatic, Minimap, Tectonic Horizon and Zoom are selected by default. Saved selections (including an empty selection) win.
+This does not download packages or compile native mods; install them and use launcher Build. Compiled native mods and their content default to enabled together, including when an older selection file omits their IDs; explicit disabled selections still win.
 
 Installed games live in `fork-versions/` and native build caches in `fork-native/`, separately from old
 upstream installations. The existing account keyring, Minecraft files, game folder, worlds and skin
