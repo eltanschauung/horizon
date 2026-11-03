@@ -110,34 +110,12 @@ fn downloaded_info(p: &Pack) -> PackInfo {
         fixed: true,
     }
 }
-/// The vanilla pack: required, at the bottom (`BuiltInPackSource`), with the
-/// client JAR's `pack.png` that the prepared resources hold.
-fn vanilla_info(vanilla: &Path) -> PackInfo {
-    PackInfo {
-        id: "vanilla".into(),
-        title: Text::translate("resourcePack.vanilla.name", &[]),
-        description: Text::translate("resourcePack.vanilla.description", &[]),
-        description_style: Style::default(),
-        source: PackSource::BuiltIn,
-        compat: Compat::Compatible,
-        icon: std::fs::read(vanilla.join("pack.png"))
-            .ok()
-            .as_deref()
-            .and_then(pack_screen::load_icon),
-        required: true,
-        position: Position::Bottom,
-        fixed: false,
-    }
-}
-/// Packs the Resource Packs screen lists: folder and built-in packs, then any
-/// active downloaded server (or world) packs, then vanilla.
 pub(super) fn pack_infos(vanilla: &Path, server: &[Pack]) -> Vec<PackInfo> {
     let mut infos: Vec<PackInfo> = packs::discover(vanilla, &packs_dir())
         .iter()
         .map(info)
         .collect();
     infos.extend(server.iter().map(downloaded_info));
-    infos.push(vanilla_info(vanilla));
     infos
 }
 impl Game<'_> {

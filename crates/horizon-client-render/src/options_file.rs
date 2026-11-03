@@ -195,7 +195,7 @@ static TABLE: LazyLock<Vec<Def>> = LazyLock::new(|| {
         b("highContrast", false),
         b("highContrastBlockOutline", false),
         b("narratorHotkey", true),
-        def("resourcePacks", List, V::List(Vec::new())),
+        def("resourcePacks", List, V::List(vec!["programmer_art".into()])),
         def("incompatibleResourcePacks", List, V::List(Vec::new())),
         def("lastServer", PS, V::Str(String::new())),
         def("lang", PS, V::Str("en_us".into())),
