@@ -57,6 +57,7 @@ pub mod ore_feature;
 pub mod overrides;
 pub mod placement;
 pub mod placement_config;
+pub mod placement_config_menu;
 pub mod projected;
 pub mod region_weights;
 pub mod replace_blobs;

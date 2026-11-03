@@ -1838,10 +1838,21 @@ impl Game<'_> {
     /// their labels when it is yours. Asked again each time the page opens
     /// and after each click.
     pub(super) fn native_settings(&mut self, mod_id: &str, buttons: &mut Vec<String>) {
+        if mod_id == "biomesoplenty" {
+            match Self::native_config_dir() {
+                Ok(root) => buttons.extend(horizon_world::worldgen::placement_config_menu::buttons(&root)),
+                Err(e) => buttons.push(format!("Cannot open configuration: {e}")),
+            }
+        }
         mod_api::dispatch_settings(self, mod_api::mods(), mod_id, buttons);
     }
     /// Button `button` of mod `mod_id`'s settings page was clicked.
     pub(super) fn native_settings_click(&mut self, mod_id: &str, button: usize) {
+        if mod_id == "biomesoplenty" {
+            if let Ok(root) = Self::native_config_dir() {
+                horizon_world::worldgen::placement_config_menu::click(&root, button);
+            }
+        }
         mod_api::dispatch_settings_click(self, mod_api::mods(), mod_id, button);
     }
     /// The player did `event` on mod `mod_id`'s panel (`native_panel_items`):
