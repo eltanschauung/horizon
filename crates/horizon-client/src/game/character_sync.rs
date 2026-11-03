@@ -234,6 +234,12 @@ impl Game<'_> {
         let mut joins = Vec::new();
         if let Some(host) = self.lan.as_mut() {
             for (uuid, index) in &self.character_sync.server.peers {
+                // Saved preferences and cached names are not this connection's choice.
+                if host.hub.character_join_pending(*uuid)
+                    && !self.character_sync.server.selection_confirmed(*uuid)
+                {
+                    continue;
+                }
                 let Some(base) = self.pack.character_catalog.get(*index) else {
                     continue;
                 };
@@ -266,7 +272,13 @@ impl Game<'_> {
             .server
             .flush(&self.pack.character_catalog)
         {
-            let rows:Vec<_>=self.character_sync.resolved.iter().filter(|(u,_)|self.character_sync.server.peers.contains_key(u)).map(|(u,c)|(format!("{u:032x}"),c.id.clone(),c.name.clone())).collect();
+            let rows: Vec<_> = self.character_sync.server.peers.keys().filter_map(|uuid| {
+                if !self.character_sync.server.selection_confirmed(*uuid) {
+                    return None;
+                }
+                let character = self.character_for(*uuid)?;
+                Some((format!("{uuid:032x}"), character.id.clone(), character.name.clone()))
+            }).collect();
             for chunk in rows.chunks(64) {if let Ok(bytes)=serde_json::to_vec(chunk){let _=self.native_net_send_to_player(delivery.player,"lunatic:character_names_v1",&bytes);}}
             // Legacy JSON rosters may exceed the old channel limit on large servers.
             // They cannot be retried successfully; the compact v2 snapshot always fits.

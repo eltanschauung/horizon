@@ -388,6 +388,7 @@ pub struct Delivery {
 pub struct Server {
     pub peers: BTreeMap<u128, u16>,
     online: BTreeSet<u128>,
+    confirmed: BTreeSet<u128>,
     legacy: BTreeSet<u128>,
     full: BTreeSet<u128>,
     dirty: BTreeMap<u128, Option<u16>>,
@@ -405,23 +406,33 @@ impl Server {
         self.online.insert(uuid);
         self.full.insert(uuid);
         if let Some(index) = restored {
-            self.set(uuid, index);
+            // Keep the preference available to the server, but do not advertise
+            // it as this connection's choice before the client confirms it.
+            self.peers.insert(uuid, index);
         }
     }
+    /// A valid selection received on this connection, rather than a restored
+    /// preference. Retransmits and unchanged selections still confirm identity.
+    pub fn selection_confirmed(&self, uuid: u128) -> bool {
+        self.online.contains(&uuid) && self.confirmed.contains(&uuid)
+    }
+
     fn set(&mut self, uuid: u128, index: u16) -> bool {
-        if self.peers.insert(uuid, index) == Some(index) {
-            return false;
+        let changed = self.peers.insert(uuid, index) != Some(index);
+        let first_confirmation = self.confirmed.insert(uuid);
+        if changed || first_confirmation {
+            self.dirty.insert(uuid, Some(index));
         }
-        self.dirty.insert(uuid, Some(index));
-        true
+        changed
     }
     pub fn leave(&mut self, uuid: u128) {
         self.online.remove(&uuid);
+        let confirmed = self.confirmed.remove(&uuid);
         self.legacy.remove(&uuid);
         self.full.remove(&uuid);
         self.acknowledgements.remove(&uuid);
         self.requests.remove(&uuid);
-        if self.peers.remove(&uuid).is_some() {
+        if self.peers.remove(&uuid).is_some() && confirmed {
             self.dirty.insert(uuid, None);
         }
     }
@@ -528,6 +539,9 @@ impl Server {
                             .peers
                             .iter()
                             .filter_map(|(u, i)| {
+                                if !self.confirmed.contains(u) {
+                                    return None;
+                                }
                                 Some((format!("{u:032x}"), catalog.get(*i)?.id.as_str()))
                             })
                             .collect();
@@ -544,7 +558,12 @@ impl Server {
                     Update {
                         kind: Kind::Snapshot(catalog.digest),
                         revision: self.revision,
-                        changes: self.peers.iter().map(|(u, i)| (*u, Some(*i))).collect(),
+                        changes: self
+                            .peers
+                            .iter()
+                            .filter(|(uuid, _)| self.confirmed.contains(*uuid))
+                            .map(|(uuid, index)| (*uuid, Some(*index)))
+                            .collect(),
                         ack: None,
                     }
                     .encode()
@@ -605,6 +624,106 @@ mod tests {
         }
     }
     #[test]
+    fn reconnect_waits_for_current_selection_and_keeps_reserved_character_suffix() {
+        let c = Catalog::new(
+            [("satori", "Komeiji Satori"), ("cirno", "Cirno")]
+                .into_iter()
+                .map(|(id, name)| {
+                    serde_json::from_value(serde_json::json!({
+                        "id": format!("lunatic:{id}"), "name": name,
+                        "texture": format!("lunatic:entity/character/{id}")
+                    }))
+                    .unwrap()
+                })
+                .collect(),
+        );
+        let satori = c.index("lunatic:satori").unwrap();
+        let cirno = c.index("lunatic:cirno").unwrap();
+        let mut names = crate::characters::reservations::Reservations::default();
+        assert_eq!(names.reserve(1, "lunatic:cirno"), 0);
+        let slot = names.reserve(2, "lunatic:cirno");
+        let mut server = Server::default();
+        server.join(2, Some(satori));
+        assert!(!server.selection_confirmed(2));
+        assert!(server.select(2, select(&c, 1, cirno), &c));
+        assert!(server.selection_confirmed(2));
+        assert_eq!(
+            format!("Cirno{}", crate::characters::reservations::suffix(slot)),
+            "Cirno (B)"
+        );
+        server.leave(2);
+        assert!(!server.selection_confirmed(2));
+        // An old saved character or roster sync cannot announce the new session.
+        server.join(2, Some(satori));
+        assert_eq!(server.peers.get(&2), Some(&satori));
+        assert!(!server.selection_confirmed(2));
+        assert!(!server.select(2, Request::Resync, &c));
+        assert!(!server.selection_confirmed(2));
+        let mut invalid = select(&c, 1, cirno);
+        let Request::Select(selection) = &mut invalid else {
+            unreachable!()
+        };
+        selection.catalog = [0; 32];
+        assert!(!server.select(2, invalid, &c));
+        assert!(!server.selection_confirmed(2));
+        assert!(server.select(2, select(&c, 2, cirno), &c));
+        assert!(server.selection_confirmed(2));
+        let character = c.get(server.peers[&2]).unwrap();
+        let name = format!(
+            "{}{}",
+            character.name,
+            crate::characters::reservations::suffix(names.reserve(2, &character.id))
+        );
+        assert_eq!(name, "Cirno (B)");
+    }
+
+    #[test]
+    fn unchanged_selection_confirms_reconnect_without_changing_preference() {
+        let c = catalog();
+        let mut server = Server::default();
+        server.join(1, Some(0));
+        let mut client = Client::default();
+        receive(&mut client, &server.flush(&c), 1, &c);
+        assert!(!client.peers.contains_key(&1));
+        assert!(!server.selection_confirmed(1));
+        // The existing client's snapshot shortcut must not suppress this request.
+        let request = client.poll(1, 0, c.digest, Duration::ZERO).unwrap();
+        assert!(!server.select(1, Request::decode(&request).unwrap(), &c));
+        assert!(server.selection_confirmed(1));
+        assert!(!server.select(1, select(&c, 1, 0), &c));
+        assert!(server.selection_confirmed(1));
+        receive(&mut client, &server.flush(&c), 1, &c);
+        assert_eq!(client.peers.get(&1), Some(&0));
+        assert!(
+            client
+                .poll(1, 0, c.digest, Duration::from_secs(60))
+                .is_none()
+        );
+        assert_eq!(client.stats.sent, 1);
+        server.leave(1);
+        server.join(1, Some(0));
+        assert!(!server.selection_confirmed(1));
+    }
+
+    #[test]
+    fn legacy_selection_confirmation_is_scoped_to_the_connection() {
+        let c = catalog();
+        let mut server = Server::default();
+        server.join(1, Some(0));
+        assert!(!server.selection_confirmed(1));
+        assert!(!server.select_legacy(1, 0));
+        assert!(server.selection_confirmed(1));
+        server.join(2, Some(1));
+        let messages = server.flush(&c);
+        let legacy = messages.iter().find(|message| message.player == 1).unwrap();
+        let roster: serde_json::Value = serde_json::from_slice(&legacy.bytes).unwrap();
+        assert!(roster.get(format!("{:032x}", 2).as_str()).is_none());
+        server.leave(1);
+        server.join(1, Some(0));
+        assert!(!server.selection_confirmed(1));
+    }
+
+    #[test]
     fn handshake_then_silent_idle_and_cached_late_join_delta() {
         let c = catalog();
         let mut server = Server::default();
@@ -629,6 +748,14 @@ mod tests {
         assert_eq!(alice.stats.sent, 1);
         assert_eq!(alice.stats.retries, 0);
         server.join(2, Some(1));
+        let mut bob = Client::default();
+        let initial = server.flush(&c);
+        assert_eq!(initial.len(), 1);
+        assert_eq!(initial[0].player, 2);
+        receive(&mut bob, &initial, 2, &c);
+        assert!(!bob.peers.contains_key(&2));
+        let choice = bob.poll(2, 1, c.digest, Duration::ZERO).unwrap();
+        assert!(!server.select(2, Request::decode(&choice).unwrap(), &c));
         let messages = server.flush(&c);
         assert_eq!(messages.len(), 2);
         assert_eq!(
@@ -636,7 +763,6 @@ mod tests {
             Kind::Delta
         );
         receive(&mut alice, &messages, 1, &c);
-        let mut bob = Client::default();
         receive(&mut bob, &messages, 2, &c);
         assert_eq!(alice.peers, bob.peers);
         assert!(bob.poll(2, 1, c.digest, Duration::ZERO).is_none());
@@ -769,6 +895,7 @@ mod tests {
         let new = Catalog::new(old.characters.iter().rev().cloned().collect());
         let mut server = Server::default();
         server.join(1, Some(0));
+        server.select(1, select(&old, 1, 0), &old);
         server.flush(&old);
         server.reload(&old, &new);
         assert_eq!(server.peers.get(&1), Some(&1));
@@ -836,6 +963,11 @@ mod tests {
         let mut server = Server::default();
         for uuid in 0..MAX_PEERS as u128 {
             server.join(uuid, Some(0));
+            server.select(uuid, select(&c, 1, 0), &c);
+        }
+        server.flush(&c);
+        for uuid in 0..MAX_PEERS as u128 {
+            server.select(uuid, Request::Resync, &c);
         }
         let messages = server.flush(&c);
         assert_eq!(messages.len(), MAX_PEERS);
