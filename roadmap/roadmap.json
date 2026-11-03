@@ -356,20 +356,6 @@
    "shipped_in": "v0.2.70"
   },
   {
-   "id": "discord-presence",
-   "title": "Discord Rich Presence",
-   "status": "shipped",
-   "area": "extras",
-   "plain": "Your Discord profile can show that you are playing Horizon, with a switch to turn it off.",
-   "dev": "A Discord IPC client on its own thread (#1787) and the presence with its setting (#1788). Merged: it ships with the next release.",
-   "links": [
-    "#1787",
-    "#1788"
-   ],
-   "shipped_in": "v0.2.58",
-   "announce": true
-  },
-  {
    "id": "server-dialogs",
    "title": "Server dialogs and login screens",
    "status": "shipped",

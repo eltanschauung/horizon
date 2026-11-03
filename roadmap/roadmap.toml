@@ -295,18 +295,6 @@ scratch'."""
 links = ["#1820", "#1822", "#1861", "#1863", "#1855", "docs/shaders.md", "docs/api/shaders.md"]
 
 [[item]]
-id = "discord-presence"
-title = "Discord Rich Presence"
-status = "shipped"
-shipped_in = "v0.2.58"
-area = "extras"
-announce = true
-plain = """Your Discord profile can show that you are playing Horizon, with a switch to turn it off."""
-dev = """A Discord IPC client on its own thread (#1787) and the presence with its setting (#1788). Merged: it ships \
-with the next release."""
-links = ["#1787", "#1788"]
-
-[[item]]
 id = "server-dialogs"
 title = "Server dialogs and login screens"
 status = "shipped"

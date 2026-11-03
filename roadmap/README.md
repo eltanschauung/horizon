@@ -80,8 +80,6 @@ merged pull request, release, shipped item and weekly summary, newest first, the
 ```json
 { "format": "horizon-journal", "version": 2, "generated": "…", "url": "https://playhorizon.dev/hub#journal",
   "entries": [
-    { "id": "pr-1788", "kind": "merge", "date": "…", "title": "the pull request's title", "url": "…",
-      "number": 1788, "item": "discord-presence", "item_title": "Discord Rich Presence" },
     { "id": "release-v0.2.57", "kind": "release", "date": "…", "title": "…", "plain": "one line", "url": "…",
       "tag": "v0.2.57" },
     { "id": "shipped-server-resource-packs", "kind": "shipped", "date": "the release's", "title": "…",
