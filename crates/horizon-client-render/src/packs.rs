@@ -4,6 +4,7 @@
 //! and an overlay resource root that layers the enabled packs over the
 //! vanilla resources (later packs win), so every loader sees one tree.
 mod cache;
+mod bundled;
 use crate::text::Style;
 use crate::{text::Text, zip::Zip};
 pub use horizon_client_core::pattern;
@@ -493,6 +494,10 @@ pub fn discover(resources: &Path, packs_dir: &Path) -> Vec<Pack> {
         {
             out.push(p);
         }
+    }
+    match bundled::pacp(packs_dir) {
+        Ok(path) => if let Some(p) = pack("pacp".into(), Text::literal("Programmer Art Continuation Project 2.5.4"), Source::Zip(path)) { out.push(p); },
+        Err(e) => log::warn!("Could not materialize bundled PACP: {e}"),
     }
     out.extend(folder(packs_dir, RESOURCE_FORMAT));
     out

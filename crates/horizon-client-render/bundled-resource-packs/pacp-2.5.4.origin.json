@@ -1,0 +1,16 @@
+{
+  "name": "Programmer Art Continuation Project",
+  "version": "2.5.4",
+  "author": "mzovjn (mzovistired/mzov/jen)",
+  "project": "https://modrinth.com/resourcepack/pacp",
+  "release": "https://modrinth.com/resourcepack/pacp/version/2.5.4",
+  "modrinth_version": "7sZqSYLJ",
+  "download": "https://cdn.modrinth.com/data/gx2HeuWD/versions/7sZqSYLJ/PACP_Base_Release.zip",
+  "hashes": {
+    "sha512": "9c72b9e23e7dbd4c99f0570707f45f815e6129c6b64b37e9999de010c38b995d58bdfa723ef71d49dc8a1eee8c58f7a0f028d0388a49e2ff7acd156b78472837",
+    "sha1": "0cd932771220323860775cda339aa0173cd621ce"
+  },
+  "license": "All Rights Reserved; separate permission, not covered by Horizon license",
+  "permission": "Fork maintainer confirmed permission to embed the ZIP on 2026-11-03.",
+  "size": 4513210
+}

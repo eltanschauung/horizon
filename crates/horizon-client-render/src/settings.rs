@@ -270,7 +270,7 @@ impl Default for Settings {
             show_subtitles: false,
             notification_display_time: 1.0,
             main_hand_left: false,
-            resource_packs: vec!["programmer_art".into()],
+            resource_packs: vec!["programmer_art".into(), "pacp".into()],
             keys: KeyBinds::default(),
             file: OptionsFile::default(),
             invert_x: false,
