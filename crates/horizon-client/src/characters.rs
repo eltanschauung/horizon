@@ -3,6 +3,8 @@ use crate::hud::HudAtlas;
 use serde::{Deserialize, Serialize};
 use std::{fs, io, io::Write, path::Path};
 
+pub mod sync;
+
 pub const FALLBACK_SKIN: &str = "entity/player/wide/steve";
 const CHOICE_FILE: &str = "character.json";
 
@@ -148,6 +150,52 @@ pub fn roster(root: &Path) -> Vec<Character> {
         }
     }
     characters
+}
+
+/// Immutable catalog for one loaded resource generation. Shared by cloned pack bundles.
+/// Networking uses indices and this precomputed digest, never filesystem reads.
+pub struct Catalog {
+    characters: Vec<Character>,
+    by_id: std::collections::HashMap<String, u16>,
+    pub digest: [u8; 32],
+    pub digest_hex: String,
+}
+impl Catalog {
+    pub fn load(root: &Path) -> Self {
+        Self::new(roster(root))
+    }
+    pub fn new(mut characters: Vec<Character>) -> Self {
+        use sha2::{Digest, Sha256};
+        // u16::MAX is the wire's removal marker.
+        characters.truncate(usize::from(u16::MAX));
+        let digest: [u8; 32] =
+            Sha256::digest(serde_json::to_vec(&characters).expect("character catalog serializes"))
+                .into();
+        let by_id = characters
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (c.id.clone(), i as u16))
+            .collect();
+        let digest_hex = digest.iter().map(|b| format!("{b:02x}")).collect();
+        Self {
+            characters,
+            by_id,
+            digest,
+            digest_hex,
+        }
+    }
+    pub fn get(&self, index: u16) -> Option<&Character> {
+        self.characters.get(usize::from(index))
+    }
+    pub fn index(&self, id: &str) -> Option<u16> {
+        self.by_id.get(id).copied()
+    }
+    pub fn resolve_legacy(&self, bytes: &[u8]) -> Option<u16> {
+        let request: SelectionRequest = serde_json::from_slice(bytes).ok()?;
+        (request.catalog == self.digest_hex)
+            .then(|| self.index(&request.character))
+            .flatten()
+    }
 }
 
 #[derive(Deserialize, Serialize)]

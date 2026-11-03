@@ -1,39 +1,35 @@
 # Horizon fork
 
-- Repository: `eltanschauung/horizon`; push to `origin`, never `upstream`.
-- Desktop checkout: `/home/xxlib/Desktop/horizon`. From the VPS, use `ssh horizon-desktop`.
-- Preserve our skin changes: Steve fallback, startup caching, textures ready before world rendering.
-- Launcher Build uses the fork's pushed `main`; keep its ancestry checks and separate fork installs.
+- Rust game for Minecraft 26.3: `eltanschauung/horizon`; push to `origin`, never `upstream`.
+- Checkout: `/home/xxlib/Desktop/horizon`; from VPS: `ssh horizon-desktop`. Inspect status/diffs; preserve unrelated edits.
+- Paths/checks: `docs/architecture.md`, `CONTRIBUTING.md` (read matching sections). Game: `crates/horizon-client/src/game.rs` + `game/`; worldgen: `crates/horizon-world/src/worldgen/`; launcher: `launcher/src/`; mods: sibling repos.
 
-## Commands
+## Build and deploy
 
-Run from the checkout on the desktop, including over SSH:
+Rust/cache config: `.local/fork-build.json`. Run here:
 
 ```sh
-./tools/fork.py build                  # Build game + launcher, optimized fast profile
-./tools/fork.py install                # Build + install both; select the local game build
-./tools/fork.py build game             # Or: launcher
-./tools/fork.py install launcher       # Or: game
-./tools/fork.py build --release        # Slower build, maximum optimization
+./tools/fork.py build             # Game + launcher; optimized fast profile
+./tools/fork.py install           # Build + deploy both; selects plain fork-local
+./tools/fork.py build game        # Or: launcher
+./tools/fork.py build lunatic     # Packages: ../Lunatic/target/horizon-mod
+./tools/fork.py install launcher  # Or: game
+./tools/fork.py build --release   # Optional maximum optimization
 ```
 
-Rust is found automatically. Optional machine-specific cache/toolchain paths go in ignored
-`.local/fork-build.json` (`CARGO_HOME`, `RUSTUP_HOME`, `HORIZON_FORK_RUST_BIN`).
-Install preserves accounts, keyring, Minecraft files, skins and worlds; it never restarts running apps.
-Use install when asked to deploy changes. The launcher's Build fetches pushed code; these commands
-build the local checkout, including uncommitted edits. Native mods are applied by launcher Build;
-local game installs select the plain fork.
+Local commands build edits; deploy affected components only. Native mods: package/install in their repo, then launcher Build with selected mods. It fetches pushed fork `main`; push game changes first; preserve ancestry checks/separate installs. Local installs select the plain fork without native mods. Server builds only for server/multiplayer work; telemazer:25565.
 
-## Rules
+## Workflow
 
-- Keep total build artifacts under 5 GB; at 5 GB or more, purge all but the most recent build.
+- Use `rg`; batch independent reads, retrieve bounded snippets once. Validate dependencies/resource/package formats before compilation. Reuse toolchain, target directory and profile; build after edits.
+- Build checks: wait 30–55s, keep session handles, read new output/errors only. Avoid repeated log dumps and unrelated commands during waits.
+- Skip tests for small tasks and builds for documentation. Otherwise run focused checks once; broaden only for new failures/unresolved risk.
+- Handoff in existing docs or ignored `.local/`: completed/next work, exact commands, validation, running handles. Resume there instead of rereading chat history.
 
-- At the end of each turn, report the current launcher version ID (for example, `native-*`).
+## Safety and feedback
 
-- Never commit tokens, Minecraft JARs/assets, prepared files, logs or player data.
-- Test with temporary game/launcher/XDG homes; keep tests away from real worlds and accounts.
-- Run relevant tests, `git diff --check` and `python3 tools/check_public_tree.py` before committing.
-- Add an agent `Co-Authored-By:` trailer to commits. Don't post upstream issues/PRs unless asked.
-- Code map: `docs/architecture.md`. Gameplay conventions and checks: `CONTRIBUTING.md`.
-
-- `/feedback <message>` is available to all players. Bug reports live on the receiving server in `<HORIZON_HOME>/feedback.sqlite3` (desktop default `~/.local/share/horizon/feedback.sqlite3`), table `feedback`, columns `time` (UTC ISO timestamp) and `message`. Query: `SELECT time, message FROM feedback ORDER BY time DESC;`.
+- Preserve accounts, keyring, Minecraft resources, skins and worlds; never restart running apps. Test only with temporary game/launcher/XDG homes.
+- Preserve Cargo caches/fingerprints/dependencies. Packages below 5 GB; at the limit retain newest/running builds; exclude caches from cleanup.
+- Never commit credentials, Minecraft JARs/assets, prepared resources, logs or player data. Before committing: `git diff --check`, `python3 tools/check_public_tree.py`; add `Co-Authored-By:`. Upstream issues/PRs require a request.
+- Finish with validation/limits, new version IDs, and commit HEADs for repos committed this turn.
+- `/feedback <message>`: receiving server's `<HORIZON_HOME>/feedback.sqlite3` (desktop `~/.local/share/horizon/feedback.sqlite3`), table `feedback(time,message)`; UTC ISO timestamps.

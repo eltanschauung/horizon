@@ -342,7 +342,9 @@ impl Game<'_> {
         self.portals.sections.clear();
         self.options.resources = root.clone();
         let context = pack.context.clone();
+        let old_catalog = self.pack.character_catalog.clone();
         self.pack = pack;
+        self.reload_character_catalog(old_catalog);
         self.gui = gui;
         // The new atlas's skin and map slots are blank: players and maps
         // upload into it again instead of naming sprites it does not have.

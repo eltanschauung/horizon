@@ -42,12 +42,32 @@ Characters may set `character_chat: true` to display the local player's ordinary
 chat as `Character Name : message`, and use that name on the player's own visible
 nametag. Optional `color` accepts Minecraft named colors or `#RRGGBB`, and colors
 the name only. These are presentation changes: profile identity, scoreboard keys,
-message signing, commands and private messages are unchanged. Selections synchronize over `lunatic:characters_v1` on Horizon mod networking.
-The authenticated connection supplies the UUID; clients submit only a character ID
-and catalog digest. The server rejects unknown IDs, changed catalogs and extra
-fields. It saves choices in `character-selections.json`, restores them on login,
-and sends the online roster on join, change and periodic refresh. Disconnects
-remove the online appearance without deleting the saved preference.
+message signing, commands and private messages are unchanged.
+
+Selections synchronize over `lunatic:characters_v2` on Horizon mod networking.
+The authenticated connection supplies the UUID. Both sides cache one indexed
+catalog and its SHA-256 digest per loaded resource generation, shared by cloned
+resource bundles. A selection is 39 bytes (sequence, digest and catalog index).
+The server validates it and piggybacks an acknowledgement on a revisioned roster
+update. It sends one snapshot on join and coalesces changed selections/removals
+into one delta per tick. Encoded snapshots are shared until the roster changes;
+normal chat reads the cached UUID map and sends no character messages.
+
+After acknowledgement, synchronization is silent until a selection, roster or
+catalog changes. A matching restored selection needs no client request. Failed
+handshakes/resyncs have at most four attempts with exponential backoff; explicit
+rejections stop retries. Revision gaps request a fresh snapshot. Catalog mismatch
+stays rejected until the client loads a different catalog. Texture-only reloads
+retain the same digest and need no resynchronization. The roster is capped at
+1,024 players so its binary snapshot fits the 30,000-byte mod channel.
+
+The server saves changed IDs only, coalescing writes once per tick, and restores
+them on login. An unreadable/invalid preference file is preserved, never replaced
+with defaults. Disconnects remove online appearances without deleting saved
+preferences. Older v1 clients still receive cached JSON snapshots when something
+changes; their identical polling requests generate no replies or disk writes.
+New clients and servers should be updated together. Agent `status` exposes safe
+`server.character_sync` counters for traffic regression tests.
 
 Player models, overhead names, player-list names/skins and ordinary chat resolve
 through that shared UUID map. Accounts, scoreboard keys and signed message bodies
@@ -74,4 +94,6 @@ python3 tools/character_sync_e2e.py --game /path/to/horizon-client \
 It runs a private offline dedicated fixture and two headless clients, all in
 scratch folders, and checks the shared roster/colors, late joins, chat,
 overhead names, disconnects, changed selections, reconnects and persisted UUID
-choices. The production server uses online authentication.
+choices. It also verifies that eight idle seconds and a burst of chat produce
+zero character messages, and an unchanged reconnect does not rewrite preferences.
+The production server uses online authentication.

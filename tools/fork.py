@@ -64,7 +64,9 @@ def build(component, profile, jobs, env, cargo):
         raise RuntimeError("HORIZON_MSA_CLIENT_ID must not be empty: the launcher needs it to renew logins.")
     common = [cargo, "build", "--locked", "--profile", profile, "-j", str(jobs)]
     if component in ("all", "game"):
-        subprocess.run(common + ["-p", "horizon-client", "--bin", "horizon-client", "--bin", "horizon-ctl"],
+        subprocess.run(common + ["-p", "horizon-client", "--bin", "horizon-client"],
+                       cwd=ROOT, env=env, check=True)
+        subprocess.run(common + ["-p", "horizon-client-lib", "--bin", "horizon-ctl"],
                        cwd=ROOT, env=env, check=True)
     if component in ("all", "launcher"):
         subprocess.run(common + ["--manifest-path", str(ROOT / "launcher/Cargo.toml"), "--bin", "horizon-launcher"],
@@ -184,7 +186,7 @@ def install(component, profile, env):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("build", "install"), help="install builds first, then deploys")
-    parser.add_argument("component", nargs="?", default="all", choices=("all", "game", "launcher"))
+    parser.add_argument("component", nargs="?", default="all", choices=("all", "game", "launcher", "lunatic"))
     parser.add_argument("--release", action="store_true", help="use slower release builds instead of fast")
     parser.add_argument("--jobs", type=int, default=2, help="parallel compiler jobs (default: 2)")
     args = parser.parse_args()
@@ -192,6 +194,20 @@ def main():
         parser.error("--jobs must be positive")
     if sys.platform != "linux":
         parser.error("these local build/install commands currently support Linux")
+    if args.component == "lunatic":
+        if args.action != "build":
+            parser.error("Lunatic supports build only; install its packages through the launcher")
+        if args.release:
+            parser.error("--release applies to game/launcher builds, not Lunatic packages")
+        lunatic = ROOT.parent / "Lunatic"
+        command = [sys.executable, str(lunatic / "tools/build.py"), "--horizon", str(ROOT)]
+        if (lunatic / "target/tools/debug/cargo-horizon-mod").is_file():
+            command.append("--skip-tool-build")
+        try:
+            subprocess.run(command, cwd=lunatic, check=True)
+        except (OSError, subprocess.CalledProcessError) as error:
+            parser.exit(1, f"fork: {error}\n")
+        return
     try:
         env, cargo = build_environment()
         profile = "release" if args.release else "fast"

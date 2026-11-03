@@ -1973,6 +1973,7 @@ impl UiResources {
 /// cloning shares the loaded data.
 #[derive(Clone)]
 pub struct PackResources {
+    character_catalog: Arc<horizon_client::characters::Catalog>,
     assets: Arc<Assets>,
     render: Arc<RenderAssets>,
     context: Arc<WorkerContext>,
@@ -2044,6 +2045,7 @@ impl PackResources {
             names: Arc::new(Names::load(root)),
             clouds: Arc::new(load_clouds(root)),
             forcefield: Arc::new(load_forcefield(root)),
+            character_catalog: Arc::new(horizon_client::characters::Catalog::load(root)),
         }
     }
 }

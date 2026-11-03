@@ -67,6 +67,8 @@ impl Game<'_> {
         for (player, m) in std::mem::take(&mut self.native_net.from_players) {
             if m.channel == super::character_sync::CHANNEL {
                 self.character_from_client(player, &m.data);
+            } else if m.channel == super::character_sync::LEGACY_CHANNEL {
+                self.character_from_legacy_client(player, &m.data);
             } else {
                 self.native_net_from_client(player, &m.channel, &m.data);
             }
@@ -75,6 +77,9 @@ impl Game<'_> {
 
     /// What the mods sent this tick leaves; the tick's allowances start over.
     pub(super) fn flush_native_net(&mut self, host: &mut LanHost) {
+        if self.level_pass.last {
+            self.flush_character_sync();
+        }
         for (player, data) in std::mem::take(&mut self.native_net.to_players) {
             if let Some(g) = host
                 .hub
