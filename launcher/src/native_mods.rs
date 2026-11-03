@@ -1082,9 +1082,6 @@ pub struct About {
 
 /// What installed native build `version` was made from; None for any other version.
 pub fn about(version: &str) -> Option<About> {
-    if !is_native(version) {
-        return None;
-    }
     about_in(&backend::version_dir(version))
 }
 

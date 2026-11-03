@@ -838,6 +838,7 @@ pub(crate) fn install_as(
     let target = version_dir(tag);
     let _ = fs::remove_dir_all(&target);
     fs::rename(&top, &target).map_err(|e| e.to_string())?;
+    crate::fork::install_bundled_mods(&target, &game_home())?;
     fs::write(target.join(COMPLETE), "").map_err(|e| e.to_string())?;
     let _ = fs::remove_dir_all(&partial);
     reuse_prepared_for(tag);
