@@ -50,7 +50,7 @@ fn string(v: &Value) -> io::Result<&str> {
 impl Catalog {
     /// Imports native decoded definitions and resolves raw tag resources with
     /// the shared tag implementation. No data-pack or network IDs are invented.
-    pub fn from_json(v: &Value, resources: &Value) -> io::Result<Self> {
+    pub fn from_json(v: &Value, resources: &Value) -> io::Result<Catalog> {
         if v["data_version"].as_i64() != Some(i64::from(DATA_VERSION)) {
             return Err(invalid("damage catalog data version mismatch"));
         }
