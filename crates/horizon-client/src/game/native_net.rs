@@ -107,6 +107,7 @@ impl Game<'_> {
     /// A `horizon:mod_net` payload the server sent the window.
     pub(super) fn remote_native_net(&mut self, data: &[u8]) {
         match mod_net::decode(data) {
+            Ok(m) if m.channel == "lunatic:character_names_v1" => self.character_names_from_server(&m.data),
             Ok(m) if m.channel == super::character_sync::CHANNEL => {
                 self.character_from_server(&m.data)
             }

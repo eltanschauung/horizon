@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::{fs, io, io::Write, path::Path};
 
 pub mod sync;
+pub mod reservations;
 
 pub const FALLBACK_SKIN: &str = "entity/player/wide/steve";
 const CHOICE_FILE: &str = "character.json";

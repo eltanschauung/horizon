@@ -2352,12 +2352,12 @@ impl OptionsUi {
                     ),
                     // No AI hides the AI Agent page and everything AI.
                     Row::Buttons(
-                        self.extra_button(s, crate::extras::Item::DiscordPresence),
-                        Some(if s.extras.no_ai {
+                        if s.extras.no_ai {
                             self.extra_button(s, crate::extras::Item::NoAi)
                         } else {
                             open("horizon.pages.open.agent", Page::Agent)
-                        }),
+                        },
+                        None,
                     ),
                 ]
                 .into_iter()

@@ -16,6 +16,7 @@ pub(super) struct State {
     pub client: Client,
     server: Server,
     saved: Option<Saved>,
+    resolved: BTreeMap<u128, Character>,
     legacy_requests: BTreeMap<u128, Vec<u8>>,
     started: Instant,
     reported: Option<Rejection>,
@@ -26,6 +27,7 @@ impl Default for State {
             client: Client::default(),
             server: Server::default(),
             saved: None,
+            resolved: BTreeMap::new(),
             legacy_requests: BTreeMap::new(),
             started: Instant::now(),
             reported: None,
@@ -108,6 +110,7 @@ impl Game<'_> {
         };
         index
             .and_then(|i| self.pack.character_catalog.get(*i))
+            .map(|base| self.character_sync.resolved.get(&uuid).filter(|c| c.id == base.id).unwrap_or(base))
             .or_else(|| {
                 (!self.character_sync.client.authoritative()
                     && self.remote.as_ref().is_some_and(|r| r.profile() == uuid))
@@ -116,7 +119,10 @@ impl Game<'_> {
             })
     }
     pub(super) fn character_for_name(&self, name: &str) -> Option<&Character> {
-        self.character_for(self.remote.as_ref()?.character_uuid(name)?)
+        if let Some(remote) = &self.remote { return self.character_for(remote.character_uuid(name)?); }
+        if self.lan_acting_name.as_deref() == Some(name) { return self.character_for(self.lan_acting_uuid?); }
+        self.lan.as_ref().and_then(|h| h.hub.guests.iter().find(|g|g.name==name)).and_then(|g|self.character_for(g.uuid))
+            .or_else(|| (name == self.acting_player_name()).then_some(self.character.as_ref()).flatten())
     }
     pub(super) fn tick_character_sync(&mut self) {
         let Some(remote) = self
@@ -184,7 +190,19 @@ impl Game<'_> {
             self.remember_character(uuid);
         }
     }
+    fn resolve_character_name(&mut self, uuid:u128) {
+        let Some(mut c) = self.character_sync.server.peers.get(&uuid).and_then(|i|self.pack.character_catalog.get(*i)).cloned() else{return;};
+        let path=std::path::Path::new("character-name-reservations.json");
+        let result=(|| -> io::Result<u32>{let mut names=horizon_client::characters::reservations::Reservations::load(path)?;let slot=names.reserve(uuid,&c.id);names.save(path)?;Ok(slot)})();
+        match result {Ok(slot)=>{c.name.push_str(&horizon_client::characters::reservations::suffix(slot));self.character_sync.resolved.insert(uuid,c);},Err(e)=>log::error!("Cannot reserve character name: {e}")}
+    }
+    pub(super) fn character_names_from_server(&mut self, bytes:&[u8]) {
+        if let Ok(rows)=serde_json::from_slice::<Vec<(String,String,String)>>(bytes) {
+            for (uuid,id,name) in rows.into_iter().take(64) {if let (Ok(uuid),Some(mut c))=(u128::from_str_radix(&uuid,16),self.pack.character_catalog.index(&id).and_then(|i|self.pack.character_catalog.get(i)).cloned()){if name.len()<=256 && name.starts_with(&c.name){c.name=name;self.character_sync.resolved.insert(uuid,c);}}}
+        }
+    }
     fn remember_character(&mut self, uuid: u128) {
+        self.resolve_character_name(uuid);
         if let Some(character) = self
             .character_sync
             .server
@@ -207,6 +225,8 @@ impl Game<'_> {
             .server
             .flush(&self.pack.character_catalog)
         {
+            let rows:Vec<_>=self.character_sync.resolved.iter().filter(|(u,_)|self.character_sync.server.peers.contains_key(u)).map(|(u,c)|(format!("{u:032x}"),c.id.clone(),c.name.clone())).collect();
+            for chunk in rows.chunks(64) {if let Ok(bytes)=serde_json::to_vec(chunk){let _=self.native_net_send_to_player(delivery.player,"lunatic:character_names_v1",&bytes);}}
             // Legacy JSON rosters may exceed the old channel limit on large servers.
             // They cannot be retried successfully; the compact v2 snapshot always fits.
             if delivery.bytes.len() > horizon_protocol::mod_net::MAX_DATA {
@@ -226,12 +246,15 @@ impl Game<'_> {
         }
     }
     pub(super) fn character_logged_in(&mut self, uuid: u128) {
+        let path=std::path::Path::new("character-name-reservations.json");
+        if let Err(e)=(|| -> io::Result<()> {let mut r=horizon_client::characters::reservations::Reservations::load(path)?;r.join(uuid);r.save(path)})(){log::error!("Cannot record character join order: {e}");}
         let saved = self.character_sync.saved.get_or_insert_with(Saved::load);
         let restored = saved
             .entries
             .get(&format!("{uuid:032x}"))
             .and_then(|id| self.pack.character_catalog.index(id));
         self.character_sync.server.join(uuid, restored);
+        self.resolve_character_name(uuid);
     }
     pub(super) fn character_logged_out(&mut self, uuid: u128) {
         self.character_sync.server.leave(uuid);
@@ -254,5 +277,6 @@ impl Game<'_> {
         self.character_sync.client.reload();
         self.character_sync.legacy_requests.clear();
         self.character_sync.reported = None;
+        self.character_sync.resolved.clear();
     }
 }

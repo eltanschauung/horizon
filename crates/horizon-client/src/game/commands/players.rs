@@ -147,10 +147,12 @@ impl Game<'_> {
     /// `Player.getDisplayName`: the name as its team shows it, suggesting a
     /// `/tell`, showing the player on hover, inserting the name.
     pub(in crate::game) fn player_text(&self, name: &str, uuid: u128) -> Text {
+        let member = self.character_for(uuid).or_else(||self.character_for_name(name)).map_or_else(||Text::literal(name),|c|c.display_name());
         let shown = match self.score.board.players_team(name) {
-            Some(team) => team.formatted_name(Text::literal(name)),
-            None => Text::literal(name),
+            Some(team) => team.formatted_name(member.clone()),
+            None => member,
         };
+        let hover_name = shown.component();
         shown.with_component_fields(vec![
             (
                 "click_event".into(),
@@ -159,7 +161,7 @@ impl Game<'_> {
             (
                 "hover_event".into(),
                 serde_json::json!({"action": "show_entity", "id": "minecraft:player",
-                    "uuid": horizon_protocol::crypto::uuid_string(uuid), "name": name}),
+                    "uuid": horizon_protocol::crypto::uuid_string(uuid), "name": hover_name}),
             ),
             ("insertion".into(), name.into()),
         ])

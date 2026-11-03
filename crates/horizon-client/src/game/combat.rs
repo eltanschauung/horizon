@@ -500,7 +500,7 @@ impl Game<'_> {
     }
     /// `CombatTracker.getDeathMessage`.
     pub(super) fn combat_death_message(&mut self) -> Text {
-        self.combat_death_message_for(Text::literal(PLAYER_NAME))
+        self.combat_death_message_for(self.player_display_text())
     }
     /// `CombatTracker.getDeathMessage` for a player whose display name is
     /// `me`: a server's guest is not `PLAYER_NAME`.

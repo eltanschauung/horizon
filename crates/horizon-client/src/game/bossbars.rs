@@ -384,7 +384,7 @@ impl Game<'_> {
                 if out.iter().any(|(uuid, _)| *uuid == ints) {
                     continue;
                 }
-                out.push((ints, Text::literal(g.name.clone())));
+                out.push((ints, self.player_text(&g.name, g.uuid)));
             }
         }
         out

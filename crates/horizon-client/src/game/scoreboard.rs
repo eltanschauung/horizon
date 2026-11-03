@@ -606,7 +606,7 @@ impl Game<'_> {
         }
     }
     pub(super) fn player_display_text(&self) -> Text {
-        let name = Text::literal(self.acting_player_name());
+        let name = self.character_for_name(self.acting_player_name()).or_else(||self.lan_acting_uuid.is_none().then_some(self.character.as_ref()).flatten()).map_or_else(||Text::literal(self.acting_player_name()),|c|c.display_name());
         match self.player_team() {
             Some(t) => t.formatted_name(name),
             None => name,

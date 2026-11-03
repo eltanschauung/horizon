@@ -200,7 +200,6 @@ impl Game<'_> {
             // getDisplayName: the name in the team's prefix, suffix and colour.
             let member = if player {
                 self.character_for_name(&name)
-                    .filter(|c| c.character_chat)
                     .map_or_else(|| Text::literal(&name), |c| c.display_name())
             } else {
                 m.custom_name_text
