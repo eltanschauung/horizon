@@ -49,6 +49,7 @@ fn character_size<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f32, D::Erro
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(from = "CharacterDefinition")]
 pub struct Character {
     pub id: String,
     pub name: String,
@@ -66,6 +67,41 @@ pub struct Character {
     pub character_chat: bool,
     #[serde(default)]
     pub color: Option<String>,
+}
+
+// Resolve optional content fields before validation, rendering and synchronization.
+#[derive(Deserialize)]
+struct CharacterDefinition {
+    id: String,
+    name: String,
+    #[serde(default)]
+    texture: Option<String>,
+    #[serde(default)]
+    race: String,
+    #[serde(default = "default_size", deserialize_with = "character_size")]
+    size: f32,
+    #[serde(default)]
+    starting_items: Vec<StartingItem>,
+    #[serde(default = "default_character_model")]
+    model: Model,
+    #[serde(default = "default_character_chat")]
+    character_chat: bool,
+    #[serde(default)]
+    color: Option<String>,
+}
+fn default_character_model() -> Model { Model::Slim }
+fn default_character_chat() -> bool { true }
+impl From<CharacterDefinition> for Character {
+    fn from(value: CharacterDefinition) -> Self {
+        let texture = value.texture.unwrap_or_else(|| {
+            value.id.split_once(':').map(|(namespace, name)|
+                format!("{namespace}:entity/character/{name}")
+            ).unwrap_or_default()
+        });
+        Self { id: value.id, name: value.name, texture, race: value.race,
+            size: value.size, starting_items: value.starting_items, model: value.model,
+            character_chat: value.character_chat, color: value.color }
+    }
 }
 
 impl Character {
