@@ -435,7 +435,8 @@ impl Game<'_> {
 
     /// Use complete generated geometry so equipment, animation and custom
     /// models cannot stick out of an assumed collision-sized culling box.
-    pub(super) fn cull_entity_vertices(&self, vertices: &mut Vec<Vertex>, start: usize) {
+    /// Returns this entity's occlusion result, including retained shadow casters.
+    pub(super) fn cull_entity_vertices(&self, vertices: &mut Vec<Vertex>, start: usize) -> bool {
         if let Some(culler) = &self.entity_culler {
             let hidden = culler.hidden(vertices, start, |pos| self.occluder_ready(pos));
             // A shader pack's shadow pass still draws what the camera cannot see.
@@ -444,14 +445,14 @@ impl Game<'_> {
             {
                 vertices.truncate(start);
             }
-            return;
+            return hidden;
         }
 
         let Some(culler) = &self.async_entity_culler else {
-            return;
+            return false;
         };
         let Some(query) = culler.query(vertices, start) else {
-            return;
+            return false;
         };
         let hidden = self
             .async_entity_culler
@@ -464,6 +465,7 @@ impl Game<'_> {
         if let Some(culler) = &self.async_entity_culler {
             culler.queue(query);
         }
+        hidden
     }
 
     fn async_proof_is_current(&self, proof: &OcclusionProof) -> bool {
@@ -710,6 +712,17 @@ mod tests {
     fn a_chicken_is_drawn_forty_eight_blocks_away() {
         let range = default_range(glam::DVec3::new(0.4, 0.7, 0.4), entity_view_scale(12, 1.0));
         assert_eq!(range, 48.0);
+    }
+
+    /// `Entity.shouldRenderAtSqrDistance` for a dropped item (`ItemEntity`
+    /// keeps the default and its box is 0.25 on each side): 24 blocks at
+    /// render distance 12, 32 at 16, 40 from 20 on; never 64.
+    #[test]
+    fn a_dropped_item_is_drawn_sixteen_blocks_times_the_view_scale() {
+        let item = glam::DVec3::splat(0.25);
+        assert_eq!(default_range(item, entity_view_scale(12, 1.0)), 24.0);
+        assert_eq!(default_range(item, entity_view_scale(16, 1.0)), 32.0);
+        assert_eq!(default_range(item, entity_view_scale(32, 1.0)), 40.0);
     }
 
     /// `Entity.shouldRenderAtSqrDistance` on a broken box: the size falls

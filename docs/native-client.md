@@ -95,6 +95,7 @@ Optional Windows allocator build features are documented in
 | E | Inventory and 2x2 crafting (shift-click to quick-move or craft all) |
 | Q / Ctrl+Q | Drop one / drop stack |
 | F3 | Debug overlay (position, chunk, light, biome, FPS) |
+| F3 + S | Dump the texture atlas to `screenshots/debug/`: `minecraft_textures_atlas_gui.png` with `minecraft_textures_atlas_gui.txt` beside it, every sprite's rect in texels (vanilla's `TextureManager.dumpAllSheets`) |
 | Esc | Pause menu (Save and Quit) |
 
 Worlds autosave every 6000 ticks (5 minutes), when chunks unload and on quit.
@@ -252,6 +253,28 @@ terrain goes off and the render distance in use drops, never the saved option, a
 there is room. Linux and macOS have no such limit: there the game steps down before it reaches the limit.
 The game ends with a crash report only when it can't run under the limit: on Windows no frame for a minute
 while faulting hard, elsewhere 20 seconds over the limit with nothing left to give up.
+
+**`HORIZON_MEMORY_HARD_MB` / `/ramlimit hard <MB>`** is the other contract, the one `-Xmx` gives
+Java: a budget for the memory the process commits, not only for the part that stays in RAM. Nothing is
+paged out to meet it. Once a second the game compares what the process committed with the budget and,
+over nine tenths of it, gives up far terrain and then render distance the way it does under a low RAM
+limit, until it fits; when there is room again, both come back. Below a budget the game can reach even
+at its lowest distance, it ends after twenty seconds with a crash report naming what it held and the
+budget, instead of sitting in the page file.
+
+The allocator holds the same line: it counts the bytes the game asks for, a free returns them at once,
+and a request past the ceiling fails rather than being served, so a sudden burst cannot pass the budget
+in the second before the next look. That failure ends the game with a message naming the ceiling.
+
+Set it at or below the RAM limit; alone it also becomes the RAM limit. What it counts is the whole
+process: on a clean launch this build commits 1.1 to 1.2 GB before a world is open (the renderer and
+the game's resources), so a budget under about 1.4 GB leaves too little to run, exactly as `-Xmx` too
+low throws `OutOfMemoryError`.
+
+What "committed" means depends on the system. On Windows it is the process's commit charge, the
+figure Task Manager shows, the graphics driver's pages included. On Linux and macOS there is no such
+figure: it is what the game's allocator (mimalloc) committed, so the driver's and the GPU's own memory
+are outside the budget there.
 
 
 ### Play on another of your machines

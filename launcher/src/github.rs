@@ -120,7 +120,7 @@ pub(crate) fn mirror_url(url: &str) -> Option<String> {
 
 fn mirror_url_with(url: &str, base: &str) -> Option<String> {
     let path = url.strip_prefix(API)?;
-    let repo = format!("/repos/{}/", backend::REPO);
+    let repo = "/repos/horizon-rust/horizon/";
     (!base.is_empty() && path.starts_with(&repo))
         .then(|| format!("{}{path}", base.trim_end_matches('/')))
 }
