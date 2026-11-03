@@ -1170,22 +1170,10 @@ impl Hub {
         // PlayerList.sendPlayerPermissionLevel, then the recipe book.
         self.send_permission_level(i);
         self.send_initial_recipe_book(i);
-        // PlayerList.placeNewPlayer broadcasts the join line before
-        // players.add: the others read it, the newcomer doesn't (nor those
+        // Unless character selection is pending, placeNewPlayer broadcasts
+        // the join line before players.add: the others read it, the newcomer doesn't (nor those
         // a native mod hides it from).
-        let joined = C::SystemChat(play::SystemChat {
-            content: yellow_names(
-                "multiplayer.player.joined",
-                vec![display_name(self.guests[i].uuid, &name)],
-            ),
-            overlay: false,
-        })
-        .encode();
-        for g in self.guests.iter().filter(|g| g.placed && g.conn != conn) {
-            if self.sees(g.permission, uuid) {
-                g.sender.send(joined.clone());
-            }
-        }
+        self.announce_join(conn);
         self.guests[i].placed = true;
         self.resend_teleport(i, None);
         let g = &self.guests[i];
@@ -1896,10 +1884,14 @@ impl Hub {
         self.broadcast(&C::RemoveEntities(play::RemoveEntities {
             ids: vec![g.entity_id],
         }));
+        // No orphan leave notice for a connection whose join was never announced.
+        if g.character_join_pending {
+            return g;
+        }
         let left = C::SystemChat(play::SystemChat {
             content: yellow_names(
                 "multiplayer.player.left",
-                vec![display_name(g.uuid, &g.name)],
+                vec![self.player_display_name(g.uuid, &g.name)],
             ),
             overlay: false,
         })
@@ -3897,13 +3889,56 @@ impl Hub {
         }));
     }
 
+    /// Whether this connection is still waiting for its first character identity.
+    pub fn character_join_pending(&self, uuid: u128) -> bool {
+        self.guests
+            .iter()
+            .any(|g| g.uuid == uuid && g.placed && g.character_join_pending)
+    }
+
+    fn announce_join(&self, conn: u32) {
+        let Some(joined) = self.guest(conn).filter(|g| !g.character_join_pending) else {
+            return;
+        };
+        let packet = C::SystemChat(play::SystemChat {
+            content: yellow_names(
+                "multiplayer.player.joined",
+                vec![self.player_display_name(joined.uuid, &joined.name)],
+            ),
+            overlay: false,
+        })
+        .encode();
+        for observer in self.guests.iter().filter(|g| g.placed && g.conn != conn) {
+            if self.sees(observer.permission, joined.uuid) {
+                observer.sender.send(packet.clone());
+            }
+        }
+    }
+
+    /// Update the styled identity, and release a deferred join exactly once.
+    /// Returns true when the integrated host should also show that join.
+    pub fn set_character_name(&mut self, uuid: u128, component: serde_json::Value) -> bool {
+        self.character_names.insert(uuid, component);
+        self.set_nickname(uuid, self.nicknames.get(&uuid).cloned());
+        let conn = self
+            .guests
+            .iter_mut()
+            .find(|g| g.uuid == uuid && g.placed && g.character_join_pending)
+            .map(|g| {
+                g.character_join_pending = false;
+                g.conn
+            });
+        if let Some(conn) = conn {
+            self.announce_join(conn);
+            true
+        } else {
+            false
+        }
+    }
+
     /// A player's nickname changed (None: their name again): kept for chat,
     /// and the Tab list shows it (PlayerInfo UPDATE_DISPLAY_NAME for
     /// everyone).
-    pub fn set_character_name(&mut self,uuid:u128,component:serde_json::Value){
-        self.character_names.insert(uuid,component);
-        self.set_nickname(uuid,self.nicknames.get(&uuid).cloned());
-    }
     pub fn set_nickname(&mut self, uuid: u128, nickname: Option<String>) {
         match nickname {
             Some(n) => self.nicknames.insert(uuid, n),
@@ -4437,6 +4472,112 @@ mod tests {
             }
         }
         sent
+    }
+
+    fn add_character_guest(hub: &mut Hub) -> std::sync::mpsc::Receiver<crate::lan::Out> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut guest = Guest::new(
+            crate::lan::Joined {
+                conn: 2,
+                uuid: 2,
+                name: "AccountName".into(),
+                properties: Vec::new(),
+                info: horizon_protocol::packets::configuration::ClientInformation::new(8),
+                brand: "horizon".into(),
+                sender: crate::lan::PlayerSender::new(tx, std::sync::Arc::default()),
+                latency: std::sync::Arc::new(std::sync::atomic::AtomicI32::new(0)),
+                address: "127.0.0.1:25565".parse().unwrap(),
+            },
+            2,
+            [0.5, 64.0, 0.5],
+            8,
+        );
+        guest.placed = true;
+        guest.character_join_pending = true;
+        hub.guests.push(guest);
+        rx
+    }
+
+    fn sent_system_messages(
+        rx: &std::sync::mpsc::Receiver<crate::lan::Out>,
+    ) -> Vec<serde_json::Value> {
+        rx.try_iter()
+            .filter_map(|out| {
+                let crate::lan::Out::Packet(body) = out else {
+                    return None;
+                };
+                let mut reader = horizon_protocol::buf::Reader::new(&body);
+                let id = reader.varint().ok()?;
+                match C::decode(id, reader.rest()).ok()? {
+                    C::SystemChat(message) => {
+                        Some(crate::scoreboard::tag_to_json(&message.content))
+                    }
+                    _ => None,
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn character_join_waits_for_styled_identity_and_is_announced_once() {
+        let (mut hub, observer) = hub_with_a_guest();
+        let newcomer = add_character_guest(&mut hub);
+        hub.announce_join(2);
+        assert!(sent_system_messages(&observer).is_empty());
+        assert!(hub.character_join_pending(2));
+        let character = serde_json::json!({"text":"Kaku Seiga","color":"blue"});
+        assert!(hub.set_character_name(2, character.clone()));
+        let messages = sent_system_messages(&observer);
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0]["translate"], "multiplayer.player.joined");
+        assert_eq!(messages[0]["with"][0]["text"], "Kaku Seiga");
+        assert_eq!(messages[0]["with"][0]["color"], "blue");
+        assert!(sent_system_messages(&newcomer).is_empty());
+        assert!(!hub.character_join_pending(2));
+        assert!(!hub.set_character_name(2, character));
+        assert!(sent_system_messages(&observer).is_empty());
+        hub.remove_guest(1, "test disconnect");
+        let left = sent_system_messages(&observer);
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0]["translate"], "multiplayer.player.left");
+        assert_eq!(left[0]["with"][0]["text"], "Kaku Seiga");
+        assert_eq!(left[0]["with"][0]["color"], "blue");
+    }
+
+    #[test]
+    fn character_join_releases_even_when_the_saved_name_is_unchanged() {
+        let (mut hub, observer) = hub_with_a_guest();
+        let _newcomer = add_character_guest(&mut hub);
+        let character = serde_json::json!({"text":"Kaku Seiga II","color":"blue"});
+        hub.character_names.insert(2, character.clone());
+        hub.announce_join(2);
+        assert!(sent_system_messages(&observer).is_empty());
+        assert!(hub.set_character_name(2, character));
+        assert_eq!(
+            sent_system_messages(&observer)[0]["with"][0]["text"],
+            "Kaku Seiga II"
+        );
+    }
+
+    #[test]
+    fn unresolved_character_disconnect_does_not_leak_an_account_name() {
+        let (mut hub, observer) = hub_with_a_guest();
+        let _newcomer = add_character_guest(&mut hub);
+        hub.announce_join(2);
+        let removed = hub.remove_guest(1, "test disconnect");
+        assert!(removed.character_join_pending);
+        assert!(sent_system_messages(&observer).is_empty());
+    }
+
+    #[test]
+    fn ordinary_join_without_character_sync_is_still_immediate() {
+        let (mut hub, observer) = hub_with_a_guest();
+        let _newcomer = add_character_guest(&mut hub);
+        hub.guest_mut(2).unwrap().character_join_pending = false;
+        hub.announce_join(2);
+        let messages = sent_system_messages(&observer);
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0]["with"][0]["text"], "AccountName");
     }
 
     /// A world whose blocks at y = 63 are `state` under the four chunks around the origin.

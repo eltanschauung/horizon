@@ -315,6 +315,8 @@ pub struct Guest {
     pub death_time: u32,
     /// The join packets were sent (PlayerList.placeNewPlayer ran).
     pub placed: bool,
+    /// Hold visible join/leave notices until the server resolves a character name.
+    pub character_join_pending: bool,
     /// Root command names the mods took out of this player's command tree
     /// (`native_player_commands_sent`); their tree is sent without them.
     pub hidden_commands: Vec<String>,
@@ -484,6 +486,7 @@ impl Guest {
             dead: false,
             death_time: 0,
             placed: false,
+            character_join_pending: false,
             hidden_commands: Vec::new(),
             flying_speed: 0.05,
             dimension: "minecraft:overworld".into(),

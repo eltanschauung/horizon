@@ -231,7 +231,33 @@ impl Game<'_> {
         }
     }
     pub(super) fn flush_character_sync(&mut self) {
-        if let Some(host)=self.lan.as_mut(){for (uuid,c) in &self.character_sync.resolved {let component=c.display_name().component();if host.hub.character_names.get(uuid)!=Some(&component){host.hub.set_character_name(*uuid,component);}}}
+        let mut joins = Vec::new();
+        if let Some(host) = self.lan.as_mut() {
+            for (uuid, index) in &self.character_sync.server.peers {
+                let Some(base) = self.pack.character_catalog.get(*index) else {
+                    continue;
+                };
+                let character = self.character_sync.resolved.get(uuid)
+                    .filter(|character| character.id == base.id)
+                    .unwrap_or(base);
+                let name = character.display_name();
+                let component = name.component();
+                if (host.hub.character_names.get(uuid) != Some(&component)
+                    || host.hub.character_join_pending(*uuid))
+                    && host.hub.set_character_name(*uuid, component)
+                {
+                    joins.push(name);
+                }
+            }
+        }
+        if self.options.dedicated.is_none() && self.player.is_some() {
+            for name in joins {
+                self.system_message(
+                    horizon_client::text::Text::translate("multiplayer.player.joined", &[name])
+                        .with_color(horizon_client::text::YELLOW),
+                );
+            }
+        }
         if let Some(saved) = &mut self.character_sync.saved {
             saved.flush();
         }

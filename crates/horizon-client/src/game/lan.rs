@@ -1908,6 +1908,7 @@ impl Game<'_> {
                     } else if self.player.is_some()
                         && let Some(g) = host.hub.guest(conn)
                         && g.placed
+                        && !g.character_join_pending
                     {
                         // The host's chat hears of the newcomer as the guests do.
                         let who = self.player_text(&g.name, g.uuid);
@@ -1970,7 +1971,10 @@ impl Game<'_> {
                             "INFO",
                             &format!("System chat: {} left the game", guest.name),
                         );
-                    } else if self.player.is_some() && guest.placed {
+                    } else if self.player.is_some()
+                        && guest.placed
+                        && !guest.character_join_pending
+                    {
                         // ServerGamePacketListenerImpl.removePlayerFromWorld.
                         let who = self.player_text(&guest.name, guest.uuid);
                         self.system_message(
@@ -2549,6 +2553,14 @@ impl Game<'_> {
         } else {
             entities
         };
+        // A first-time Horizon player chooses their character through the existing
+        // play-phase sync. Keep the join private until that choice is resolved.
+        if self.pack.character_catalog.get(0).is_some()
+            && let Some(g) = host.hub.guest_mut(conn)
+            && g.brand == "horizon"
+        {
+            g.character_join_pending = true;
+        }
         let clock_rate = self.network_clock_rate();
         let mut ctx = TickCtx {
             world: &mut self.world,
