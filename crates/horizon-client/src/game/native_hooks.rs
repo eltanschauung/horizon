@@ -6,6 +6,8 @@
 //! Horizon's own HUD extras do, and keep a mod's settings where the
 //! WebAssembly mod of the same id kept them.
 //!
+//! API 154 adds client-side render transforms for item-based projectiles (`native_projectile_item_pose`).
+//!
 //! API 153 adds a player starting or stopping flight, cancellable (`native_player_toggle_flight`).
 //!
 //! API 152 adds a player opening and closing a menu (`native_player_container_open`, `native_player_container_close`).
@@ -523,7 +525,7 @@ pub(super) use horizon_world::level::flags;
 /// The hook points' API version. The launcher reads this line from the
 /// source it builds; keep its form.
 #[allow(dead_code)]
-pub(crate) const NATIVE_HOOKS_API: u32 = 153;
+pub(crate) const NATIVE_HOOKS_API: u32 = 154;
 
 impl GameLevel<'_> {
     /// An authoritative server committed a changed state through `Level.setBlock`.
@@ -1335,6 +1337,19 @@ impl Game<'_> {
         lights: &mut Vec<NativeColoredLight>,
     ) {
         mod_api::dispatch_visuals(self, mod_api::mods(), rims, lights);
+    }
+    /// The camera-facing pose of an item-based projectile, before its model's
+    /// Ground display transform is applied. Client render only; never changes
+    /// physics or network state. `partial` interpolates the current tick, 0..1.
+    /// Reuse the resolved model and alter this matrix for frame-smooth animation.
+    /// API 154.
+    pub(super) fn native_projectile_item_pose(
+        &self,
+        projectile: &horizon_client::projectiles::Projectile,
+        partial: f64,
+        pose: &mut glam::Mat4,
+    ) {
+        let _ = (projectile, partial, pose);
     }
     /// At most 32 pairs of already-loaded base and transparent overlay sprites.
     /// Per-pixel alpha in the overlay marks full-bright material, without

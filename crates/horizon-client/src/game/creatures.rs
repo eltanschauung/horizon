@@ -6556,8 +6556,9 @@ impl Game<'_> {
             if let Some(stack) = a.drawn_item() {
                 let owner = super::item_draw::owner_at(at, 0.0, a.kind.id());
                 let state = self.resolve_item(&stack, DisplayContext::Ground, Some(&owner), 0);
-                let pose = glam::Mat4::from_translation(c)
+                let mut pose = glam::Mat4::from_translation(c)
                     * glam::Mat4::from_quat(self.camera_orientation());
+                self.native_projectile_item_pose(a, alpha, &mut pose);
                 self.submit_item_world(&state, pose, packed, out);
                 continue;
             }
