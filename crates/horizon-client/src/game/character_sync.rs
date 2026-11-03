@@ -212,7 +212,7 @@ impl Game<'_> {
     }
     pub(super) fn character_names_from_server(&mut self, bytes:&[u8]) {
         if let Ok(rows)=serde_json::from_slice::<Vec<(String,String,String)>>(bytes) {
-            for (uuid,id,name) in rows.into_iter().take(64) {if let (Ok(uuid),Some(mut c))=(u128::from_str_radix(&uuid,16),self.pack.character_catalog.index(&id).and_then(|i|self.pack.character_catalog.get(i)).cloned()){if name.len()<=256 && name.starts_with(&c.name){c.name=name;if let Some(p)=self.remote.as_ref().and_then(|r|r.tab_players.get(&uuid)){self.character_sync.account_names.insert(p.name.clone(),uuid);}self.character_sync.resolved.insert(uuid,c);}}}
+            for (uuid,id,name) in rows.into_iter().take(64) {if let (Ok(uuid),Some(mut c))=(u128::from_str_radix(&uuid,16),self.pack.character_catalog.index(&id).and_then(|i|self.pack.character_catalog.get(i)).cloned()){if name.len()<=256 && name.starts_with(&c.name){c.name=name;if let Some(name)=self.remote.as_ref().and_then(|r|r.character_account_name(uuid)).map(str::to_owned){self.character_sync.account_names.insert(name,uuid);}self.character_sync.resolved.insert(uuid,c);}}}
         }
     }
     fn remember_character(&mut self, uuid: u128) {
@@ -231,6 +231,7 @@ impl Game<'_> {
         }
     }
     pub(super) fn flush_character_sync(&mut self) {
+        if let Some(host)=self.lan.as_mut(){for (uuid,c) in &self.character_sync.resolved {let component=c.display_name().component();if host.hub.character_names.get(uuid)!=Some(&component){host.hub.set_character_name(*uuid,component);}}}
         if let Some(saved) = &mut self.character_sync.saved {
             saved.flush();
         }

@@ -268,6 +268,7 @@ pub struct Hub {
     /// (`native_set_nickname`), by UUID. Their real name stays everywhere
     /// else: the log, commands, the hover of the shown name.
     pub nicknames: std::collections::HashMap<u128, String>,
+    pub character_names: std::collections::HashMap<u128, serde_json::Value>,
     last_clock: i64,
     last_rate: f32,
     ticking: (f32, bool),
@@ -380,17 +381,15 @@ impl Hub {
     pub fn player_display_name(&self, uuid: u128, name: &str) -> Tag {
         let shown = self.nicknames.get(&uuid).map_or(name, String::as_str);
         let team = self.teams.iter().find(|t| t.players.contains(name));
-        if team.is_none() && shown == name {
+        if team.is_none() && shown == name && !self.character_names.contains_key(&uuid) {
             return display_name(uuid, name);
         }
-        let mut c = match team {
-            Some(team) => team.formatted_name_comp(&crate::scoreboard::literal(shown)),
-            None => serde_json::json!({ "text": shown }),
-        };
+        let member=self.character_names.get(&uuid).cloned().unwrap_or_else(||crate::scoreboard::literal(shown));
+        let mut c = match team {Some(team)=>team.formatted_name_comp(&member),None=>member};
         c["click_event"] =
             serde_json::json!({"action": "suggest_command", "command": format!("/tell {name} ")});
         c["hover_event"] = serde_json::json!({"action": "show_entity", "id": "minecraft:player",
-            "uuid": horizon_protocol::crypto::uuid_string(uuid), "name": name});
+            "uuid": horizon_protocol::crypto::uuid_string(uuid), "name": self.character_names.get(&uuid).cloned().unwrap_or_else(||serde_json::json!(name))});
         c["insertion"] = name.into();
         crate::scoreboard::component_tag(&c)
     }
@@ -574,6 +573,7 @@ impl Hub {
             native_tracking: Vec::new(),
             teams: Vec::new(),
             nicknames: std::collections::HashMap::new(),
+            character_names: std::collections::HashMap::new(),
         }
     }
 
@@ -860,7 +860,7 @@ impl Hub {
             game_mode: Some(mode),
             listed: Some(true),
             latency: Some(latency),
-            display_name: Some(self.nicknames.get(&uuid).map(|n| literal(n))),
+            display_name: Some(self.character_names.get(&uuid).map(crate::scoreboard::component_tag).or_else(||self.nicknames.get(&uuid).map(|n|literal(n)))) ,
             list_order: Some(0),
             show_hat: Some(guest.is_none_or(|g| g.info.model_customisation & 0x40 != 0)),
         }
@@ -3416,6 +3416,10 @@ impl Hub {
     /// A player's nickname changed (None: their name again): kept for chat,
     /// and the Tab list shows it (PlayerInfo UPDATE_DISPLAY_NAME for
     /// everyone).
+    pub fn set_character_name(&mut self,uuid:u128,component:serde_json::Value){
+        self.character_names.insert(uuid,component);
+        self.set_nickname(uuid,self.nicknames.get(&uuid).cloned());
+    }
     pub fn set_nickname(&mut self, uuid: u128, nickname: Option<String>) {
         match nickname {
             Some(n) => self.nicknames.insert(uuid, n),
@@ -3425,7 +3429,7 @@ impl Hub {
             actions: 0x20,
             entries: vec![play::PlayerInfo {
                 uuid,
-                display_name: Some(self.nicknames.get(&uuid).map(|n| literal(n))),
+                display_name: Some(self.character_names.get(&uuid).map(crate::scoreboard::component_tag).or_else(||self.nicknames.get(&uuid).map(|n|literal(n)))) ,
                 ..Default::default()
             }],
         }));

@@ -9992,6 +9992,7 @@ impl Remote {
         self.players.len()
     }
     /// The local player's profile UUID.
+    pub(super) fn character_account_name(&self, uuid:u128)->Option<&str>{if uuid==self.profile{Some(&self.profile_name)}else{self.players.get(&uuid).map(String::as_str)}}
     pub(super) fn character_uuid(&self, name: &str) -> Option<u128> {
         if name == self.profile_name {
             return Some(self.profile);

@@ -3622,7 +3622,7 @@ impl Game<'_> {
                 names.push(Text::translate(
                     "commands.list.nameAndId",
                     &[
-                        Text::literal(name.as_str()),
+                        self.player_text(name,*uuid),
                         Text::literal(horizon_protocol::crypto::uuid_string(*uuid)),
                     ],
                 ));
