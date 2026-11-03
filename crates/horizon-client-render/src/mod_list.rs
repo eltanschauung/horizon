@@ -30,6 +30,8 @@ pub struct ModList {
     pub keys: BTreeMap<String, BTreeMap<String, String>>,
     /// What the Mods page shows, filled by the game from the mods it found.
     pub installed: Vec<Installed>,
+    /// Runtime settings pages for content mods, independent of native toggle/reload semantics.
+    pub pages: BTreeMap<String, NativePage>,
 }
 
 /// One installed mod as the Mods page shows it.
@@ -58,6 +60,10 @@ pub struct NativePage {
 }
 
 impl ModList {
+    pub fn page(&self, index: usize) -> Option<&NativePage> {
+        let row = self.installed.get(index)?;
+        row.native.as_ref().or_else(|| self.pages.get(&row.id))
+    }
     pub fn load(dir: &Path) -> Self {
         Self::parse(&horizon_mods::selections::load(dir))
     }
@@ -103,6 +109,7 @@ impl ModList {
             disabled,
             keys,
             installed: Vec::new(),
+            pages: BTreeMap::new(),
         }
     }
     pub fn serialize(&self) -> String {

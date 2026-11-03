@@ -5915,6 +5915,7 @@ impl Game<'_> {
     }
     /// Options > Mods' rows for the native mods, after the others.
     pub(super) fn list_native_mods(&mut self) {
+        self.settings.mods.pages.clear();
         let mut mods = Vec::new();
         self.native_mods(&mut mods);
         // A WebAssembly mod of the same id: the native row stands for it,
@@ -5939,6 +5940,15 @@ impl Game<'_> {
                 native: Some(page),
             });
         }
+        let content: Vec<String> = self.settings.mods.installed.iter()
+            .filter(|row| row.native.is_none()).map(|row| row.id.clone()).collect();
+        for id in content {
+            let mut buttons = Vec::new();
+            self.native_settings(&id, &mut buttons);
+            if !buttons.is_empty() {
+                self.settings.mods.pages.insert(id, NativePage { keys: Vec::new(), buttons });
+            }
+        }
     }
     /// A click on button `button` of native mod `i`'s page (its index in
     /// Options > Mods), and the page's labels after it.
@@ -5959,6 +5969,8 @@ impl Game<'_> {
         self.native_settings(&id, &mut buttons);
         let row = self.settings.mods.installed.get_mut(i);
         if let Some(page) = row.and_then(|m| m.native.as_mut()) {
+            page.buttons = buttons;
+        } else if let Some(page) = self.settings.mods.pages.get_mut(&id) {
             page.buttons = buttons;
         }
     }

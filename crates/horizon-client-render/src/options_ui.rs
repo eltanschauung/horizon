@@ -2233,7 +2233,7 @@ impl OptionsUi {
             return Vec::new();
         };
         let mut rows = vec![Row::Note(m.title.clone())];
-        let Some(page) = &m.native else {
+        let Some(page) = s.mods.page(i) else {
             return rows;
         };
         let chosen = s.mods.keys.get(&m.id);
@@ -2585,10 +2585,8 @@ impl OptionsUi {
                         let dead = installed.dev
                             || installed.id.is_empty()
                             || (self.in_world && installed.native.is_none());
-                        // Only native mods with actual settings need a second button.
-                        if installed
-                            .native
-                            .as_ref()
+                        // Settings are independent of whether a mod has native code.
+                        if s.mods.page(i)
                             .is_some_and(|page| !page.keys.is_empty() || !page.buttons.is_empty())
                         {
                             let toggle = button(0.0, 0.0, 150.0, label, Act::ToggleMod(i));
