@@ -4316,7 +4316,7 @@ impl Game<'_> {
             C::SystemChat(p) => {
                 // The component as sent, translated in the client's own
                 // language. ChatListener.handleOverlay for the action bar.
-                let text = remote_text(&p.content);
+                let text = self.character_system_text(remote_text(&p.content));
                 if p.overlay {
                     self.say_system_queued(&text);
                     self.titles.set_overlay(text, false);

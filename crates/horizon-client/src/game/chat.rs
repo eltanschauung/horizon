@@ -705,6 +705,7 @@ impl Game<'_> {
     }
     /// A chat message from the game (ChatComponent.addServerSystemMessage).
     pub(super) fn system_message(&mut self, text: Text) {
+        let text=self.character_system_text(text);
         if let Some(capture) = self.chat_capture.as_mut() {
             capture.push(text);
             return;

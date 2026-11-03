@@ -17,6 +17,7 @@ pub(super) struct State {
     server: Server,
     saved: Option<Saved>,
     resolved: BTreeMap<u128, Character>,
+    account_names: BTreeMap<String,u128>,
     legacy_requests: BTreeMap<u128, Vec<u8>>,
     started: Instant,
     reported: Option<Rejection>,
@@ -28,6 +29,7 @@ impl Default for State {
             server: Server::default(),
             saved: None,
             resolved: BTreeMap::new(),
+            account_names: BTreeMap::new(),
             legacy_requests: BTreeMap::new(),
             started: Instant::now(),
             reported: None,
@@ -119,10 +121,22 @@ impl Game<'_> {
             })
     }
     pub(super) fn character_for_name(&self, name: &str) -> Option<&Character> {
-        if let Some(remote) = &self.remote { return self.character_for(remote.character_uuid(name)?); }
+        if let Some(remote) = &self.remote { let uuid=remote.character_uuid(name).or_else(||self.character_sync.account_names.get(name).copied())?;return self.character_for(uuid).or_else(||self.character_sync.resolved.get(&uuid)); }
         if self.lan_acting_name.as_deref() == Some(name) { return self.character_for(self.lan_acting_uuid?); }
         self.lan.as_ref().and_then(|h| h.hub.guests.iter().find(|g|g.name==name)).and_then(|g|self.character_for(g.uuid))
             .or_else(|| (name == self.acting_player_name()).then_some(self.character.as_ref()).flatten())
+    }
+    // Rewrite identity arguments in server announcements, never signed message bodies or command targets.
+    pub(super) fn character_system_text(&self, text:horizon_client::text::Text)->horizon_client::text::Text {
+        fn visit(game:&Game<'_>, v:&mut serde_json::Value){
+            let identity=v.get("translate").and_then(|v|v.as_str()).is_some_and(|key|key.starts_with("chat.type.advancement.")||key.starts_with("multiplayer.player.")||key.starts_with("death.attack.")||key.starts_with("commands."));
+            if identity {if let Some(args)=v.get_mut("with").and_then(|a|a.as_array_mut()){for arg in args {
+                let account=arg.as_str().or_else(||arg.get("text").and_then(|t|t.as_str())).map(str::to_owned);
+                if let Some(c)=account.as_deref().and_then(|n|game.character_for_name(n)){*arg=c.display_name().component();}else{visit(game,arg);}
+            }}}
+            if let Some(extra)=v.get_mut("extra").and_then(|a|a.as_array_mut()){for child in extra{visit(game,child);}}
+        }
+        let mut component=text.component();visit(self,&mut component);horizon_client::scoreboard::comp_text(&component)
     }
     pub(super) fn tick_character_sync(&mut self) {
         let Some(remote) = self
@@ -198,7 +212,7 @@ impl Game<'_> {
     }
     pub(super) fn character_names_from_server(&mut self, bytes:&[u8]) {
         if let Ok(rows)=serde_json::from_slice::<Vec<(String,String,String)>>(bytes) {
-            for (uuid,id,name) in rows.into_iter().take(64) {if let (Ok(uuid),Some(mut c))=(u128::from_str_radix(&uuid,16),self.pack.character_catalog.index(&id).and_then(|i|self.pack.character_catalog.get(i)).cloned()){if name.len()<=256 && name.starts_with(&c.name){c.name=name;self.character_sync.resolved.insert(uuid,c);}}}
+            for (uuid,id,name) in rows.into_iter().take(64) {if let (Ok(uuid),Some(mut c))=(u128::from_str_radix(&uuid,16),self.pack.character_catalog.index(&id).and_then(|i|self.pack.character_catalog.get(i)).cloned()){if name.len()<=256 && name.starts_with(&c.name){c.name=name;if let Some(p)=self.remote.as_ref().and_then(|r|r.tab_players.get(&uuid)){self.character_sync.account_names.insert(p.name.clone(),uuid);}self.character_sync.resolved.insert(uuid,c);}}}
         }
     }
     fn remember_character(&mut self, uuid: u128) {
@@ -278,5 +292,6 @@ impl Game<'_> {
         self.character_sync.legacy_requests.clear();
         self.character_sync.reported = None;
         self.character_sync.resolved.clear();
+        for uuid in self.character_sync.server.peers.keys().copied().collect::<Vec<_>>() {self.resolve_character_name(uuid);}
     }
 }
