@@ -205,6 +205,11 @@ def main():
             command.append("--skip-tool-build")
         try:
             subprocess.run(command, cwd=lunatic, check=True)
+            data_home = Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local/share")))
+            game_home = Path(os.environ.get("HORIZON_HOME", str(data_home / "horizon")))
+            destination = game_home / "horizon-mods/lunatic.hmod"
+            atomic_copy(lunatic / "target/horizon-mod/lunatic.hmod", destination)
+            print(f"Installed Lunatic content: {destination}. Restart Horizon to load it.", flush=True)
         except (OSError, subprocess.CalledProcessError) as error:
             parser.exit(1, f"fork: {error}\n")
         return
