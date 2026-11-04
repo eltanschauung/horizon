@@ -45,7 +45,7 @@ def package(build, resources, content, output, platform):
                 'Horizon portable (' + platform + ' x86-64)\n\n'
                 'Extract the entire ZIP to a writable folder. Run horizon-client' + suffix + '.\n'
                 'No launcher, Java, Rust build or Minecraft download is needed.\n'
-                'Linux requires a Vulkan-capable GPU/driver and the normal desktop audio/window libraries.\n'
+                'Linux requires glibc 2.44 or newer, a Vulkan-capable GPU/driver and desktop audio/window libraries.\n'
                 'Windows requires a supported graphics driver.\n\n'
                 'Choose your character before playing. This copy starts with no saves or account credentials.\n'
                 'Player files stay in data/. The first multiplayer connection creates data/portable-identity.key.\n'
