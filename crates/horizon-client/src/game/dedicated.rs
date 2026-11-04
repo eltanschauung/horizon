@@ -1419,7 +1419,7 @@ impl Game<'_> {
     /// server (permission level 4). The dedicated-only commands are here;
     /// everything else goes to the game's dispatcher.
     fn console_command(&mut self, state: &mut ServerState, line: &str) {
-        let line = line.strip_prefix('/').unwrap_or(line);
+        let line = horizon_client::command::strip_command_prefix(line).unwrap_or(line);
         let mut words = line.split_whitespace();
         let Some(command) = words.next() else {
             return;

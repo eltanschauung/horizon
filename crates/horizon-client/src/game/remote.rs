@@ -8998,9 +8998,14 @@ impl Game<'_> {
         if message.is_empty() || !self.chat_abilities().allows(message) {
             return;
         }
-        if let Some(command) = message.strip_prefix('/') {
-            // The player's own RAM limit, which no server has a say in.
-            if !self.ram_limit_command(command) {
+        if let Some(command) = horizon_client::command::strip_command_prefix(message) {
+            // Bang commands are public chat AND normal commands. Keep the chat first,
+            // including its signature/chain update, then use the usual command signing path.
+            if message.starts_with('!') {
+                self.send_signed_chat(message);
+            }
+            // Client mod commands and the player's RAM limit stay local.
+            if !self.client_mod_command(command) && !self.ram_limit_command(command) {
                 self.send_command(command);
             }
         } else {

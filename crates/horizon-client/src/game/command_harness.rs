@@ -194,7 +194,10 @@ impl Game<'_> {
                     self.cmds.results = Some(Vec::new());
                     self.harness_owner(|g| {
                         g.as_console(|g| {
-                            g.run_command(command.strip_prefix('/').unwrap_or(command))
+                            g.run_command(
+                                horizon_client::command::strip_command_prefix(command)
+                                    .unwrap_or(command),
+                            )
                         });
                         Ok(())
                     })?;

@@ -287,16 +287,25 @@ fn mod_commands_are_coloured_and_complete_like_vanilla_ones() {
     };
     // Unknown without the mod's tree (#456).
     assert!(red(&typed(vanilla, "/coords")));
-    for line in ["/coords", "/where", "/where me and you"] {
+    for line in [
+        "/coords",
+        "/where",
+        "/where me and you",
+        "!coords",
+        "!where",
+        "!where me and you",
+    ] {
         assert!(!red(&typed(&modded, line)), "{line}");
     }
     let c = Commands {
         dispatcher: &modded,
         registries: &registries,
     };
-    let mut screen = typed(&modded, "/coo");
-    screen.key(&m, &c, &[], winit::keyboard::KeyCode::Tab, false, false);
-    assert_eq!(screen.value(), "/coords");
+    for prefix in ['/', '!'] {
+        let mut screen = typed(&modded, &format!("{prefix}coo"));
+        screen.key(&m, &c, &[], winit::keyboard::KeyCode::Tab, false, false);
+        assert_eq!(screen.value(), format!("{prefix}coords"));
+    }
 }
 
 #[test]
@@ -379,22 +388,24 @@ fn ask_server_nodes_wait_for_the_servers_completions() {
     let tab = |screen: &mut ChatScreen| {
         screen.key(&m, &c, &[], winit::keyboard::KeyCode::Tab, false, false);
     };
-    let mut screen = ChatScreen::new(&m, &c, "", 0, 640, 360, full());
-    screen.type_text(&m, &c, "/bossbar get pt");
-    let (request, sent) = screen.take_request().expect("the server is asked");
-    assert_eq!(sent, "/bossbar get pt");
-    assert_eq!(screen.take_request(), None);
-    // Nothing to complete until the reply.
-    tab(&mut screen);
-    assert_eq!(screen.value(), "/bossbar get pt");
-    // A reply to an older request is dropped; the range is in UTF-16 units.
-    let reply = |text: &str| vec![(text.to_owned(), None)];
-    screen.server_suggestions(&m, &c, request - 1, (13, 2), reply("pt6:old"));
-    tab(&mut screen);
-    assert_eq!(screen.value(), "/bossbar get pt");
-    screen.server_suggestions(&m, &c, request, (13, 2), reply("pt6:check"));
-    tab(&mut screen);
-    assert_eq!(screen.value(), "/bossbar get pt6:check");
+    for prefix in ['/', '!'] {
+        let mut screen = ChatScreen::new(&m, &c, "", 0, 640, 360, full());
+        screen.type_text(&m, &c, &format!("{prefix}bossbar get pt"));
+        let (request, sent) = screen.take_request().expect("the server is asked");
+        assert_eq!(sent, "/bossbar get pt");
+        assert_eq!(screen.take_request(), None);
+        // Nothing to complete until the reply.
+        tab(&mut screen);
+        assert_eq!(screen.value(), &format!("{prefix}bossbar get pt"));
+        // A reply to an older request is dropped; the range is in UTF-16 units.
+        let reply = |text: &str| vec![(text.to_owned(), None)];
+        screen.server_suggestions(&m, &c, request - 1, (13, 2), reply("pt6:old"));
+        tab(&mut screen);
+        assert_eq!(screen.value(), &format!("{prefix}bossbar get pt"));
+        screen.server_suggestions(&m, &c, request, (13, 2), reply("pt6:check"));
+        tab(&mut screen);
+        assert_eq!(screen.value(), format!("{prefix}bossbar get pt6:check"));
+    }
     // Without the server's provider the local list is done at once.
     let local = crate::command::vanilla::game_dispatcher();
     let c = Commands {
@@ -740,4 +751,28 @@ fn character_chat_identity_survives_wrapping_and_rewrap_without_parsing_text() {
         chat.lines.last().unwrap().content.component()["lunatic_skin"],
         "lunatic:entity/character/reimu"
     );
+}
+
+#[test]
+fn bang_commands_follow_chat_restrictions_and_persist_in_history() {
+    for command in ["!worldspawn", "!ban player", "!give @s minecraft:stone"] {
+        assert!(!ChatAbilities::new(ChatVisibility::System).allows(command));
+        assert!(!ChatAbilities::new(ChatVisibility::Hidden).allows(command));
+        assert!(full().allows(command));
+    }
+    assert!(!ChatAbilities::new(ChatVisibility::System).allows("hello !give"));
+    assert!(ChatAbilities::new(ChatVisibility::System).allows("/give @s minecraft:stone"));
+    let folder = std::env::temp_dir().join(format!("horizon-bang-history-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).unwrap();
+    let mut chat = Chat::default();
+    chat.load_history(&folder);
+    chat.add_recent("!give @s minecraft:stone");
+    assert_eq!(
+        std::fs::read_to_string(folder.join(COMMAND_HISTORY_FILE)).unwrap(),
+        "!give @s minecraft:stone\n"
+    );
+    let mut restored = Chat::default();
+    restored.load_history(&folder);
+    assert_eq!(restored.recent, ["!give @s minecraft:stone"]);
+    std::fs::remove_dir_all(folder).unwrap();
 }

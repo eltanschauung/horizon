@@ -3379,7 +3379,7 @@ impl Game<'_> {
         else {
             return;
         };
-        let skip = usize::from(text.starts_with('/'));
+        let skip = usize::from(horizon_client::command::strip_command_prefix(&text).is_some());
         let command = &text[skip..];
         let d = vanilla::game_dispatcher_with_features(&self.level.enabled_features);
         // The completions come from the server's players and lists, not from the host's own registries: a

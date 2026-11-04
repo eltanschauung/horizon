@@ -748,7 +748,7 @@ impl Game<'_> {
         } else if !unchanged {
             self.ui.chat_draft = Some(ChatDraft {
                 text: text.to_owned(),
-                command: text.starts_with('/'),
+                command: horizon_client::command::strip_command_prefix(text).is_some(),
             });
         }
     }
@@ -971,39 +971,41 @@ impl Game<'_> {
         // On a server (single player's own included) the server runs it,
         // unless a client mod owns the command.
         if self.remote.is_some() {
-            if let Some(command) = message.strip_prefix('/')
-                && self.client_mod_command(command)
-            {
-                return;
-            }
             self.send_chat(&message);
             return;
         }
-        if let Some(command) = message.strip_prefix('/') {
+        if let Some(command) = horizon_client::command::strip_command_prefix(&message) {
+            if message.starts_with('!') {
+                self.add_local_player_chat(&message);
+            }
             // A native mod's command first.
             if !self.client_mod_command(command) {
                 self.run_command(command);
             }
         } else {
-            let line = Text::translate(
-                "chat.type.text",
-                &[self.player_display_name(), Text::literal(message.as_str())],
-            );
-            let line = self
-                .character
-                .as_ref()
-                .and_then(|c| c.chat_line(&serde_json::Value::from(message.as_str())))
-                .unwrap_or(line);
-            let focused = self.screen == Screen::Chat;
-            self.ui.chat.add(
-                &self.gui.atlas,
-                line,
-                None,
-                ChatSource::Player,
-                self.ticks,
-                focused,
-            );
+            self.add_local_player_chat(&message);
         }
+    }
+    /// The same character name/colors and chat history rendering for messages and public bang commands.
+    fn add_local_player_chat(&mut self, message: &str) {
+        let line = Text::translate(
+            "chat.type.text",
+            &[self.player_display_name(), Text::literal(message)],
+        );
+        let line = self
+            .character
+            .as_ref()
+            .and_then(|c| c.chat_line(&serde_json::Value::from(message)))
+            .unwrap_or(line);
+        let focused = self.screen == Screen::Chat;
+        self.ui.chat.add(
+            &self.gui.atlas,
+            line,
+            None,
+            ChatSource::Player,
+            self.ticks,
+            focused,
+        );
     }
     pub(super) fn chat_scroll(&mut self, amount: f32) {
         let cursor = self.cursor;
@@ -1182,7 +1184,7 @@ impl Game<'_> {
     /// first, as `ClientPacketListener.sendUnattendedCommand` lets client
     /// commands take it.
     pub(super) fn click_command(&mut self, command: &str) {
-        let command = command.strip_prefix('/').unwrap_or(command);
+        let command = horizon_client::command::strip_command_prefix(command).unwrap_or(command);
         if self.client_mod_command(command) {
             return;
         }

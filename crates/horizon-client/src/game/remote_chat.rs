@@ -297,7 +297,7 @@ impl Game<'_> {
     /// a server nor a mod can have the player sign a message they never saw.
     pub(super) fn send_unattended_command(&mut self, command: &str) {
         let command = command.trim();
-        let command = command.strip_prefix('/').unwrap_or(command);
+        let command = horizon_client::command::strip_command_prefix(command).unwrap_or(command);
         if command.is_empty() || !self.chat_abilities().allows(&format!("/{command}")) {
             return;
         }

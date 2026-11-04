@@ -525,8 +525,10 @@ impl Game<'_> {
     /// from `source` at game master level, and how many of its results
     /// succeeded.
     pub(super) fn run_as_game_master(&mut self, command: &str, source: Source) -> i32 {
-        // performPrefixedCommand: a leading slash is allowed.
-        let line = command.strip_prefix('/').unwrap_or(command).to_owned();
+        // performPrefixedCommand: either user-facing command prefix is allowed.
+        let line = horizon_client::command::strip_command_prefix(command)
+            .unwrap_or(command)
+            .to_owned();
         let outer = self.cmds.results.replace(Vec::new());
         let level = std::mem::replace(&mut self.ui.registries.permission, 2);
         self.with_source(source, |g| g.run_command(&line));

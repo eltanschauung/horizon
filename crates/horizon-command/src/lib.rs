@@ -25,6 +25,12 @@ mod vanilla_order;
 pub use args::{Arg, ArgType, CustomCompletionAction, Registries, modify_custom_completions};
 use horizon_client_core::text::Text;
 
+/// A user-facing command may begin with either slash or bang. Strip exactly one prefix;
+/// argument text and exclamation marks elsewhere are preserved.
+pub fn strip_command_prefix(input: &str) -> Option<&str> {
+    input.strip_prefix('/').or_else(|| input.strip_prefix('!'))
+}
+
 /// The command id of a mod's command (`Dispatcher::with_mod_commands`).
 pub const MOD_COMMAND: &str = "mod";
 

@@ -1112,3 +1112,21 @@ fn fork_feedback_accepts_player_messages_without_operator_permission() {
         assert_eq!(d.parse("feedback I just saw a glitch", &r).executable().unwrap().1, "feedback");
     }
 }
+
+#[test]
+fn command_prefix_alias_preserves_command_arguments() {
+    for body in [
+        "worldspawn",
+        "ban player",
+        "give @s minecraft:stone",
+        "say héllo!",
+        "",
+    ] {
+        for prefix in ['/', '!'] {
+            assert_eq!(strip_command_prefix(&format!("{prefix}{body}")), Some(body));
+        }
+    }
+    assert_eq!(strip_command_prefix("say !hello"), None);
+    assert_eq!(strip_command_prefix(" !give"), None);
+    assert_eq!(strip_command_prefix("!!give"), Some("!give"));
+}

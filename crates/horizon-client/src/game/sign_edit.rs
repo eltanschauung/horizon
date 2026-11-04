@@ -127,11 +127,11 @@ impl Game<'_> {
         }
     }
     /// Run a sign's `run_command` line as the prefixed command vanilla runs
-    /// it as: a leading slash is allowed, errors are not reported (the NULL
+    /// it as: either command prefix is allowed, errors are not reported (the NULL
     /// source).
     fn run_sign_command(&mut self, pos: [i32; 3], command: &str) {
         let source = self.sign_command_source(pos);
-        let line = command.strip_prefix('/').unwrap_or(command);
+        let line = horizon_client::command::strip_command_prefix(command).unwrap_or(command);
         self.exec = Default::default();
         let permission = std::mem::replace(&mut self.ui.registries.permission, 2);
         let _ = self.execute_line(line, source);

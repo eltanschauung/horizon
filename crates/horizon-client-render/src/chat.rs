@@ -5,6 +5,7 @@
 use crate::{
     command::{
         Dispatcher, ParseResults, Registries, Suggestion, SuggestionsBuilder, merge_suggestions,
+        strip_command_prefix,
     },
     hud::{HudAtlas, HudBatch},
     hud_layout::{self, GuiDraw, PoseOp},
@@ -101,7 +102,10 @@ impl ChatAbilities {
     }
     /// Whether the chat screen may send `input` (`hasAllowedInput`).
     pub fn allows(&self, input: &str) -> bool {
-        if input.starts_with('/') {
+        // Public bang commands need permission to send both chat and commands.
+        if input.starts_with('!') {
+            self.send_commands && self.send_messages
+        } else if strip_command_prefix(input).is_some() {
             self.send_commands
         } else {
             self.send_messages
@@ -537,7 +541,9 @@ impl Chat {
             }
             self.recent.push(message.to_owned());
         }
-        if message.starts_with('/') && self.commands.last().map(String::as_str) != Some(message) {
+        if strip_command_prefix(message).is_some()
+            && self.commands.last().map(String::as_str) != Some(message)
+        {
             if self.commands.len() >= MAX_PERSISTED_COMMAND_HISTORY {
                 self.commands.remove(0);
             }
@@ -1271,9 +1277,9 @@ impl ChatScreen {
         self.usage.clear();
         let cursor = self.input.cursor;
         let cursor_b = byte_at(&command, cursor);
-        let slash = command.starts_with('/');
-        if self.layout.commands_only || slash {
-            let start = usize::from(slash);
+        let prefixed = strip_command_prefix(&command).is_some();
+        if self.layout.commands_only || prefixed {
+            let start = usize::from(prefixed);
             if self.parse.is_none() {
                 self.parse = Some(c.dispatcher.parse_at(&command, start, c.registries));
             }
@@ -1292,7 +1298,12 @@ impl ChatScreen {
                     // suggestions are done when the server answers.
                     let id = SUGGESTION_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
                     let truncated = command[..cursor_b].to_owned();
-                    self.request = Some((id, truncated.clone()));
+                    // Servers receive the standard slash form. Both prefixes occupy one
+                    // UTF-16 unit, so reply ranges still apply to the original input.
+                    let request = truncated
+                        .strip_prefix('!')
+                        .map_or_else(|| truncated.clone(), |body| format!("/{body}"));
+                    self.request = Some((id, request));
                     self.awaiting = Some(Awaiting {
                         id,
                         truncated,
@@ -1435,6 +1446,11 @@ impl ChatScreen {
         if !self.abilities.send_commands {
             self.usage.push(
                 Text::translate("chat_screen.commands_not_allowed", &[]).with_color(text::RED),
+            );
+        }
+        if self.input.value.starts_with('!') && !self.abilities.send_messages {
+            self.usage.push(
+                Text::translate("chat_screen.messages_not_allowed", &[]).with_color(text::RED),
             );
         }
         self.usage_width = self.usage.iter().map(|u| m.width(u)).max().unwrap_or(0);
