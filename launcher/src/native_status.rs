@@ -157,9 +157,6 @@ pub fn untracked(home: &Path) -> Vec<Installed> {
 /// The mods installed version `version` was built with, or None when it isn't a native build
 /// (or its `native-mods.json` can't be read: the Mods page then offers Build).
 pub fn built(version: &str) -> Option<Vec<Mod>> {
-    if !native_mods::is_native(version) {
-        return None;
-    }
     let path = backend::version_dir(version).join("native-mods.json");
     let about: serde_json::Value = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
     Some(parse_built(&about))

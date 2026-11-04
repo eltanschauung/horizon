@@ -873,9 +873,6 @@ impl Launcher {
 
     /// What installed native build `version` was made from (`native_status::Build`), read once.
     fn native_build_of(&self, version: &str) -> Option<native_status::Build> {
-        if !native_mods::is_native(version) {
-            return None;
-        }
         self.native_builds
             .borrow_mut()
             .entry(version.to_owned())
