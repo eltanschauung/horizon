@@ -2449,6 +2449,7 @@ pub fn server_dir(requested: Option<PathBuf>) -> PathBuf {
 
 /// Whether `tag` is prepared, with the run-time reports it needs completed when another copy has them.
 pub fn need_prepared(tag: &str) -> Result<(), String> {
+    crate::fork::install_bundled_mods(&version_dir(tag), &game_home())?;
     if is_prepared(tag) {
         complete_reports(&versions_dir(), tag);
         Ok(())

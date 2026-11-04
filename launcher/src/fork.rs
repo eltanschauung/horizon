@@ -1,11 +1,22 @@
 //! Fork source policy shared by native builds and release installs.
 //! A mod's upstream compatibility pin must never remove our skin changes.
 use crate::{backend, native_mods};
-use std::{fs, path::Path};
+use sha2::{Digest, Sha256};
+use std::{collections::BTreeMap, fs, path::Path};
 
 /// Signed fork releases carry content and editable native bundles beside the prebuild.
-/// Install missing defaults without replacing a player's existing mods or choices.
+/// Update managed defaults, preserving player-modified packages and selections.
 pub fn install_bundled_mods(version: &Path, home: &Path) -> Result<(), String> {
+    let record = home.join(".horizon-bundled-mods.json");
+    let read = |p: &Path| -> BTreeMap<String, String> {
+        fs::read(p)
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default()
+    };
+    let mut managed = read(&record);
+    let previous = read(&version.join("fork-mods/previous-defaults.json"));
+    let mut changed = false;
     for (folder, extension) in [("horizon-mods", "hmod"), ("horizon-native-mods", "hnmod")] {
         let source = version.join("fork-mods").join(folder);
         if !source.exists() {
@@ -22,13 +33,44 @@ pub fn install_bundled_mods(version: &Path, home: &Path) -> Result<(), String> {
                 return Err("Invalid bundled mod file".into());
             }
             let destination = target.join(entry.file_name());
+            let key = format!("{folder}/{}", entry.file_name().to_string_lossy());
             if destination.exists() {
-                continue;
+                let digest = format!(
+                    "{:x}",
+                    Sha256::digest(fs::read(&destination).map_err(|e| e.to_string())?)
+                );
+                if managed.get(&key) != Some(&digest) && previous.get(&key) != Some(&digest) {
+                    continue;
+                }
             }
             let temporary = destination.with_extension("installing");
             fs::copy(&path, &temporary).map_err(|e| e.to_string())?;
+            // Windows cannot rename over an existing file.
+            if destination.exists() {
+                fs::remove_file(&destination).map_err(|e| e.to_string())?;
+            }
             fs::rename(&temporary, &destination).map_err(|e| e.to_string())?;
+            managed.insert(
+                key,
+                format!(
+                    "{:x}",
+                    Sha256::digest(fs::read(&path).map_err(|e| e.to_string())?)
+                ),
+            );
+            changed = true;
         }
+    }
+    if changed {
+        let temp = record.with_extension("json.tmp");
+        fs::write(
+            &temp,
+            serde_json::to_vec_pretty(&managed).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
+        if record.exists() {
+            fs::remove_file(&record).map_err(|e| e.to_string())?;
+        }
+        fs::rename(temp, record).map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -79,6 +121,10 @@ mod tests {
         install_bundled_mods(&version, &home).unwrap();
         let installed = home.join("horizon-mods/lunatic.hmod");
         assert_eq!(fs::read(&installed).unwrap(), b"bundled");
+        fs::write(source.join("lunatic.hmod"), b"updated").unwrap();
+        install_bundled_mods(&version, &home).unwrap();
+        assert_eq!(fs::read(&installed).unwrap(), b"updated");
+
         fs::write(&installed, b"custom").unwrap();
         fs::write(home.join("horizon-mods.txt"), b"mod.lunatic:false\n").unwrap();
         install_bundled_mods(&version, &home).unwrap();

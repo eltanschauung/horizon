@@ -71,7 +71,7 @@ def main():
         "Minecraft files and player data are not distributed in this release.\n"
     )
     if not windows:
-        instructions += "\nLinux: x86-64, glibc 2.35 or newer, Vulkan-capable graphics, X11/Wayland, ALSA and libudev.\n"
+        instructions += "\nLinux: x86-64, glibc 2.44 or newer, Vulkan-capable graphics, X11/Wayland, ALSA and libudev.\n"
     for folder in (game, launcher):
         (folder / "README.txt").write_text(instructions, encoding="utf-8")
     for folder in (game, launcher):
