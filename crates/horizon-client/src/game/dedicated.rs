@@ -196,8 +196,7 @@ fn load_anticheat() -> horizon_anticheat::Config {
     }
 }
 
-/// `server.toml`'s `[chat_filter]` (docs/chat-filter.md), like `[anticheat]`: on by default, off (with an
-/// error logged) when the section is wrong. The mutes are kept beside server.properties.
+/// Load operator-issued mutes using the legacy `[chat_filter]` section.
 fn load_chat_filter() -> Option<horizon_chat_filter::Guard> {
     let text = std::fs::read_to_string("server.toml").unwrap_or_default();
     let config = match horizon_chat_filter::Config::from_server_toml(&text) {
@@ -219,10 +218,7 @@ fn load_chat_filter() -> Option<horizon_chat_filter::Guard> {
     }
     log(
         "INFO",
-        &format!(
-            "Chat filter on: {} words (server.toml [chat_filter]; enabled = false turns it off)",
-            guard.filter.len()
-        ),
+        "Operator-issued chat mutes available; automatic word filtering removed",
     );
     Some(guard)
 }

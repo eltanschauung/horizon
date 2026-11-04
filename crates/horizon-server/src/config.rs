@@ -85,13 +85,8 @@ enabled = true               # false pauses it and keeps the webhook
 # decay = 0.02               # violation level lost each second
 # ban_after = 0              # the kick (counting this check's earlier ones) that bans instead; 0: never
 
-# The chat filter (docs/chat-filter.md) is on: a message, sign, anvil name or book title with a hate slur reaches
-# nobody, the sender is told, and logs/chat-filter.log keeps it for operators. To change it:
-# [chat_filter]
-# enabled = true             # false: players' text goes out as they wrote it
-# mute_after = 2             # the hit (within window_minutes) that mutes for mute_minutes; 0: never
-# tempban_after = 3          # the hit that bans for tempban_hours; 0: never
-# words_file = ""            # your own list, in the format of the built-in one; "": the built-in list
+# Operator-issued mute commands use the legacy [chat_filter] enabled setting.
+# Automatic word matching and automatic mute/ban escalation have been removed.
 "##;
 
 /// Each typed setting: its section, its name, and the vanilla key it writes.
@@ -669,23 +664,10 @@ mod tests {
     }
 
     #[test]
-    fn the_chat_filter_is_on_unless_its_section_turns_it_off() {
-        assert!(Config::default().chat_filter.enabled);
-        assert!(!TEMPLATE.lines().any(|l| l.trim() == "[chat_filter]"));
-        let text =
-            format!("{TEMPLATE}\n[chat_filter]\nmute_after = 3\nwords_file = \"slurs.txt\"\n");
-        let c = Config::parse(&text).unwrap();
-        assert_eq!(c.chat_filter.mute_after, 3);
+    fn legacy_word_filter_settings_are_ignored() {
+        let c = Config::parse("[chat_filter]\nmute_after = 1\nwords_file = \"old.txt\"\n").unwrap();
+        assert_eq!(c.chat_filter, horizon_chat_filter::Config::default());
         assert_eq!(Config::parse(&render(&c)).unwrap(), c);
-        // The game reads the same section from the same file.
-        assert_eq!(
-            horizon_chat_filter::Config::from_server_toml(&text).unwrap(),
-            c.chat_filter
-        );
-        let off = Config::parse(&format!("{TEMPLATE}\n[chat_filter]\nenabled = false\n")).unwrap();
-        assert!(!off.chat_filter.enabled);
-        assert_eq!(Config::parse(&render(&off)).unwrap(), off);
-        assert!(Config::parse("[chat_filter]\nmute = 2\n").is_err());
     }
 
     #[test]

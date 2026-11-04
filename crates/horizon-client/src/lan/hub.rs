@@ -180,17 +180,6 @@ pub enum HostEvent {
         sender: u128,
         text: String,
     },
-    /// A player's text the chat filter refused (docs/chat-filter.md): relayed to nobody, for the
-    /// game to log and to carry out `action`.
-    ChatFiltered {
-        sender: u128,
-        name: String,
-        place: chat_filter::Place,
-        text: String,
-        /// The hit's number in the filter's window.
-        count: u32,
-        action: horizon_chat_filter::Action,
-    },
     /// A server log warning (ServerGamePacketListenerImpl's LOGGER.warn).
     Warn(String),
     /// A server log error (LOGGER.error).
@@ -473,8 +462,15 @@ impl Hub {
         if team.is_none() && shown == name && !self.character_names.contains_key(&uuid) {
             return display_name(uuid, name);
         }
-        let member=self.character_names.get(&uuid).cloned().unwrap_or_else(||crate::scoreboard::literal(shown));
-        let mut c = match team {Some(team)=>team.formatted_name_comp(&member),None=>member};
+        let member = self
+            .character_names
+            .get(&uuid)
+            .cloned()
+            .unwrap_or_else(|| crate::scoreboard::literal(shown));
+        let mut c = match team {
+            Some(team) => team.formatted_name_comp(&member),
+            None => member,
+        };
         c["click_event"] =
             serde_json::json!({"action": "suggest_command", "command": format!("/tell {name} ")});
         c["hover_event"] = serde_json::json!({"action": "show_entity", "id": "minecraft:player",
@@ -1054,7 +1050,12 @@ impl Hub {
             game_mode: Some(mode),
             listed: Some(true),
             latency: Some(latency),
-            display_name: Some(self.character_names.get(&uuid).map(crate::scoreboard::component_tag).or_else(||self.nicknames.get(&uuid).map(|n|literal(n)))) ,
+            display_name: Some(
+                self.character_names
+                    .get(&uuid)
+                    .map(crate::scoreboard::component_tag)
+                    .or_else(|| self.nicknames.get(&uuid).map(|n| literal(n))),
+            ),
             list_order: Some(0),
             show_hat: Some(guest.is_none_or(|g| g.info.model_customisation & 0x40 != 0)),
         }
@@ -3948,7 +3949,12 @@ impl Hub {
             actions: 0x20,
             entries: vec![play::PlayerInfo {
                 uuid,
-                display_name: Some(self.character_names.get(&uuid).map(crate::scoreboard::component_tag).or_else(||self.nicknames.get(&uuid).map(|n|literal(n)))) ,
+                display_name: Some(
+                    self.character_names
+                        .get(&uuid)
+                        .map(crate::scoreboard::component_tag)
+                        .or_else(|| self.nicknames.get(&uuid).map(|n| literal(n))),
+                ),
                 ..Default::default()
             }],
         }));

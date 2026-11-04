@@ -1832,14 +1832,6 @@ impl Game<'_> {
                 HostEvent::Ban { uuid, name, reason } => {
                     self.anticheat_ban(&mut host.hub, uuid, &name, &reason);
                 }
-                HostEvent::ChatFiltered {
-                    sender,
-                    name,
-                    place,
-                    text,
-                    count,
-                    action,
-                } => self.chat_filtered(&mut host, sender, &name, place, &text, count, action),
                 HostEvent::PlayerChat { sender, text } => {
                     if let Some(g) = host.hub.guests.iter().find(|g| g.uuid == sender) {
                         if self.options.dedicated.is_some() {
@@ -1971,9 +1963,7 @@ impl Game<'_> {
                             "INFO",
                             &format!("System chat: {} left the game", guest.name),
                         );
-                    } else if self.player.is_some()
-                        && guest.placed
-                        && !guest.character_join_pending
+                    } else if self.player.is_some() && guest.placed && !guest.character_join_pending
                     {
                         // ServerGamePacketListenerImpl.removePlayerFromWorld.
                         let who = self.player_text(&guest.name, guest.uuid);

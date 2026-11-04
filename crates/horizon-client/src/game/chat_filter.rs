@@ -1,13 +1,8 @@
-//! The dedicated server's chat filter, game side (docs/chat-filter.md): what the hub refused is
-//! written to `logs/chat-filter.log` and told to horizon-server's event stream as `chat_filtered`
-//! (never as `chat`), a temporary ban goes into banned-players.json, and operators mute and unmute
-//! players by hand with `/mute`, `/tempmute`, `/mutelist` and `/unmute` (the same words on the console).
+//! Operator-issued mute commands. No automatic text moderation.
 use super::{Game, dedicated, lan::LanHost};
-use horizon_chat_filter::Action;
 use horizon_client::lan::hub::{HostEvent, chat_filter::Place};
 use horizon_protocol::packets::play::{self, Clientbound as C};
 use horizon_protocol::text::{literal, translatable};
-use horizon_server_files::user_lists::{BanEntry, NameAndId};
 
 /// The operator level the mute commands need, as `/ban`'s.
 const MUTE_LEVEL: u8 = 3;
@@ -15,101 +10,10 @@ const MUTE_LEVEL: u8 = 3;
 /// The commands of `mute_command`.
 pub(super) const MUTE_COMMANDS: [&str; 4] = ["mute", "tempmute", "mutelist", "unmute"];
 
-/// The reason a temporary ban gives at login.
-const BAN_REASON: &str = "Hate speech in chat (Horizon chat filter)";
-
 impl Game<'_> {
-    /// The hub's events from a filtered text: `ChatFiltered` carried out here, the others logged.
-    pub(super) fn chat_filter_events(&mut self, host: &mut LanHost, events: Vec<HostEvent>) {
+    pub(super) fn chat_filter_events(&mut self, _host: &mut LanHost, events: Vec<HostEvent>) {
         for event in events {
-            match event {
-                HostEvent::ChatFiltered {
-                    sender,
-                    name,
-                    place,
-                    text,
-                    count,
-                    action,
-                } => self.chat_filtered(host, sender, &name, place, &text, count, action),
-                event => self.lan_log_event(event),
-            }
-        }
-    }
-
-    /// One refused text: the log, the event, and a temporary ban when it came to that.
-    #[allow(clippy::too_many_arguments)]
-    pub(super) fn chat_filtered(
-        &mut self,
-        host: &mut LanHost,
-        uuid: u128,
-        name: &str,
-        place: Place,
-        text: &str,
-        count: u32,
-        action: Action,
-    ) {
-        let now = horizon_chat_filter::now_millis();
-        let summary = format!(
-            "[chat-filter] Refused {name}'s {} (hit {count}: {})",
-            place.name(),
-            action.name()
-        );
-        if self.options.dedicated.is_none() {
-            log::info!("{summary}");
-            return;
-        }
-        // The text only goes to the filter's own log, for operators: never to the console or the stream.
-        dedicated::log("INFO", &summary);
-        if let Some(path) = host.hub.chat_filter_log() {
-            let line =
-                horizon_chat_filter::log_line(now, name, uuid, place.name(), count, action, text);
-            if let Err(e) = horizon_chat_filter::append_log(std::path::Path::new(path), &line) {
-                dedicated::log("WARN", &format!("[chat-filter] {path}: {e}"));
-            }
-        }
-        dedicated::events::record(
-            "chat_filtered",
-            name,
-            uuid,
-            serde_json::json!({ "place": place.name(), "hit": count, "action": action.name() }),
-        );
-        let Action::Banned { until } = action else {
-            return;
-        };
-        if let Some(lists) = &self.server_lists {
-            lists.lock().unwrap().bans.add(BanEntry::new(
-                NameAndId {
-                    id: uuid,
-                    name: name.to_owned(),
-                },
-                Some("Server".into()),
-                Some(until),
-                Some(BAN_REASON.into()),
-            ));
-        }
-        let hours = (until - now + 3_599_999) / 3_600_000;
-        dedicated::log(
-            "INFO",
-            &format!("[chat-filter] Banned {name} for {hours} hours: {BAN_REASON}"),
-        );
-        let reason = literal(&format!(
-            "You're banned for {hours} hours: slurs aren't allowed here."
-        ));
-        let conns: Vec<u32> = host
-            .hub
-            .guests
-            .iter()
-            .filter(|g| g.uuid == uuid)
-            .map(|g| g.conn)
-            .collect();
-        for conn in conns {
-            host.hub.kick(conn, reason.clone());
-            dedicated::events::record(
-                "kick",
-                name,
-                uuid,
-                serde_json::json!({ "reason": "chat filter: temporary ban" }),
-            );
+            self.lan_log_event(event);
         }
     }
 

@@ -387,13 +387,8 @@ impl Game<'_> {
     /// lets `text` through: true without a filter, None inside a player's
     /// hook (where the server is out of reach). API 62.
     pub(super) fn native_text_allowed(&self, text: &str) -> Option<bool> {
-        let host = self.lan.as_ref()?;
-        Some(
-            host.hub
-                .chat_filter
-                .as_ref()
-                .is_none_or(|g| !g.filter.matches(text)),
-        )
+        let _ = text;
+        self.lan.as_ref().map(|_| true)
     }
     /// A system line in every player's chat and the server's log.
     pub(super) fn native_broadcast(&self, mut line: Text) {
