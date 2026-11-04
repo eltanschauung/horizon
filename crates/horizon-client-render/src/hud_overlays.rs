@@ -137,6 +137,12 @@ pub(crate) fn compare_effects(a: &EffectIcon, o: &EffectIcon) -> Ordering {
 /// `Hud.extractEffects`: `effects` in `getActiveEffects` order; `demo` moves
 /// the icons below the demo timer.
 pub fn effects(w: i32, demo: bool, effects: &[EffectIcon]) -> Vec<GuiDraw> {
+    effects_at(w, 1, demo, effects)
+}
+
+/// The normal effect rows below an explicitly measured HUD anchor. The caller
+/// owns corner layout; ordering, category rows, blinking and sprites stay vanilla.
+pub fn effects_at(w: i32, top: i32, demo: bool, effects: &[EffectIcon]) -> Vec<GuiDraw> {
     let mut out = Vec::new();
     let mut sorted: Vec<&EffectIcon> = effects.iter().collect();
     // Ordering.natural().reverse().sortedCopy.
@@ -144,7 +150,7 @@ pub fn effects(w: i32, demo: bool, effects: &[EffectIcon]) -> Vec<GuiDraw> {
     let (mut beneficial, mut harmful) = (0, 0);
     for e in sorted.into_iter().filter(|e| e.show_icon) {
         let mut x = w;
-        let mut y = 1 + if demo { 15 } else { 0 };
+        let mut y = top + if demo { 15 } else { 0 };
         if e.beneficial {
             beneficial += 1;
             x -= 25 * beneficial;
@@ -190,6 +196,66 @@ pub fn effects(w: i32, demo: bool, effects: &[EffectIcon]) -> Vec<GuiDraw> {
         });
     }
     out
+}
+
+#[cfg(test)]
+mod effect_layout_tests {
+    use super::*;
+
+    fn icons() -> Vec<EffectIcon> {
+        vec![
+            EffectIcon {
+                id: "speed".into(),
+                beneficial: true,
+                color: 0,
+                ambient: false,
+                duration: 600,
+                show_icon: true,
+            },
+            EffectIcon {
+                id: "poison".into(),
+                beneficial: false,
+                color: 0,
+                ambient: false,
+                duration: 80,
+                show_icon: true,
+            },
+        ]
+    }
+
+    #[test]
+    fn default_effect_rows_keep_vanilla_positions() {
+        let draws = effects(320, false, &icons());
+        let positions: Vec<_> = draws
+            .iter()
+            .map(|draw| match draw {
+                GuiDraw::Sprite { x, y, .. } => (*x, *y),
+                _ => panic!("unexpected effect draw"),
+            })
+            .collect();
+        assert!(positions.contains(&(295, 1)));
+        assert!(positions.contains(&(298, 4)));
+        assert!(positions.contains(&(295, 27)));
+        assert!(positions.contains(&(298, 30)));
+    }
+
+    #[test]
+    fn measured_anchor_moves_every_draw_without_changing_effect_rendering() {
+        for width in [160, 320, 640] {
+            for demo in [false, true] {
+                let vanilla = effects(width, demo, &icons());
+                let anchored = effects_at(width, 109, demo, &icons());
+                assert_eq!(vanilla.len(), anchored.len());
+                for (mut expected, actual) in vanilla.into_iter().zip(anchored) {
+                    if let GuiDraw::Sprite { y, .. } = &mut expected {
+                        *y += 108;
+                    }
+                    assert_eq!(expected, actual);
+                }
+            }
+        }
+        assert!(effects_at(320, 109, false, &[]).is_empty());
+    }
 }
 
 /// The saving indicator: `Hud.tickAutosaveIndicator` fades a value towards 1

@@ -233,12 +233,11 @@ impl Game<'_> {
     pub(super) fn zoom_turn_scale(&self) -> f64 {
         self.zoom_now().2
     }
-    /// The minimap and mods' corner panels, in the HUD layer (hidden with F1
-    /// by the caller). The top left corner gives way to the debug screen.
-    pub(super) fn draw_extras(&mut self, batch: &mut HudBatch) {
+    /// Persistent corner panels share the caller's allocator with later HUD
+    /// layers. The caller hides these with F1; top left gives way to debug.
+    pub(super) fn draw_extras(&mut self, batch: &mut HudBatch, corners: &mut Corners) {
         let map = self.minimap_shown();
         let visible = |corner| !(self.debug && corner == Corner::TopLeft);
-        let mut corners = Corners::new(batch.width, batch.height, self.effect_rows_height());
         let atlas = &self.gui.atlas;
         if let Some((map_corner, map_size, view)) = map
             && visible(map_corner)
@@ -257,21 +256,8 @@ impl Game<'_> {
                 arrow,
                 north,
             };
-            extras_hud::draw_minimap(batch, atlas, &mut corners, &look);
+            extras_hud::draw_minimap(batch, atlas, corners, &look);
         }
-        self.native_hud(batch, &mut corners);
-    }
-    /// The height the status effect icons take at the top right
-    /// (`Hud.extractEffects`: beneficial at y 1, harmful at y 26).
-    fn effect_rows_height(&self) -> f32 {
-        let effects = &self.potions.effects.list;
-        if effects.is_empty() || self.screen != Screen::Playing {
-            return 0.0;
-        }
-        let harmful = effects.iter().any(|e| {
-            horizon_client::brewing::effect(e.id)
-                .is_some_and(|d| d.category != horizon_client::brewing::Category::Beneficial)
-        });
-        if harmful { 50.0 } else { 25.0 }
+        self.native_hud(batch, corners);
     }
 }

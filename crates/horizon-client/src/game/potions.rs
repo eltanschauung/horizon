@@ -1766,9 +1766,9 @@ impl Game<'_> {
         };
         batch.width as i32 - (ox as i32 + image_width + 2) >= 32
     }
-    /// `Hud.extractEffects`: icons top-right, beneficial row then harmful row;
+    /// `Hud.extractEffects`: icons at the measured top-right anchor, beneficial row then harmful row;
     /// every screen but the inventories keeps them.
-    pub(super) fn draw_effect_icons(&self, batch: &mut HudBatch) {
+    pub(super) fn draw_effect_icons(&self, batch: &mut HudBatch, top: i32) {
         if self.potions.effects.list.is_empty() || self.screen_shows_active_effects(batch) {
             return;
         }
@@ -1779,7 +1779,7 @@ impl Game<'_> {
             .iter()
             .map(hud_overlays::EffectIcon::from)
             .collect();
-        let draws = hud_overlays::effects(batch.width as i32, false, &icons);
+        let draws = hud_overlays::effects_at(batch.width as i32, top, false, &icons);
         hud_layout::paint(batch, &self.gui.atlas, &draws);
     }
     /// `EffectsInInventory`: panels to the right of survival/creative inventory.

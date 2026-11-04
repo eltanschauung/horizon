@@ -17,7 +17,7 @@ pub struct Corners {
     used: [f32; 4],
 }
 impl Corners {
-    /// `top_right` reserves the status effect icons' rows.
+    /// `top_right` is an optional initial reservation for that corner.
     pub fn new(width: f32, height: f32, top_right: f32) -> Self {
         Self {
             width,
@@ -25,6 +25,14 @@ impl Corners {
             used: [0.0, top_right, 0.0, 0.0],
         }
     }
+    /// The next box's distance from this corner's edge, including the shared
+    /// gap, if a panel has already claimed space. Read-only: querying a later
+    /// layer never changes the placement of earlier panels.
+    pub fn next_edge(&self, corner: Corner) -> Option<f32> {
+        let i = Corner::ALL.iter().position(|c| *c == corner).unwrap_or(0);
+        (self.used[i] > 0.0).then_some(self.used[i] + MARGIN)
+    }
+
     /// The top-left position of a `w` x `h` box in `corner`, below (or
     /// above) what the corner already holds.
     pub fn place(&mut self, corner: Corner, w: f32, h: f32) -> (f32, f32) {
@@ -130,11 +138,33 @@ mod tests {
     use super::*;
 
     #[test]
+    fn next_edge_includes_the_complete_map_and_coordinate_footer() {
+        let mut c = Corners::new(400.0, 300.0, 0.0);
+        assert_eq!(c.next_edge(Corner::TopRight), None);
+        assert_eq!(c.place(Corner::TopRight, 96.0, 96.0), (302.0, 2.0));
+        assert_eq!(c.next_edge(Corner::TopRight), Some(100.0));
+        assert_eq!(c.place(Corner::TopRight, 96.0, 7.0), (302.0, 100.0));
+        assert_eq!(c.next_edge(Corner::TopRight), Some(109.0));
+        // Measuring transient content does not reserve another box.
+        assert_eq!(c.next_edge(Corner::TopRight), Some(109.0));
+        assert_eq!(c.place(Corner::TopRight, 48.0, 12.0), (350.0, 109.0));
+    }
+
+    #[test]
+    fn other_corners_do_not_displace_top_right_effects() {
+        let mut c = Corners::new(320.0, 180.0, 0.0);
+        for corner in [Corner::TopLeft, Corner::BottomLeft, Corner::BottomRight] {
+            c.place(corner, 64.0, 64.0);
+            assert_eq!(c.next_edge(Corner::TopRight), None);
+        }
+    }
+
+    #[test]
     fn corners_stack_away_from_their_edge() {
         let mut c = Corners::new(400.0, 300.0, 26.0);
         assert_eq!(c.place(Corner::TopLeft, 50.0, 12.0), (2.0, 2.0));
         assert_eq!(c.place(Corner::TopLeft, 70.0, 20.0), (2.0, 16.0));
-        // Top right starts under the effect icons.
+        // Top right honors its initial reservation.
         assert_eq!(c.place(Corner::TopRight, 50.0, 12.0), (348.0, 28.0));
         assert_eq!(c.place(Corner::BottomRight, 50.0, 12.0), (348.0, 286.0));
         assert_eq!(c.place(Corner::BottomRight, 50.0, 10.0), (348.0, 274.0));

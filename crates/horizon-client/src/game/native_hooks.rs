@@ -2325,7 +2325,8 @@ impl Game<'_> {
     pub(super) fn native_level_tick_post(&mut self, dimension: &str) {
         mod_api::dispatch_level_tick_post(self, mod_api::mods(), dimension);
     }
-    /// The HUD (not drawn under F1), after the minimap: place a box with
+    /// Persistent HUD panels (not drawn under F1), after the minimap and
+    /// before transient status-effect rows: place a box with
     /// `corners.place` (boxes stack away from their edge) and draw it with
     /// `native_fill` and `native_text`. Skip a corner `native_corner_shown`
     /// says is taken.

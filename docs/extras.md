@@ -72,6 +72,7 @@ the hook points they use (`crates/horizon-client/src/game/native_hooks.rs`), and
 keys and `movedToMods`.
 
 The game still draws the minimap, for the native mod (`native_minimap` in `native_hooks.rs`, [mods.md](mods.md)):
+- stable corner placement: the map, its coordinate footer and native HUD panels share a per-frame corner allocator; status-effect rows start below occupied top-right space and never move the map. Without a top-right panel, effects retain their vanilla position.
 - a corner map (top right by default), square or round, small/medium/large, zoom 0.5 to 4 blocks per pixel, rotating
   with the player or north up, with the player arrow (vanilla's map decoration sprite);
 - vanilla's `MapColor` per block, as map items use, with the map item's height shading and water-depth dithering;

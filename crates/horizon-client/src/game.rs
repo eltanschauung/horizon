@@ -8527,14 +8527,23 @@ impl Game<'_> {
                     }
                 }
             });
+            // Persistent corner panels claim space before transient effect rows.
+            // This includes the minimap mod's coordinate footer through the same
+            // allocator; no duplicated map dimensions or frame-to-frame cache.
+            let mut corners =
+                horizon_client::extras_hud::Corners::new(batch.width, batch.height, 0.0);
+            self.draw_extras(&mut batch, &mut corners);
+            let effects_top = corners
+                .next_edge(horizon_client::extras::Corner::TopRight)
+                .unwrap_or(1.0)
+                .ceil() as i32;
             self.gui_layer("minecraft:effects", &mut batch, |g, batch| {
-                g.draw_effect_icons(batch);
+                g.draw_effect_icons(batch, effects_top);
             });
             // Hud: the action bar and titles draw over the hotbar (nextStratum).
             self.gui_layer("minecraft:boss_overlay", &mut batch, |g, batch| {
                 g.draw_boss_bars(batch);
             });
-            self.draw_extras(&mut batch);
         }
         if show_hud {
             // Hud.nextContextualInfoState: the jump bar, the experience bar or
