@@ -37,3 +37,18 @@ fn migrate_old_release_defaults_but_preserve_custom_mods_and_selections() {
     );
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn release_tags_recognize_their_bundled_native_build() {
+    let root = std::env::temp_dir().join(format!("release-native-{}", std::process::id()));
+    let path = root.join("fork-versions/v0.3.2");
+    fs::create_dir_all(&path).unwrap();
+    let metadata = serde_json::json!({"base":"v0.3.2","horizon":"8cf2519dd64b3d12af9eecb866390f0db4907b3f","target":"client","mods":[{"id":"lunatic","version":"0.7.1"}]});
+    fs::write(path.join("native-mods.json"), metadata.to_string()).unwrap();
+    std::env::set_var("HORIZON_LAUNCHER_HOME", &root);
+    let mods = horizon_launcher::native_status::built("v0.3.2").unwrap();
+    assert_eq!(mods[0].0, "lunatic");
+    assert!(horizon_launcher::native_status::Build::read("v0.3.2").is_some());
+    std::env::remove_var("HORIZON_LAUNCHER_HOME");
+    fs::remove_dir_all(root).unwrap();
+}
