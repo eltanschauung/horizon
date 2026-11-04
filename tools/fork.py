@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -183,10 +184,27 @@ def install(component, profile, env):
     print("Running apps were left open. Restart them when ready to use the new binaries.", flush=True)
 
 
+def fork_launcher():
+    override = os.environ.get("HORIZON_FORK_LAUNCHER")
+    if override:
+        return override
+    desktop = Path.home() / ".local/share/applications/horizon-launcher.desktop"
+    if desktop.exists():
+        for line in desktop.read_text().splitlines():
+            if line.startswith("Exec="):
+                executable = shlex.split(line[5:])[0]
+                if Path(executable).is_file():
+                    return executable
+    found = shutil.which("horizon-launcher")
+    if found:
+        return found
+    raise RuntimeError("Install the fork launcher first or set HORIZON_FORK_LAUNCHER")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("build", "install"), help="install builds first, then deploys")
-    parser.add_argument("component", nargs="?", default="all", choices=("all", "game", "launcher", "lunatic"))
+    parser.add_argument("component", nargs="?", default="all", choices=("all", "game", "launcher", "lunatic", "modded"))
     parser.add_argument("--release", action="store_true", help="use slower release builds instead of fast")
     parser.add_argument("--jobs", type=int, default=2, help="parallel compiler jobs (default: 2)")
     args = parser.parse_args()
@@ -194,6 +212,20 @@ def main():
         parser.error("--jobs must be positive")
     if sys.platform != "linux":
         parser.error("these local build/install commands currently support Linux")
+    if args.component == "modded":
+        try:
+            # Native builds fetch committed fork main. Never silently omit local source edits.
+            changed = subprocess.check_output(["git", "diff", "HEAD", "--name-only"], cwd=ROOT, text=True).splitlines()
+            if any(name != "AGENTS.md" for name in changed):
+                raise RuntimeError("Commit source changes first; native builds use pushed main")
+            branch = subprocess.check_output(["git", "branch", "--show-current"], cwd=ROOT, text=True).strip()
+            if branch != "main":
+                raise RuntimeError("Run build modded from main")
+            subprocess.run(["git", "push", "origin", "main"], cwd=ROOT, check=True)
+            subprocess.run([fork_launcher(), "native-build", "--instance", "horizon", "--trust-native-code", "--allow-version-mismatch", "--profile", "release" if args.release else "performance"], cwd=ROOT, check=True)
+        except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
+            parser.exit(1, f"fork: {error}\n")
+        return
     if args.component == "lunatic":
         if args.action != "build":
             parser.error("Lunatic supports build only; install its packages through the launcher")

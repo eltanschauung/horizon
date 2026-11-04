@@ -12,6 +12,7 @@ Rust/cache config: `.local/fork-build.json`. Run here:
 ./tools/fork.py build             # Game + launcher; optimized fast profile
 ./tools/fork.py install           # Build + deploy both; selects plain fork-local
 ./tools/fork.py build game        # Or: launcher
+./tools/fork.py build modded      # Push committed main; build installed/enabled native mods + game; select in launcher
 ./tools/fork.py build lunatic     # Package Lunatic + install .hmod; restart game
 ./tools/fork.py install launcher  # Or: game
 ./tools/fork.py build --release   # Optional maximum optimization
