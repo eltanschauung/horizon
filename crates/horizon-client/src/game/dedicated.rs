@@ -970,6 +970,10 @@ impl Game<'_> {
             })),
             gate: Some(gate),
             online,
+            allow_portable: props
+                .raw
+                .get("horizon-allow-portable")
+                .is_some_and(|v| v.trim() == "true"),
             forwarding_secret,
             log: Some(NetLog {
                 write: Arc::new(log_from),

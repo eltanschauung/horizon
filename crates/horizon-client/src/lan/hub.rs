@@ -1150,8 +1150,10 @@ impl Hub {
             limited_crafting: self.limited_crafting,
             spawn: self.spawn_info(i, 0),
             // MinecraftServer.usesAuthentication, enforceSecureProfile.
-            online_mode: self.lan.shared.config.online.is_some(),
-            enforces_secure_chat: self.enforces_secure_chat(),
+            online_mode: self.lan.shared.config.online.is_some()
+                && !crate::portable::is_portable(g.uuid),
+            enforces_secure_chat: self.enforces_secure_chat()
+                && !crate::portable::is_portable(g.uuid),
         }));
         g.send(&C::ChangeDifficulty(play::ChangeDifficulty {
             difficulty: ctx.difficulty,

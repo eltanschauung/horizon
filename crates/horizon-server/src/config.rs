@@ -24,6 +24,7 @@ port = 25565                 # the port players connect to
 bind = ""                    # listen on every address, or only on this one (server-ip)
 max_players = 20             # how many players can be online at once
 online_mode = true           # check players' Minecraft accounts (false: anyone joins under any name)
+allow_portable = false       # also accept Horizon installation-key identities; no Microsoft verification for these
 whitelist = true             # only whitelisted players and operators can join
 enforce_whitelist = false    # kick online players taken off the whitelist
 view_distance = 10           # chunks sent around each player
@@ -90,12 +91,13 @@ enabled = true               # false pauses it and keeps the webhook
 "##;
 
 /// Each typed setting: its section, its name, and the vanilla key it writes.
-pub(crate) const TYPED: [(&str, &str, &str); 16] = [
+pub(crate) const TYPED: [(&str, &str, &str); 17] = [
     ("server", "motd", "motd"),
     ("server", "port", "server-port"),
     ("server", "bind", "server-ip"),
     ("server", "max_players", "max-players"),
     ("server", "online_mode", "online-mode"),
+    ("server", "allow_portable", "horizon-allow-portable"),
     ("server", "whitelist", "white-list"),
     ("server", "enforce_whitelist", "enforce-whitelist"),
     ("server", "view_distance", "view-distance"),
@@ -160,6 +162,7 @@ pub struct Server {
     pub bind: String,
     pub max_players: u32,
     pub online_mode: bool,
+    pub allow_portable: bool,
     pub whitelist: bool,
     pub enforce_whitelist: bool,
     pub view_distance: u32,
@@ -311,6 +314,7 @@ impl Default for Server {
             bind: String::new(),
             max_players: 20,
             online_mode: true,
+            allow_portable: false,
             whitelist: true,
             enforce_whitelist: false,
             view_distance: 10,
@@ -693,6 +697,22 @@ mod tests {
     }
 
     #[test]
+    fn portable_opt_in_keeps_online_authentication_enabled() {
+        let config =
+            Config::parse("[server]\nonline_mode = true\nallow_portable = true\n").unwrap();
+        assert!(config.server.online_mode && config.server.allow_portable);
+        let properties: BTreeMap<_, _> = config.vanilla().into_iter().collect();
+        assert_eq!(
+            properties.get("online-mode").map(String::as_str),
+            Some("true")
+        );
+        assert_eq!(
+            properties.get("horizon-allow-portable").map(String::as_str),
+            Some("true")
+        );
+    }
+
+    #[test]
     fn defaults_are_vanilla() {
         // Every typed default is what vanilla 26.3 writes for a missing key.
         let vanilla =
@@ -701,10 +721,10 @@ mod tests {
             // Horizon's own, which vanilla doesn't have: their defaults behave as vanilla does
             // (the far ring off, operators told of each other's commands).
             if key.starts_with("horizon-") {
-                let vanilla_like = if key == "horizon-admin-feedback-to-ops" {
-                    "true"
-                } else {
-                    "0"
+                let vanilla_like = match key.as_str() {
+                    "horizon-admin-feedback-to-ops" => "true",
+                    "horizon-allow-portable" => "false",
+                    _ => "0",
                 };
                 assert_eq!(value, vanilla_like, "{key}");
                 continue;

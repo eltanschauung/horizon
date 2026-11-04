@@ -189,7 +189,10 @@ impl Hub {
         if !self.try_handle_chat(i, &c.message, false) {
             return;
         }
-        let (enforce, now) = (self.enforces_secure_chat(), now_millis());
+        let (enforce, now) = (
+            self.enforces_secure_chat() && !crate::portable::is_portable(self.guests[i].uuid),
+            now_millis(),
+        );
         let body = Body {
             content: &c.message,
             timestamp: c.timestamp,
@@ -374,7 +377,10 @@ impl Hub {
         last_seen: &[Signature],
         events: &mut Vec<HostEvent>,
     ) -> Result<Vec<(String, ChatMessage)>, DecodeError> {
-        let (enforce, now) = (self.enforces_secure_chat(), now_millis());
+        let (enforce, now) = (
+            self.enforces_secure_chat() && !crate::portable::is_portable(self.guests[i].uuid),
+            now_millis(),
+        );
         let g = &mut self.guests[i];
         let uuid = g.uuid;
         let mut out = Vec::new();

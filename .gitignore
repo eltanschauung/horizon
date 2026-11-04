@@ -35,3 +35,6 @@
 
 # Release-only compiled original exporter bundle.
 /exporters/
+
+# Local agent instructions for private portable packages.
+/portable.md

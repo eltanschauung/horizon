@@ -178,6 +178,8 @@ pub struct NetConfig {
     pub gate: Option<LoginGate>,
     /// Online mode: players are authenticated (a LAN world's when its host is signed in).
     pub online: Option<Arc<OnlineMode>>,
+    /// Accept installation-key identities alongside Microsoft accounts (explicit server opt-in).
+    pub allow_portable: bool,
     /// Behind a Velocity proxy: the secret its forwarded player information is signed with. Only an offline
     /// server (the proxy authenticates) uses it; without it a login is the plain offline one.
     pub forwarding_secret: Option<Vec<u8>>,
@@ -232,6 +234,7 @@ impl NetConfig {
             bypasses_limit: None,
             gate: None,
             online: None,
+            allow_portable: false,
             forwarding_secret: None,
             log: None,
             resource_pack: None,

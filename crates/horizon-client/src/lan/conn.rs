@@ -593,6 +593,7 @@ fn authenticate(
     name: &str,
     address: std::net::SocketAddr,
     user: &str,
+    portable: Option<u128>,
 ) -> Result<Result<(u128, Vec<login::Property>), String>, String> {
     let e = |e: horizon_protocol::Error| e.to_string();
     let mut challenge = [0u8; 4];
@@ -602,7 +603,7 @@ fn authenticate(
             server_id: String::new(),
             public_key: online.public_der.clone(),
             challenge: challenge.to_vec(),
-            should_authenticate: true,
+            should_authenticate: portable.is_none(),
         })
         .encode(),
     )
@@ -625,6 +626,18 @@ fn authenticate(
         .ok_or_else(protocol_error)?;
     let digest = server_hash("", &secret, &online.public_der);
     c.enable_encryption(&secret);
+    if let Some(uuid) = portable {
+        // Confirm again inside encryption, bound to THIS transport's secret and server key.
+        // A proof solicited by another server cannot be relayed into this connection.
+        let hello = login::ServerHello {
+            name: name.to_owned(),
+            uuid,
+        };
+        if portable_login_bound(c, &hello, digest.as_bytes())? != Some(uuid) {
+            return Err("Portable identity confirmation required".into());
+        }
+        return Ok(Ok((uuid, Vec::new())));
+    }
     let thread = format!(
         "User Authenticator #{}",
         AUTHENTICATORS.fetch_add(1, Ordering::Relaxed) + 1
@@ -674,6 +687,42 @@ fn authenticate(
     }
 }
 
+fn portable_login(c: &mut Connection, hello: &login::ServerHello) -> Result<Option<u128>, String> {
+    portable_login_bound(c, hello, &[])
+}
+fn portable_login_bound(
+    c: &mut Connection,
+    hello: &login::ServerHello,
+    binding: &[u8],
+) -> Result<Option<u128>, String> {
+    const TRANSACTION: i32 = 0x4850;
+    let e = |e: horizon_protocol::Error| e.to_string();
+    let mut challenge = [0u8; 32];
+    horizon_protocol::crypto::random_bytes(&mut challenge).map_err(e)?;
+    c.send(
+        &login::Clientbound::CustomQuery(login::CustomQuery {
+            transaction: TRANSACTION,
+            channel: crate::portable::CHANNEL.into(),
+            data: challenge.to_vec(),
+        })
+        .encode(),
+    )
+    .map_err(e)?;
+    let (id, payload) = c.recv().map_err(e)?;
+    let answer = match login::Serverbound::decode(id, &payload).map_err(e)? {
+        login::Serverbound::CustomQueryAnswer(answer) if answer.transaction == TRANSACTION => {
+            answer
+        }
+        _ => return Err("Unexpected portable login response".into()),
+    };
+    answer
+        .payload
+        .map(|proof| {
+            crate::portable::verify_bound(&hello.name, hello.uuid, &challenge, &proof, binding)
+        })
+        .transpose()
+}
+
 fn serve_login(
     mut c: Connection,
     address: std::net::SocketAddr,
@@ -720,9 +769,28 @@ fn serve_login(
         .forwarding_secret
         .as_deref()
         .filter(|_| online.is_none() && !c.is_memory());
+    let portable = if !c.is_memory()
+        && forwarding.is_none()
+        && (shared.config.allow_portable || online.is_none())
+    {
+        portable_login(&mut c, &hello)?
+    } else {
+        None
+    };
+    if let Some(uuid) = portable {
+        name = crate::portable::name(uuid);
+    }
     let (uuid, properties) = match (online, forwarding) {
         (Some(online), _) => {
-            match authenticate(&mut c, shared, online, &hello.name, address, &user) {
+            match authenticate(
+                &mut c,
+                shared,
+                online,
+                &hello.name,
+                address,
+                &user,
+                portable,
+            ) {
                 Ok(Ok(profile)) => profile,
                 Ok(Err(refused)) => {
                     lost(shared, &user, &refused);
@@ -765,7 +833,10 @@ fn serve_login(
                 return Err(err);
             }
         },
-        (None, None) => (offline_uuid(&hello.name), Vec::new()),
+        (None, None) => (
+            portable.unwrap_or_else(|| offline_uuid(&hello.name)),
+            Vec::new(),
+        ),
     };
     // verifyLoginAndFinishConnectionSetup: PlayerList.canPlayerLogin, then
     // duplicates and a full server.
@@ -1592,6 +1663,141 @@ impl KeepAliveWatch {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn portable_test_server(online: bool, allow: bool) -> (crate::lan::Lan, Connection) {
+        let config = crate::lan::NetConfig {
+            announce: false,
+            bind: Some("127.0.0.1".parse().unwrap()),
+            online: online.then(|| Arc::new(crate::lan::OnlineMode::generate(false).unwrap())),
+            allow_portable: allow,
+            ..crate::lan::NetConfig::lan(0, "Portable test".into(), 8)
+        };
+        let lan =
+            crate::lan::Lan::start_with(Arc::new(crate::lan::data::SyncData::empty()), config)
+                .unwrap();
+        let c = Connection::connect("127.0.0.1", lan.port, Duration::from_secs(5)).unwrap();
+        (lan, c)
+    }
+    fn portable_hello(c: &mut Connection, uuid: u128) {
+        c.send(
+            &handshake::Serverbound::Intention(handshake::Intention {
+                protocol: horizon_protocol::PROTOCOL_VERSION,
+                host: "127.0.0.1".into(),
+                port: 0,
+                intent: handshake::LOGIN,
+            })
+            .encode(),
+        )
+        .unwrap();
+        c.send(
+            &login::Serverbound::Hello(login::ServerHello {
+                name: "Friend".into(),
+                uuid,
+            })
+            .encode(),
+        )
+        .unwrap();
+    }
+    #[test]
+    fn portable_logins_keep_identity_online_and_offline_and_encrypt_online() {
+        let mut nonce = [0; 8];
+        horizon_protocol::crypto::random_bytes(&mut nonce).unwrap();
+        let folder =
+            std::env::temp_dir().join(format!("horizon-login-{:x}", u64::from_be_bytes(nonce)));
+        let identity = crate::portable::Identity::load_or_create(&folder).unwrap();
+        for online in [false, true] {
+            let (_lan, mut c) = portable_test_server(online, true);
+            portable_hello(&mut c, identity.uuid());
+            let (id, bytes) = c.recv().unwrap();
+            let login::Clientbound::CustomQuery(q) =
+                login::Clientbound::decode(id, &bytes).unwrap()
+            else {
+                panic!("portable query missing")
+            };
+            assert_eq!(q.channel, crate::portable::CHANNEL);
+            c.send(
+                &login::Serverbound::CustomQueryAnswer(login::CustomQueryAnswer {
+                    transaction: q.transaction,
+                    payload: Some(identity.answer("Friend", &q.data).unwrap()),
+                })
+                .encode(),
+            )
+            .unwrap();
+            let mut encrypted = false;
+            let mut binding = Vec::new();
+            loop {
+                let (id, bytes) = c.recv().unwrap();
+                match login::Clientbound::decode(id, &bytes).unwrap() {
+                    login::Clientbound::Hello(h) => {
+                        assert!(!h.should_authenticate);
+                        let public =
+                            horizon_protocol::rsa::RsaPublicKey::from_der(&h.public_key).unwrap();
+                        let secret = horizon_protocol::crypto::generate_secret().unwrap();
+                        c.send(
+                            &login::Serverbound::Key(login::Key {
+                                key: public.encrypt(&secret).unwrap(),
+                                challenge: public.encrypt(&h.challenge).unwrap(),
+                            })
+                            .encode(),
+                        )
+                        .unwrap();
+                        c.enable_encryption(&secret);
+                        binding = server_hash("", &secret, &h.public_key).into_bytes();
+                        encrypted = true;
+                    }
+                    login::Clientbound::CustomQuery(q) => {
+                        c.send(
+                            &login::Serverbound::CustomQueryAnswer(login::CustomQueryAnswer {
+                                transaction: q.transaction,
+                                payload: Some(
+                                    identity.answer_bound("Friend", &q.data, &binding).unwrap(),
+                                ),
+                            })
+                            .encode(),
+                        )
+                        .unwrap();
+                    }
+                    login::Clientbound::Compression(p) => c.set_compression(p.threshold),
+                    login::Clientbound::LoginFinished(p) => {
+                        assert_eq!(p.profile.uuid, identity.uuid());
+                        assert_eq!(p.profile.name, crate::portable::name(identity.uuid()));
+                        assert_eq!(encrypted, online);
+                        break;
+                    }
+                    other => panic!("unexpected portable login packet {other:?}"),
+                }
+            }
+        }
+        std::fs::remove_dir_all(folder).unwrap();
+    }
+    #[test]
+    fn account_authentication_still_required_when_portable_declined_or_disabled() {
+        for allow in [false, true] {
+            let (_lan, mut c) = portable_test_server(true, allow);
+            portable_hello(&mut c, offline_uuid("Friend"));
+            if allow {
+                let (id, bytes) = c.recv().unwrap();
+                let login::Clientbound::CustomQuery(q) =
+                    login::Clientbound::decode(id, &bytes).unwrap()
+                else {
+                    panic!("query missing")
+                };
+                c.send(
+                    &login::Serverbound::CustomQueryAnswer(login::CustomQueryAnswer {
+                        transaction: q.transaction,
+                        payload: None,
+                    })
+                    .encode(),
+                )
+                .unwrap();
+            }
+            let (id, bytes) = c.recv().unwrap();
+            let login::Clientbound::Hello(h) = login::Clientbound::decode(id, &bytes).unwrap()
+            else {
+                panic!("online authentication missing")
+            };
+            assert!(h.should_authenticate);
+        }
+    }
 
     /// Logs in through `c` and answers the `LoginFinished` profile.
     fn login_profile(mut c: Connection, name: &str) -> login::GameProfile {

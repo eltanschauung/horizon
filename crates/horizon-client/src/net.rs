@@ -10,7 +10,7 @@ use crate::auth::AuthSession;
 use horizon_protocol::{
     PROTOCOL_VERSION,
     connection::{ConnReader, ConnWriter, Connection, Counters},
-    crypto::{generate_secret, offline_uuid, server_hash},
+    crypto::{generate_secret, server_hash},
     packets::{Empty, configuration as cfg, handshake, login, play},
     registry::Dynamic,
     rsa::RsaPublicKey,
@@ -665,7 +665,15 @@ fn run(
     )
     .map_err(e)?;
     // Vanilla's login sends the account's profile id, or the offline one.
-    let uuid = auth.map_or_else(|| offline_uuid(name), |a| a.uuid);
+    let portable = if auth.is_none() {
+        Some(
+            crate::portable::Identity::load_or_create(&crate::logging::player_dir())
+                .map_err(|e| Reason::plain(format!("Portable identity: {e}")))?,
+        )
+    } else {
+        None
+    };
+    let uuid = auth.map_or_else(|| portable.as_ref().unwrap().uuid(), |a| a.uuid);
     c.send(
         &login::Serverbound::Hello(login::ServerHello {
             name: name.to_owned(),
@@ -674,6 +682,7 @@ fn run(
         .encode(),
     )
     .map_err(e)?;
+    let mut portable_binding = Vec::new();
     let profile = loop {
         let (id, payload) = c.recv().map_err(e)?;
         match login::Clientbound::decode(id, &payload).map_err(e)? {
@@ -732,12 +741,23 @@ fn run(
                 )
                 .map_err(e)?;
                 c.enable_encryption(&secret);
+                portable_binding =
+                    server_hash(&hello.server_id, &secret, &hello.public_key).into_bytes();
             }
             login::Clientbound::CustomQuery(q) => {
+                let payload = if q.channel == crate::portable::CHANNEL {
+                    portable
+                        .as_ref()
+                        .map(|identity| identity.answer_bound(name, &q.data, &portable_binding))
+                        .transpose()
+                        .map_err(Reason::plain)?
+                } else {
+                    None
+                };
                 c.send(
                     &login::Serverbound::CustomQueryAnswer(login::CustomQueryAnswer {
                         transaction: q.transaction,
-                        payload: None,
+                        payload,
                     })
                     .encode(),
                 )

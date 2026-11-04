@@ -13,6 +13,8 @@ description = "Reusable client systems, control tool and parity probes"
 path = "../horizon-client/src/client_lib.rs"
 
 [dependencies]
+# Installation identity proofs for portable/offline clients.
+ring = "0.17.14"
 horizon-assets = { path = "../horizon-assets" }
 horizon-client-core = { path = "../horizon-client-core" }
 horizon-client-input = { path = "../horizon-client-input" }

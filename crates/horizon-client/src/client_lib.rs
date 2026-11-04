@@ -2,6 +2,7 @@
 //! bindings between the validated simulation pieces and the game loop.
 #![forbid(unsafe_code)]
 extern crate self as horizon_client;
+pub mod portable;
 pub mod advancements;
 pub mod ambience;
 pub mod animate_tick;
