@@ -1055,7 +1055,7 @@ impl Game<'_> {
                 MotionEvent::Health(horizon_client::health::HealthEvent::DamageBroadcast {
                     source,
                 }) => self.guest_damage_broadcast(host, conn, source),
-                MotionEvent::HurtSound(sound) => self.guest_hurt_sound(host, conn, sound),
+                MotionEvent::HurtSound(sound) => self.guest_voice_sound(host, conn, sound),
                 _ => {}
             }
         }
@@ -1109,17 +1109,23 @@ impl Game<'_> {
         host.hub.damage_event(id, kind, None, None, at);
     }
 
-    /// `LivingEntity.playHurtSound` for a guest: the server's `Entity.playSound`
-    /// reaches every player around but the hurt one, whose own client plays it
-    /// from `handleDamageEvent` (#4149).
-    fn guest_hurt_sound(&mut self, host: &mut LanHost, conn: u32, sound: &str) {
+    /// Player hurt/death voice: the normal positional sound packet reaches nearby
+    /// players in the same dimension except its owner, who hears the entity event.
+    fn guest_voice_sound(&mut self, host: &mut LanHost, conn: u32, sound: &str) {
         let Some(g) = host.hub.guest(conn) else {
             return;
         };
         let at = g.position;
+        let dimension = g.dimension.clone();
         let source = horizon_client::settings::sound_source(sound) as i32;
-        self.audio.play_unshared(sound, Some(at), 1.0, 1.0);
-        host.hub.sound(sound, at, 1.0, 1.0, source, Some(conn));
+        if self.dim.id() == dimension {
+            self.audio.play_unshared(sound, Some(at), 1.0, 1.0);
+        }
+        let packet = host
+            .hub
+            .sound_packet(sound, at, 1.0, 1.0, source, host.hub.next_sound_seed());
+        host.hub
+            .broadcast_near_in_dimension(&dimension, at, 16.0, &packet, Some(conn));
     }
 
     /// `ServerLevel.players()` in turn: the host's own player, then each
@@ -3908,7 +3914,15 @@ impl Game<'_> {
                 &C::PlayerCombatKill(play::PlayerCombatKill { id, message }),
             );
             // LivingEntity.die: the death animation, the dying player included.
-            host.hub.entity_event(id, 3, at);
+            let dimension = host.hub.guests[gi].dimension.clone();
+            host.hub.broadcast_near_in_dimension(
+                &dimension,
+                at,
+                128.0,
+                &C::EntityEvent(play::EntityEvent { id, event: 3 }),
+                None,
+            );
+            self.guest_voice_sound(host, conn, "minecraft:entity.player.death");
             // LivingEntity.die: the death is heard, and a sculk catalyst
             // nearby takes the experience (before the loot is dropped), as it
             // does for a mob.
@@ -4538,7 +4552,7 @@ impl Game<'_> {
                 // LivingEntity.playHurtSound: the server's `Entity.playSound`
                 // reaches every player around but the hurt one, whose own
                 // client plays it from handleDamageEvent (#4149).
-                MotionEvent::HurtSound(sound) => self.guest_hurt_sound(host, conn, sound),
+                MotionEvent::HurtSound(sound) => self.guest_voice_sound(host, conn, sound),
                 // LivingEntity.checkFallDamage: the crumbs reach every player.
                 MotionEvent::Fall(horizon_client::landing::FallEvent::Particles {
                     state,

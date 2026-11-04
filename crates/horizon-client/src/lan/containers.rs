@@ -36,11 +36,23 @@ impl Hub {
     /// Send to every placed guest within `range` blocks of `at`
     /// (`PlayerList.broadcast`, which leaves out a player exactly at `range`).
     pub fn broadcast_near(&self, at: [f64; 3], range: f64, packet: &C, except: Option<u32>) {
+        self.broadcast_near_in_dimension(&self.config.dimension, at, range, packet, except);
+    }
+
+    /// The same positional broadcast in an explicitly selected level.
+    pub fn broadcast_near_in_dimension(
+        &self,
+        dimension: &str,
+        at: [f64; 3],
+        range: f64,
+        packet: &C,
+        except: Option<u32>,
+    ) {
         let body = packet.encode();
         for g in self
             .guests
             .iter()
-            .filter(|g| self.here(g) && Some(g.conn) != except)
+            .filter(|g| g.placed && g.dimension == dimension && Some(g.conn) != except)
         {
             if within_range(at, g.position, range) {
                 g.sender.send(body.clone());

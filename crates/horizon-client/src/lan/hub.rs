@@ -4465,6 +4465,25 @@ mod tests {
         (hub, rx)
     }
 
+    #[test]
+    fn positional_voice_broadcast_respects_dimension_range_and_owner() {
+        let (mut hub, rx) = hub_with_a_guest();
+        let at = [0.5, 64.0, 0.5];
+        hub.guests[0].dimension = "minecraft:the_nether".into();
+        let packet = hub.sound_packet("minecraft:entity.player.death", at, 1.0, 1.0, 7, 42);
+        hub.broadcast_near_in_dimension("minecraft:the_nether", at, 16.0, &packet, None);
+        assert_eq!(rx.try_iter().count(), 1);
+        hub.broadcast_near_in_dimension("minecraft:overworld", at, 16.0, &packet, None);
+        hub.broadcast_near_in_dimension("minecraft:the_nether", at, 16.0, &packet, Some(1));
+        assert_eq!(rx.try_iter().count(), 0);
+        hub.guests[0].position[0] += 16.0;
+        hub.broadcast_near_in_dimension("minecraft:the_nether", at, 16.0, &packet, None);
+        assert_eq!(rx.try_iter().count(), 0);
+        hub.guests[0].position[0] -= 0.01;
+        hub.broadcast_near_in_dimension("minecraft:the_nether", at, 16.0, &packet, None);
+        assert_eq!(rx.try_iter().count(), 1);
+    }
+
     /// The blocks the guest was sent as `ClientboundBlockUpdatePacket`s, in order, with the
     /// state each one carries.
     fn sent_block_updates(rx: &std::sync::mpsc::Receiver<crate::lan::Out>) -> Vec<([i32; 3], i32)> {
