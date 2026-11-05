@@ -20,6 +20,8 @@ Rust/cache config: `.local/fork-build.json`. Run here:
 
 Local commands build edits; deploy affected components only. Native mods: package/install in their repo, then launcher Build with selected mods. It fetches pushed fork `main`; push game changes first; preserve ancestry checks/separate installs. Local installs select the plain fork without native mods. Server builds only for server/multiplayer work; telemazer:25565.
 
+Releases: build and package locally using existing caches, then upload the artifacts; do not use GitHub Actions to build releases.
+
 ## Workflow
 
 - Use `rg`; batch independent reads, retrieve bounded snippets once. Validate dependencies/resource/package formats before compilation. Reuse toolchain, target directory and profile; build after edits.
@@ -29,8 +31,10 @@ Local commands build edits; deploy affected components only. Native mods: packag
 
 ## Safety and feedback
 
+- Before deploying the dedicated server, check its player count; if above 0, ask permission before deployment.
 - Preserve accounts, keyring, Minecraft resources, skins and worlds; never restart running apps. Test only with temporary game/launcher/XDG homes.
 - Preserve Cargo caches/fingerprints/dependencies. Packages below 5 GB; at the limit retain newest/running builds; exclude caches from cleanup.
 - Never commit credentials, Minecraft JARs/assets, prepared resources, logs or player data. Before committing: `git diff --check`, `python3 tools/check_public_tree.py`; add `Co-Authored-By:`. Upstream issues/PRs require a request.
-- Finish with validation/limits, new version IDs, and commit HEADs for repos committed this turn.
+- Finish with validation/limits and commit HEADs for repos committed this turn.
 - `/feedback <message>`: receiving server's `<HORIZON_HOME>/feedback.sqlite3` (desktop `~/.local/share/horizon/feedback.sqlite3`), table `feedback(time,message)`; UTC ISO timestamps.
+- When desktop and server mods differ, sync both to the version furthest ahead of their shared upstream history, preserving local work.
