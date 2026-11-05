@@ -88,7 +88,7 @@ def main():
             wait(lambda:chat(observer), lambda lines:any('Komeiji Satori left the game' in s for s in lines), 12)
             connect(visitor, 'JoinVisitor', 'cirno', 'changed-reconnect')
             lines = wait(lambda:joined(observer), lambda lines:len(lines)==3, 12)
-            assert lines[-1]=='Cirno (B) joined the game', lines
+            assert lines[0]=='Cirno (B) joined the game', lines
             time.sleep(1)
             assert joined(observer)==lines, 'Duplicate announcement after idle'
             assert not any('JoinVisitor' in s or 'JoinHolder' in s for s in chat(observer)), chat(observer)
