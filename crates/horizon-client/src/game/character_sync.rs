@@ -230,30 +230,29 @@ impl Game<'_> {
                 .remember(uuid, &character.id);
         }
     }
-    pub(super) fn flush_character_sync(&mut self) {
+    pub(super) fn flush_character_sync(&mut self, host: &mut super::lan::LanHost) {
         let mut joins = Vec::new();
-        if let Some(host) = self.lan.as_mut() {
-            for (uuid, index) in &self.character_sync.server.peers {
-                // Saved preferences and cached names are not this connection's choice.
-                if host.hub.character_join_pending(*uuid)
-                    && !self.character_sync.server.selection_confirmed(*uuid)
-                {
-                    continue;
-                }
-                let Some(base) = self.pack.character_catalog.get(*index) else {
-                    continue;
-                };
-                let character = self.character_sync.resolved.get(uuid)
-                    .filter(|character| character.id == base.id)
-                    .unwrap_or(base);
-                let name = character.display_name();
-                let component = name.component();
-                if (host.hub.character_names.get(uuid) != Some(&component)
-                    || host.hub.character_join_pending(*uuid))
-                    && host.hub.set_character_name(*uuid, component)
-                {
-                    joins.push(name);
-                }
+        // The tick temporarily owns the hub outside self.lan while flushing.
+        for (uuid, index) in &self.character_sync.server.peers {
+            // Saved preferences and cached names are not this connection's choice.
+            if host.hub.character_join_pending(*uuid)
+                && !self.character_sync.server.selection_confirmed(*uuid)
+            {
+                continue;
+            }
+            let Some(base) = self.pack.character_catalog.get(*index) else {
+                continue;
+            };
+            let character = self.character_sync.resolved.get(uuid)
+                .filter(|character| character.id == base.id)
+                .unwrap_or(base);
+            let name = character.display_name();
+            let component = name.component();
+            if (host.hub.character_names.get(uuid) != Some(&component)
+                || host.hub.character_join_pending(*uuid))
+                && host.hub.set_character_name(*uuid, component)
+            {
+                joins.push(name);
             }
         }
         if self.options.dedicated.is_none() && self.player.is_some() {

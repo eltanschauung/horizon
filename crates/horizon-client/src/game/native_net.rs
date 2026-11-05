@@ -78,7 +78,7 @@ impl Game<'_> {
     /// What the mods sent this tick leaves; the tick's allowances start over.
     pub(super) fn flush_native_net(&mut self, host: &mut LanHost) {
         if self.level_pass.last {
-            self.flush_character_sync();
+            self.flush_character_sync(host);
         }
         for (player, data) in std::mem::take(&mut self.native_net.to_players) {
             if let Some(g) = host
