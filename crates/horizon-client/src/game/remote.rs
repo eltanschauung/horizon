@@ -8755,7 +8755,7 @@ impl Game<'_> {
                 .is_air(self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]));
         } else {
             if !self.creative {
-                self.clicks.miss_time = 10;
+                self.clicks.miss_time = horizon_client::attack_strength::MISS_DELAY_TICKS;
             }
             self.reset_attack_strength();
         }

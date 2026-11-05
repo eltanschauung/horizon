@@ -21,9 +21,14 @@ pub struct HeldStack {
     pub item: String,
     pub rest: String,
 }
-/// `Player.getCurrentItemAttackStrengthDelay` for an ATTACK_SPEED value.
+/// Fork-wide recovery multiplier; keep damage, prediction and HUD timing aligned.
+pub const RECOVERY_SCALE: f64 = 0.5;
+/// The survival miss lockout, halved from vanilla's ten ticks.
+pub const MISS_DELAY_TICKS: i32 = (10.0 * RECOVERY_SCALE) as i32;
+
+/// `Player.getCurrentItemAttackStrengthDelay`, with the fork's faster recovery.
 pub fn delay(attack_speed: f64) -> f32 {
-    (1.0 / attack_speed * 20.0) as f32
+    (1.0 / attack_speed * 20.0 * RECOVERY_SCALE) as f32
 }
 impl AttackStrength {
     /// The attack-strength part of `Player.tick`: both tickers advance, and a
@@ -116,16 +121,39 @@ mod tests {
     #[test]
     fn charges_over_the_attack_delay() {
         let mut s = AttackStrength::default();
-        // A sword's 1.6 attacks per second: 12.5 ticks to full strength.
-        assert_eq!(delay(1.6), 12.5);
-        for _ in 0..6 {
+        // A sword's 1.6 base attack speed: 6.25 ticks instead of 12.5.
+        assert_eq!(delay(1.6), 6.25);
+        for _ in 0..3 {
             s.tick(None);
         }
-        assert_eq!(s.scale(0.25, 1.6), 6.25 / 12.5);
+        assert_eq!(s.scale(0.125, 1.6), 3.125 / 6.25);
         for _ in 0..10 {
             s.tick(None);
         }
         assert_eq!(s.scale(0.0, 1.6), 1.0);
+    }
+    #[test]
+    fn all_weapon_speeds_and_swap_recovery_are_halved() {
+        // Custom slow weapons, axes, swords/parasol and fists/unmodified items.
+        for (speed, ticks, partial_ticks, partial) in [
+            (0.5, 20.0, 10, 0.5),
+            (0.8, 12.5, 5, 0.4),
+            (1.0, 10.0, 5, 0.5),
+            (1.6, 6.25, 3, 0.48),
+            (4.0, 2.5, 1, 0.4),
+        ] {
+            assert_eq!(delay(speed), ticks);
+            let mut state = AttackStrength::default();
+            for _ in 0..partial_ticks { state.tick(None); }
+            assert!((state.scale(0.0, speed) - partial).abs() < 1e-6);
+            assert_eq!(state.scale(0.0, speed), state.swap_scale(0.0, speed));
+            while state.ticker < ticks.ceil() as i32 { state.tick(None); }
+            assert_eq!(state.scale(0.0, speed), 1.0);
+            assert_eq!(state.swap_scale(0.0, speed), 1.0);
+            state.reset();
+            assert_eq!(state.scale(0.0, speed), 0.0);
+        }
+        assert_eq!(MISS_DELAY_TICKS, 5);
     }
     #[test]
     fn switching_items_resets_but_restacking_does_not() {

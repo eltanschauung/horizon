@@ -827,7 +827,7 @@ impl Clicks {
         }
         if miss {
             if !w.creative() {
-                self.miss_time = 10;
+                self.miss_time = crate::attack_strength::MISS_DELAY_TICKS;
             }
             w.reset_attack_strength();
         }
