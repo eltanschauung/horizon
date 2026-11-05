@@ -87,6 +87,11 @@ def main():
             return b"".join(pixel(image, x, y) for x, y in points)
         def region(image, x, y, size=48):
             return b"".join(image[((y+j)*800+x)*4:((y+j)*800+x+size)*4] for j in range(size))
+        def white_glyph(image, x, y):
+            data = region(image, x, y)
+            # Compare opaque icon pixels: the panel is translucent, so its
+            # background changes as clouds move or a Speed FOV blend settles.
+            return frozenset(i//4 for i in range(0,len(data),4) if min(data[i:i+3]) >= 235)
         server_home = home("server")
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
@@ -100,26 +105,28 @@ def main():
             until(lambda: socket.create_connection(("127.0.0.1", port), 1).close(), lambda _: True, 90)
             console("gamerule spawn_mobs false")
             console("gamerule spawn_monsters false")
-            client_home = home("client")
-            if args.character:
-                (client_home / "character.json").write_text(json.dumps({"character":args.character}))
-            config = client_home / "horizon-mods/.horizon-mod-data/minimap"
-            config.mkdir(parents=True)
-            for key,value in {"corner":"top_right","size":"64","shape":"square","outline":"stone","rotate":"false","show_coordinates":"true"}.items():
-                (config / key).write_text(value)
-            client = launch(client_home, ["--server",f"127.0.0.1:{port}","--name","HudProof","--control","--control-socket",str(client_home / "control.sock"),"--width","800","--height","600"], "client")
-            until(lambda: ctl("status"), lambda s:(s.get("server") or {}).get("loaded",False), 90)
-            console("tp @a 0.5 -60 0.5 0 0")
-            console("clear @a")
-            time.sleep(3)
-            cases = [("top_right",size,coords) for size in (64,96,128) for coords in (True,False)] + [(corner,64,True) for corner in ("top_left","bottom_left","bottom_right")]
-            for corner,size,coords in cases:
+            cases = [(corner,64,True) for corner in ("top_left","bottom_left","bottom_right")] + [("top_right",size,coords) for size in (128,96,64) for coords in (False,True)]
+            for index,(corner,size,coords) in enumerate(cases):
                 label = f"{corner}-{size}-coords-{coords}"
+                if index:
+                    ctl("quit")
+                    client.wait(timeout=20)
+                # The native mod caches settings until its settings page edits
+                # them; each file-based scenario starts a fresh test client.
+                client_home = home(f"client-{index}")
+                if args.character:
+                    (client_home / "character.json").write_text(json.dumps({"character":args.character}))
+                config = client_home / "horizon-mods/.horizon-mod-data/minimap"
+                config.mkdir(parents=True)
+                for key,value in {"corner":corner,"size":str(size),"shape":"square","outline":"stone","rotate":"false","show_coordinates":str(coords).lower()}.items():
+                    (config / key).write_text(value)
+                client = launch(client_home, ["--server",f"127.0.0.1:{port}","--name","HudProof","--control","--control-socket",str(client_home / "control.sock"),"--width","800","--height","600"], "client-" + label)
+                until(lambda: ctl("status"), lambda s:(s.get("server") or {}).get("loaded",False), 90)
+                console("tp @a 0.5 -60 0.5 0 0")
+                console("clear @a")
                 console("effect clear @a")
                 until(lambda:ctl("state")["player"]["effects"],lambda e:not e)
-                for key,value in {"corner":corner,"size":str(size),"show_coordinates":str(coords).lower()}.items():
-                    (config / key).write_text(value)
-                time.sleep(.5)
+                time.sleep(1)
                 first = shot(label + "-none")
                 assert len(first) == 800*600*4, "Unexpected screenshot resolution"
                 x = 4 if corner.endswith("left") else 800-4-size*2
@@ -137,11 +144,12 @@ def main():
                 assert frame(first,rect) == frame(mixed,rect), label
                 top = (size+4+(9 if coords else 0))*2 if corner=="top_right" else 2
                 assert region(first,750,top) != region(beneficial,750,top), label
-                assert region(beneficial,750,top) == region(mixed,750,top), label
+                glyph = white_glyph(beneficial,750,top)
+                assert glyph and min(i//48 for i in glyph) >= 6, label
+                assert glyph == white_glyph(mixed,750,top), label
                 assert region(first,750,top+52) != region(mixed,750,top+52), label
                 proof.append({"corner":corner,"size":size,"coordinates":coords,"map_stable":True,"effect_top_pixels":top})
                 print("PASS:",label,flush=True)
-            (config / "corner").write_text("top_right")
             time.sleep(.4)
             visible = shot("hud-visible")
             ctl("key","f1","tap")
@@ -152,7 +160,11 @@ def main():
             ctl("key","e","tap")
             until(lambda:ctl("status")["screen"],lambda s:s=="inventory")
             inventory = shot("inventory")
-            assert frame(visible,(668,4,128)) == frame(inventory,(668,4,128))
+            # Inventory dims the underlying HUD; compare outline geometry.
+            def dark_outline(image):
+                pixels = frame(image,(668,4,128))
+                return frozenset(i//4 for i in range(0,len(pixels),4) if max(pixels[i:i+3]) <= 32)
+            assert dark_outline(visible) == dark_outline(inventory)
             result = {"passed":True,"cases":proof,"f1_hides_hud":True,"inventory_map_stable":True}
             (args.output / "result.json").write_text(json.dumps(result,indent=2)+"\n")
             print(json.dumps(result),flush=True)
