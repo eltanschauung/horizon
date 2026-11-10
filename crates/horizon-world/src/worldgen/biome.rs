@@ -57,7 +57,7 @@ pub struct MultiNoiseBiomeSource {
     baseline: Option<ClimateIndex<String>>,
     groups: Vec<(f64, ClimateIndex<String>)>,
     selector_axis: usize,
-    regions: Option<(Vec<u32>, u8)>,
+    regions: Option<(Vec<u32>, u8, u32)>,
 }
 impl MultiNoiseBiomeSource {
     pub fn new(entries: Vec<(ParameterPoint, String)>) -> Result<Self, BiomeError> {
@@ -139,13 +139,16 @@ impl MultiNoiseBiomeSource {
                         .filter(|v| *v <= i32::MAX as u64)
                         .ok_or(DecodeError::Field("vanilla region weight"))?
                         as u32;
+                    let minimum = entry["horizon:region_min_quarts"].as_u64().unwrap_or(0);
+                    if minimum > 4096 { return Err(DecodeError::Field("region minimum size").into()); }
+                    let minimum = minimum as u32;
                     if order == 0
                         || order > 65535
-                        || region_options.is_some_and(|v| v != (vanilla, zooms))
+                        || region_options.is_some_and(|v| v != (vanilla, zooms, minimum))
                     {
                         return Err(DecodeError::Field("inconsistent region declarations").into());
                     }
-                    region_options = Some((vanilla, zooms));
+                    region_options = Some((vanilla, zooms, minimum));
                     if let Some(previous) = orders.insert(group.to_owned(), order) {
                         if previous != order {
                             return Err(DecodeError::Field("inconsistent region order").into());
@@ -181,7 +184,7 @@ impl MultiNoiseBiomeSource {
         }
         source.selector_axis = selector_axis.unwrap_or(5);
         let mut groups: Vec<_> = groups.into_iter().collect();
-        if let Some((vanilla, zooms)) = region_options {
+        if let Some((vanilla, zooms, minimum)) = region_options {
             if orders.len() != groups.len()
                 || orders
                     .values()
@@ -197,7 +200,7 @@ impl MultiNoiseBiomeSource {
                 .collect();
             super::region_weights::RegionWeights::new(0, weights.clone(), zooms)
                 .map_err(DecodeError::Field)?;
-            source.regions = Some((weights, zooms));
+            source.regions = Some((weights, zooms, minimum));
         }
         for (_, (weight, points)) in groups {
             source.groups.push((weight, ClimateIndex::new(points)?));
@@ -216,13 +219,14 @@ impl MultiNoiseBiomeSource {
                 .unwrap_or(&self.parameters)
                 .searcher(),
             additions: self.additions.as_ref().map(ClimateIndex::searcher),
-            regions: self.regions.as_ref().map(|(weights, zooms)| {
+            regions: self.regions.as_ref().map(|(weights, zooms, minimum)| {
                 super::region_weights::RegionWeights::new(
                     climate.region_seed,
                     weights.clone(),
                     *zooms,
                 )
                 .expect("validated region weights")
+                .with_min_quarts(climate.region_seed, *minimum)
             }),
             selector_axis: self.selector_axis,
             groups: self

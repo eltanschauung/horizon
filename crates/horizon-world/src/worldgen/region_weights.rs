@@ -39,6 +39,7 @@ impl Random {
 }
 #[derive(Debug)]
 pub struct RegionWeights {
+    tiered: Option<(i64, u32)>,
     weights: Vec<u32>,
     total: i32,
     seeds: Vec<i64>,
@@ -56,14 +57,51 @@ impl RegionWeights {
         let seeds: Vec<_> = salts.map(|s| layer_seed(seed, s)).collect();
         let cache = (0..seeds.len()).map(|_| HashMap::new()).collect();
         Ok(Self {
+            tiered: None,
             weights,
             total: total as i32,
             seeds,
             cache,
         })
     }
+    /// Opt-in, nested region cells. Size does not change selection probabilities.
+    pub fn with_min_quarts(mut self, seed: i64, minimum: u32) -> Self {
+        if minimum > 0 { self.tiered = Some((seed, minimum)); }
+        self
+    }
     pub fn sample(&mut self, x: i32, z: i32) -> usize {
+        if let Some((seed, minimum)) = self.tiered {
+            return self.tiered_sample(seed, minimum, x, z);
+        }
         self.at(self.seeds.len() - 1, x, z)
+    }
+    fn tiered_sample(&self, seed: i64, minimum: u32, x: i32, z: i32) -> usize {
+        let span = i64::from(minimum) * 2;
+        let warp = |salt| {
+            let (gx, gz) = (i64::from(x).div_euclid(span), i64::from(z).div_euclid(span));
+            let (fx, fz) = (i64::from(x).rem_euclid(span) as f64 / span as f64,
+                            i64::from(z).rem_euclid(span) as f64 / span as f64);
+            let smooth = |v: f64| v*v*(3.0-2.0*v);
+            let (fx, fz) = (smooth(fx), smooth(fz));
+            let at = |dx, dz| coordinate_hash(seed, salt, gx+dx, gz+dz) as f64 / u64::MAX as f64;
+            let a = at(0,0)*(1.0-fx)+at(1,0)*fx;
+            let b = at(0,1)*(1.0-fx)+at(1,1)*fx;
+            (((a*(1.0-fz)+b*fz)*2.0-1.0) * f64::from(minimum)/8.0).round() as i64
+        };
+        // A shared bounded warp preserves nesting and leaves a broad cell core.
+        let (x,z) = (i64::from(x)+warp(0x57415250), i64::from(z)+warp(0x57415251));
+        let mut remaining = self.total as u64;
+        for (index, &weight) in self.weights.iter().enumerate() {
+            if weight == 0 { continue; }
+            if remaining == u64::from(weight) { return index; }
+            let shift = self.weights.len().saturating_sub(index+2).min(8);
+            let size = i64::from(minimum) << shift;
+            let hash = coordinate_hash(seed, index as u64 + 0x54494552, x.div_euclid(size), z.div_euclid(size));
+            let roll = ((u128::from(hash)*u128::from(remaining)) >> 64) as u64;
+            if roll < u64::from(weight) { return index; }
+            remaining -= u64::from(weight);
+        }
+        unreachable!("positive validated region total")
     }
     fn at(&mut self, level: usize, x: i32, z: i32) -> usize {
         if let Some(&value) = self.cache[level].get(&[x, z]) {
@@ -114,6 +152,15 @@ impl RegionWeights {
         out
     }
 }
+fn coordinate_hash(seed: i64, salt: u64, x: i64, z: i64) -> u64 {
+    fn mix(mut v: u64) -> u64 {
+        v = (v ^ (v >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+        v = (v ^ (v >> 27)).wrapping_mul(0x94d049bb133111eb);
+        v ^ (v >> 31)
+    }
+    mix(seed as u64 ^ mix(salt) ^ mix(x as u64 ^ 0x9e3779b97f4a7c15)
+        ^ mix(z as u64 ^ 0xd1b54a32d192ed03))
+}
 fn majority([a, b, c, d]: [usize; 4]) -> Option<usize> {
     if b == c && c == d {
         Some(b)
@@ -133,6 +180,35 @@ fn majority([a, b, c, d]: [usize; 4]) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn tiered_cells_have_broad_cores_and_are_query_order_independent() {
+        let mut regions = RegionWeights::new(123, vec![40,12,8,4,1], 3).unwrap().with_min_quarts(123,192);
+        let mut expected = Vec::new();
+        for z in -12..12 { for x in -12..12 {
+            let (x,z) = (x*192+96,z*192+96);
+            let center = regions.sample(x,z);
+            for dx in [-48,0,48] { for dz in [-48,0,48] {
+                assert_eq!(regions.sample(x+dx,z+dz),center);
+            }}
+            expected.push((x,z,center));
+        }}
+        for (x,z,value) in expected.into_iter().rev() { assert_eq!(regions.sample(x,z),value); }
+    }
+    #[test]
+    fn tiered_weight_shares_match_weights_and_zero_stays_disabled() {
+        for weights in [vec![40,12,8,4,1],vec![40,12,8,0,1]] {
+            let total = weights.iter().sum::<u32>() as f64;
+            let mut count = vec![0;weights.len()];
+            let mut regions = RegionWeights::new(456,weights.clone(),3).unwrap().with_min_quarts(456,192);
+            for z in -128..128 { for x in -128..128 {
+                count[regions.sample(x*1024,z*1024)] += 1;
+            }}
+            for (i,&weight) in weights.iter().enumerate() {
+                if weight == 0 { assert_eq!(count[i],0); }
+                assert!((count[i] as f64/65536.0-f64::from(weight)/total).abs()<0.015);
+            }
+        }
+    }
     #[test]
     fn java_layer_oracle_vectors() {
         let mut previous = None;

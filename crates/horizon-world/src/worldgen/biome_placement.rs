@@ -86,6 +86,7 @@ pub fn extend_presets(
                 let divisor = doc["weight_divisor"].as_u64().unwrap_or(1);
                 candidate["horizon:weight"] = json!(weight * scale as f64 / divisor as f64);
                 if !doc["region_order"].is_null() {
+                    candidate["horizon:region_min_quarts"] = doc.get("region_min_quarts").cloned().unwrap_or(json!(0));
                     for key in ["region_order", "region_zooms", "vanilla_weight"] {
                         candidate[format!("horizon:{key}")] = if key == "vanilla_weight" {
                             json!(doc[key].as_u64().ok_or(DecodeError::Field("vanilla region weight"))?
@@ -119,6 +120,19 @@ mod tests {
         [("minecraft:overworld".into(), json!([{
             "biome":"minecraft:plains", "coordinates":[[0,0],[-10000,10000],[-10000,10000],[-10000,10000],[-10000,10000],[-10000,10000]], "offset":0
         }]).to_string())].into()
+    }
+    #[test]
+    fn tiered_region_minimum_reaches_the_biome_codec() {
+        let mut d: Value = serde_json::from_str(&contribution("example:forest",0.)).unwrap();
+        for (key,value) in [("group",json!("example:forest")),("weight",json!(1)),
+            ("region_order",json!(1)),("region_zooms",json!(3)),
+            ("vanilla_weight",json!(10)),("region_min_quarts",json!(192))] { d[key]=value; }
+        let mut presets=base();
+        extend_presets(&mut presets,&[("example:forest".into(),d.to_string())].into(),
+            &["minecraft:plains".into(),"example:forest".into()].into()).unwrap();
+        let entries: Vec<Value>=serde_json::from_str(&presets["minecraft:overworld"]).unwrap();
+        assert_eq!(entries[1]["horizon:region_min_quarts"],json!(192));
+        MultiNoiseBiomeSource::from_quantized_json(&presets["minecraft:overworld"]).unwrap();
     }
     #[test]
     fn quarter_weight_region_preserves_other_ratios_and_zero_disables_it() {

@@ -61,3 +61,14 @@ is installed or enabled on the desktop/server.
    verify the built revision, package hashes and final selection. Deploy matching
    desktop/server packages, preserve worlds/accounts/settings/caches, and check
    server health. Cleanup old builds only after replacements are verified.
+
+## BOP region footprint
+
+Overworld BOP declarations opt into nested, smoothly warped region cells with
+`region_min_quarts: 192`. Conditional seeded draws preserve the configured weight
+probabilities while separating footprint from rarity. With four BOP tiers, primary
+cells span 3072 blocks, secondary 1536, and rare/extra rare share a 768-block floor.
+The bounded shared warp preserves nesting and broad cores; climate, rivers and
+mountains can still clip individual biomes. Nether and declarations without this
+option retain the existing Java-oracle-compatible region sampler. Changes affect
+newly generated terrain; saved chunks are preserved.
