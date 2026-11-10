@@ -135,9 +135,11 @@ mod tests {
             let mut presets = base();
             extend_presets(&mut presets, &files, &names.map(String::from).into()).unwrap();
             let entries: Vec<Value> = serde_json::from_str(&presets["minecraft:overworld"]).unwrap();
-            assert_eq!(entries[1]["horizon:weight"], json!(8.0));
-            assert_eq!(entries[2]["horizon:weight"], json!(extra as f64));
-            assert_eq!(entries[1]["horizon:vanilla_weight"], json!(40));
+            let rare = entries.iter().find(|e| e["horizon:group"] == "example:rare").unwrap();
+            let extra_entry = entries.iter().find(|e| e["horizon:group"] == "example:extra").unwrap();
+            assert_eq!(rare["horizon:weight"], json!(8.0));
+            assert_eq!(extra_entry["horizon:weight"], json!(extra as f64));
+            assert_eq!(rare["horizon:vanilla_weight"], json!(40));
             MultiNoiseBiomeSource::from_quantized_json(&presets["minecraft:overworld"]).unwrap();
         }
     }
