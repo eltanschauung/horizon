@@ -69,3 +69,11 @@ source, SDKs and worlds are never swept. To clean old exports explicitly, add
 `--exports /absolute/export/folder` (repeatable): it must contain `native-mods.json`,
 and only named Horizon executables are removed. Inspect the preview first. This does
 not prune VPS backups, GitHub releases or arbitrary folders.
+
+## Default Lunatic mod set
+
+Keep these native mods installed/enabled when freezing a full deployment: arcadiandream,
+chatheads, classic_music, eatinganimation, justenoughitems, lunatic, minimap, no_copper,
+tectonic_horizon and zoom. JEI 1.1.0 and Classic Music 0.1.0 are client features;
+include their bundles in both deployment snapshots so clients keep the same defaults.
+Content packages include Arcadian Dream, Biomes O’ Plenty and Lunatic.
