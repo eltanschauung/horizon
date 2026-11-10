@@ -265,7 +265,7 @@ impl Enchantments {
                 }
             }
         }
-        let lang: HashMap<String, String> =
+        let mut lang: HashMap<String, String> =
             horizon_core::prepared_files::read(&root.join("assets/minecraft/lang/en_us.json"))
                 .ok()
                 .and_then(|b| serde_json::from_slice::<HashMap<String, String>>(&b).ok())
@@ -293,6 +293,27 @@ impl Enchantments {
                         || k.starts_with("recipe.toast.")
                 })
                 .collect();
+        // Authored content uses its own namespaces alongside the vanilla registry.
+        if let Ok(namespaces) = std::fs::read_dir(root.join("data")) {
+            for namespace in namespaces.flatten() {
+                let ns = namespace.file_name().to_string_lossy().into_owned();
+                if ns == "minecraft" { continue; }
+                if let Ok(folder) = horizon_world::json_folder::read(&namespace.path().join("enchantment")) {
+                    for file in &folder.files {
+                        if let Ok(value) = serde_json::from_slice(file.bytes().unwrap_or_default()) {
+                            files.insert(format!("{ns}:{}", file.name), value);
+                        }
+                    }
+                }
+                let language = root.join(format!("assets/{ns}/lang/en_us.json"));
+                if let Some(names) = horizon_core::prepared_files::read(&language).ok()
+                    .and_then(|bytes| serde_json::from_slice::<HashMap<String, String>>(&bytes).ok())
+                {
+                    let prefix = format!("enchantment.{ns}.");
+                    lang.extend(names.into_iter().filter(|(key, _)| key.starts_with(&prefix)));
+                }
+            }
+        }
         let list = files
             .iter()
             .map(|(id, v)| parse_entry(id, v, &tags, &lang))
