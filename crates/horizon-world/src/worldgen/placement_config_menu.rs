@@ -1,9 +1,10 @@
 //! BOP's currently supported Java region-weight options, using its existing TOML file.
 use std::{cell::RefCell, io::Write, path::Path};
-const FIELDS: [(&str, &str, &str, i64); 5] = [
+const FIELDS: [(&str, &str, &str, i64); 6] = [
     ("overworld", "bop_primary_overworld_region_weight", "Overworld primary", 10),
     ("overworld", "bop_secondary_overworld_region_weight", "Overworld secondary", 8),
     ("overworld", "bop_overworld_rare_region_weight", "Overworld rare", 2),
+    ("overworld", "bop_overworld_extra_rare_region_weight", "Overworld extra rare", 1),
     ("nether", "bop_nether_region_weight", "Nether common", 13),
     ("nether", "bop_nether_rare_region_weight", "Nether rare", 2),
 ];
@@ -26,7 +27,7 @@ fn read(root: &Path) -> Result<toml::Value, String> {
     Ok(doc)
 }
 pub fn buttons(root: &Path) -> Vec<String> {
-    let mut rows = vec!["Restart game after edits; new chunks only".into(), "Zero disables a region".into(), "Reset rarity weights to defaults".into()];
+    let mut rows = vec!["Restart game after edits; new chunks only".into(), "Zero disables; extra rare uses quarter-weight units".into(), "Reset rarity weights to defaults".into()];
     match read(root) {
         Ok(doc) => for (section, key, label, _) in FIELDS {
             let value = doc[section][key].as_integer().unwrap();

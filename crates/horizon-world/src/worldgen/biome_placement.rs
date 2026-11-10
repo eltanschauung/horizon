@@ -12,6 +12,16 @@ pub fn extend_presets(
     declarations: &BTreeMap<String, String>,
     biomes: &BTreeSet<String>,
 ) -> Result<(), DecodeError> {
+    let mut scales = BTreeMap::<String, u64>::new();
+    for text in declarations.values() {
+        let doc: Value = serde_json::from_str(text)?;
+        let divisor = doc["weight_divisor"].as_u64().unwrap_or(1);
+        if divisor == 0 || divisor > 16 || !divisor.is_power_of_two() {
+            return Err(DecodeError::Field("region weight divisor"));
+        }
+        let preset = doc["preset"].as_str().unwrap_or_default().to_owned();
+        scales.entry(preset).and_modify(|v| *v = (*v).max(divisor)).or_insert(divisor);
+    }
     let mut assembled = presets.clone();
     for (name, text) in declarations {
         identifier(name)?;
@@ -72,10 +82,15 @@ pub fn extend_presets(
                 .ok_or(DecodeError::Field("biome pool selector"))?;
                 candidate["horizon:selector_axis"] = json!(axis);
                 candidate["horizon:group"] = json!(group);
-                candidate["horizon:weight"] = json!(weight);
+                let scale = scales[&preset];
+                let divisor = doc["weight_divisor"].as_u64().unwrap_or(1);
+                candidate["horizon:weight"] = json!(weight * scale as f64 / divisor as f64);
                 if !doc["region_order"].is_null() {
                     for key in ["region_order", "region_zooms", "vanilla_weight"] {
-                        candidate[format!("horizon:{key}")] = doc[key].clone();
+                        candidate[format!("horizon:{key}")] = if key == "vanilla_weight" {
+                            json!(doc[key].as_u64().ok_or(DecodeError::Field("vanilla region weight"))?
+                                .checked_mul(scale).ok_or(DecodeError::Field("region weight overflow"))?)
+                        } else { doc[key].clone() };
                     }
                 }
             }
