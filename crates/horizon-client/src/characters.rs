@@ -51,6 +51,18 @@ fn character_size<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f32, D::Erro
     })
 }
 
+fn default_health() -> f32 { 20.0 }
+fn character_health<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f32, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Health { Number(f32), Text(String) }
+    let value = match Health::deserialize(d)? {
+        Health::Number(value) => value,
+        Health::Text(value) => value.parse().unwrap_or(20.0),
+    };
+    Ok(if value.is_finite() && value > 0.0 { value.clamp(1.0, 1024.0) } else { 20.0 })
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(from = "CharacterDefinition")]
 pub struct Character {
@@ -62,6 +74,7 @@ pub struct Character {
     pub race: String,
     #[serde(default = "default_size", deserialize_with = "character_size")]
     pub size: f32,
+    pub health: f32,
     #[serde(default)]
     pub starting_items: Vec<StartingItem>,
     #[serde(default)]
@@ -83,6 +96,8 @@ struct CharacterDefinition {
     race: String,
     #[serde(default = "default_size", deserialize_with = "character_size")]
     size: f32,
+    #[serde(default = "default_health", deserialize_with = "character_health")]
+    health: f32,
     #[serde(default)]
     starting_items: Vec<StartingItem>,
     #[serde(default = "default_character_model")]
@@ -102,7 +117,7 @@ impl From<CharacterDefinition> for Character {
             ).unwrap_or_default()
         });
         Self { id: value.id, name: value.name, texture, race: value.race,
-            size: value.size, starting_items: value.starting_items, model: value.model,
+            size: value.size, health: value.health, starting_items: value.starting_items, model: value.model,
             character_chat: value.character_chat, color: value.color }
     }
 }
@@ -277,6 +292,13 @@ pub fn save(instance: &Path, character: &Character) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn health_accepts_numbers_strings_and_safe_defaults() {
+        for (value, expected) in [(serde_json::json!("16"), 16.0), (serde_json::json!(16), 16.0), (serde_json::json!("invalid"), 20.0), (serde_json::json!(-1), 20.0)] {
+            let c: Character = serde_json::from_value(serde_json::json!({"id":"lunatic:test", "name":"Test", "health":value})).unwrap();
+            assert_eq!(c.health, expected);
+        }
+    }
     #[test]
     fn races_use_whole_tags_and_sizes_have_safe_defaults_and_bounds() {
         let base = serde_json::json!({"id":"lunatic:cirno", "name":"Cirno", "texture":"lunatic:entity/character/cirno"});
