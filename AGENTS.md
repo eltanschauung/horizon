@@ -1,6 +1,7 @@
 # Horizon fork
 
 - Rust game for Minecraft 26.3: `eltanschauung/horizon`; push to `origin`, never `upstream`.
+- Upstream sync preservation checklist for both forks: `FORK_FEATURES.md`.
 - Checkout: `/home/xxlib/Desktop/horizon`; from VPS: `ssh horizon-desktop`. Inspect status/diffs; preserve unrelated edits.
 - Paths/checks: `docs/architecture.md`, `CONTRIBUTING.md` (read matching sections). Game: `crates/horizon-client/src/game.rs` + `game/`; worldgen: `crates/horizon-world/src/worldgen/`; launcher: `launcher/src/`; mods: sibling repos.
 
