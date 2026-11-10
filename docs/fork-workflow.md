@@ -6,8 +6,7 @@ logs beside the manifest. Requires the Linux x86-64 fork launcher installed with
 `HORIZON_LAUNCHER_VERSION=0.2.58 ./tools/fork.py install launcher` after committing source.
 
 ```sh
-./tools/fork.py manifest
-# Copy the returned manifest path, or specify --output .local/my-build/manifest.json.
+./tools/fork.py manifest --output .local/my-build/manifest.json
 ./tools/fork.py preflight .local/my-build/manifest.json --target both
 ./tools/fork.py build-plan .local/my-build/manifest.json --target both
 ./tools/fork.py deploy .local/my-build/manifest.json --target both

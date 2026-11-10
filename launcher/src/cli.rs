@@ -1377,6 +1377,10 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
                     ),
                     false => e,
                 })?;
+                if crate::fork::preflight() {
+                    println!("{}", tr("Native mod preflight passed; no build exported."));
+                    return Ok(());
+                }
                 let built = std::path::absolute(&built).unwrap_or(built);
                 let path = built.display().to_string();
                 println!(
@@ -1429,6 +1433,14 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
                 })
             };
             let mut built = build()?;
+            // Preflight must not try older packages or rewrite the selected instance.
+            if crate::fork::preflight() {
+                println!(
+                    "{}",
+                    tr("Native mod preflight passed; no build installed or selected.")
+                );
+                return Ok(());
+            }
             // A mod the build left out though its version said it builds here: its next older
             // version that says so, and one more build.
             let left: Vec<String> = native_mods::about(&built)

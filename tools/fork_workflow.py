@@ -144,9 +144,9 @@ def verify_about(m, about):
     return sorted(actual)
 
 
-def logged(command, log, env=None):
+def logged(command, log, env=None, cwd=None):
     with open(log,'w') as stream:
-        result = subprocess.run(command, env=env, stdout=stream, stderr=subprocess.STDOUT)
+        result = subprocess.run(command, env=env, cwd=cwd, stdout=stream, stderr=subprocess.STDOUT)
     if result.returncode:
         lines = Path(log).read_text(errors='replace').replace('\r','\n').splitlines()
         errors = [line for line in lines if line.startswith(('error','Error','fork:'))]
@@ -216,7 +216,7 @@ def build_supervisor(p,m,env,log):
     clean.update(PATH=str(compiler)+os.pathsep+env.get('PATH',''),RUSTC=str(compiler/'rustc'),CARGO_HOME=str(root/'cargo'),CARGO_TARGET_DIR=str(cache/'target'))
     command=[str(compiler/'cargo'),'build','--manifest-path',str(stage/'Cargo.toml'),'--locked','--profile','fast' if m['profile']=='performance' else 'release','-p','horizon-server','-j','2']
     # cwd / excludes home Cargo configuration, matching the managed build.
-    with open(log,'w')as stream:subprocess.run(command,cwd='/',env=clean,stdout=stream,stderr=subprocess.STDOUT,check=True)
+    logged(command,log,clean,cwd='/')
 
 
 def artifacts(path):
@@ -237,6 +237,10 @@ def deploy(args):
     from fork import atomic_copy
     p,m,a=artifacts(args.manifest);h,game=homes()
     targets=['local','server']if args.target=='both'else[args.target]
+    if 'local' in targets and 'client' not in a:raise ValueError('Build client artifacts first')
+    if 'server' in targets:
+        if 'server' not in a:raise ValueError('Build server artifacts first')
+        if not re.fullmatch(r'[A-Za-z0-9_.@-]+',args.host) or args.host.startswith('-'):raise ValueError('Invalid SSH host')
     result={'apply':args.apply,'revision':m['game_revision'],'native_mods':sorted(e['id']for e in m['packages']if e['kind']=='native')}
     if 'local'in targets:
         if 'client'not in a:raise ValueError('Build client artifacts first')
