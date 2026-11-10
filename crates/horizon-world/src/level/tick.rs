@@ -1177,7 +1177,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         while height < 16
             && self.b.is_block(
                 self.state(pos.offset(0, -(height + 1), 0)),
-                self.b.named.bamboo,
+                self.b.block(self.state(pos)),
             )
         {
             height += 1;
@@ -1189,7 +1189,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         while height < 16
             && self.b.is_block(
                 self.state(pos.offset(0, height + 1, 0)),
-                self.b.named.bamboo,
+                self.b.block(self.state(pos)),
             )
         {
             height += 1;
@@ -1205,15 +1205,15 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         let below_two_state = self.state(below_two);
         let mut leaves = "none";
         if height >= 1 {
-            if !b.is_block(below_state, b.named.bamboo)
+            if !b.is_block(below_state, b.block(state))
                 || b.table.text(below_state, p.leaves) == "none"
             {
                 leaves = "small";
-            } else if b.is_block(below_state, b.named.bamboo)
+            } else if b.is_block(below_state, b.block(state))
                 && b.table.text(below_state, p.leaves) != "none"
             {
                 leaves = "large";
-                if b.is_block(below_two_state, b.named.bamboo) {
+                if b.is_block(below_two_state, b.block(state)) {
                     self.set_block(
                         below(pos),
                         b.table.set_text(below_state, p.leaves, "small"),
@@ -1227,7 +1227,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 }
             }
         }
-        let age = if b.table.int(state, p.age) != 1 && !b.is_block(below_two_state, b.named.bamboo)
+        let age = if b.table.int(state, p.age) != 1 && !b.is_block(below_two_state, b.block(state))
         {
             0
         } else {
@@ -1241,7 +1241,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         let next = b.table.set_int(
             b.table.set_int(
                 b.table
-                    .set_text(b.default_of(b.named.bamboo), p.leaves, leaves),
+                    .set_text(b.default_of(b.block(state)), p.leaves, leaves),
                 p.age,
                 age,
             ),
