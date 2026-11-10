@@ -504,11 +504,16 @@ pub fn default_value(m: &Mob, a: Attr) -> Option<f64> {
     m.kind.attributes.get(a.id()).copied()
 }
 pub fn base_value(m: &Mob, a: Attr) -> f64 {
+    base_value_with(m, a, || default_value(m, a))
+}
+/// [`base_value`] with the type's default given (`default_value`), for a
+/// caller that already looked it up for the mob's type.
+pub fn base_value_with(m: &Mob, a: Attr, default: impl FnOnce() -> Option<f64>) -> f64 {
     m.extra
         .attributes
         .as_ref()
         .and_then(|s| s.bases.iter().find(|(x, _)| *x == a).map(|(_, v)| *v))
-        .or_else(|| default_value(m, a))
+        .or_else(default)
         .unwrap_or(match a {
             Attr::BurningTime => 1.0,
             // The registry's default, as the type's `flying_speed` falls back to.
@@ -1031,6 +1036,27 @@ pub fn set_item_stack(m: &mut Mob, slot: usize, stack: crate::items::ItemStack) 
     if slot == MAINHAND {
         m.extra.set_main_hand_stack(Some(stack));
     } else if slot <= HEAD {
+        gear::set_stack(m, gear_slot(slot), stack);
+    }
+}
+/// `ItemStack.setDamageValue` on what `m` has in `slot` (one of the hands or
+/// the armour): its enchantments and trim stay.
+pub fn set_slot_damage(m: &mut Mob, slot: usize, damage: u32) {
+    let Some(id) = item(m, slot).filter(|_| slot <= HEAD) else {
+        return;
+    };
+    let kept = if slot == MAINHAND {
+        m.extra.main_hand_stack().cloned()
+    } else {
+        gear::gear(m).and_then(|g| g.stacks[gear_slot(slot)].clone())
+    };
+    let mut stack = kept
+        .filter(|s| s.item == id)
+        .unwrap_or_else(|| crate::items::ItemStack::new(&id, 1));
+    stack.damage = damage;
+    if slot == MAINHAND {
+        m.extra.set_main_hand_stack(Some(stack));
+    } else {
         gear::set_stack(m, gear_slot(slot), stack);
     }
 }
@@ -2645,6 +2671,23 @@ mod tests {
         assert_eq!(villager_type("minecraft:badlands"), 1);
         assert_eq!(villager_type("minecraft:grove"), 4);
         assert_eq!(villager_type("minecraft:plains"), 0);
+    }
+    /// A worn piece that wears (Thorns' `ChangeItemDamage`) keeps its
+    /// enchantments and trim, and the next wear adds to the last.
+    #[test]
+    fn a_worn_piece_keeps_its_enchantments_and_trim_as_it_wears() {
+        let kind = crate::mobs::sensor_scan_tests::kind();
+        let mut m = crate::mobs::Mob::new(1, kind, horizon_core::geometry::Vec3::ZERO, 0.0);
+        set_item(&mut m, CHEST, "minecraft:iron_chestplate");
+        set_slot_enchantments(&mut m, CHEST, vec![(Arc::from("minecraft:thorns"), 3)]);
+        let trim: gear::Trim = (Arc::from("minecraft:gold"), Arc::from("minecraft:coast"));
+        gear::set_trim(&mut m, gear::CHEST, Some(trim.clone()));
+        set_slot_damage(&mut m, CHEST, 2);
+        set_slot_damage(&mut m, CHEST, 5);
+        let worn = item_stack(&m, CHEST).unwrap();
+        assert_eq!(worn.damage, 5);
+        assert_eq!(worn.enchantment_level("minecraft:thorns"), 3);
+        assert_eq!(worn.data().and_then(|d| d.trim.clone()), Some(trim));
     }
     #[test]
     fn october_31_is_halloween() {

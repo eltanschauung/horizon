@@ -81,7 +81,37 @@ impl Game<'_> {
         if let (Some(name), Tag::Compound(map)) = (self.world.block_names.get(&key), &mut tag) {
             map.insert("CustomName".into(), Tag::String(name.as_str().into()));
         }
-        block_entity_nbt::canonical(&tag)
+        if matches!(entity, BlockEntity::Mod(_)) {
+            // The mod owns its serializer; the vanilla canonicalizer only knows
+            // vanilla entity types and must not discard this instance's data.
+            Some(tag)
+        } else {
+            block_entity_nbt::canonical(&tag)
+        }
+    }
+
+    /// The `CustomName` a block entity loads from `tag`
+    /// (`BaseContainerBlockEntity.loadAdditional`): kept beside the model in
+    /// `block_names`, and dropped when the tag has none. Banners and signs
+    /// keep their name themselves. True when the name changed.
+    pub(super) fn load_block_name(
+        &mut self,
+        key: (i32, i32, i32),
+        entity: &BlockEntity,
+        tag: &Tag,
+    ) -> bool {
+        if matches!(entity, BlockEntity::Banner(_) | BlockEntity::Sign(_)) {
+            return false;
+        }
+        let name = save::text(tag.get("CustomName"));
+        if self.world.block_names.get(&key) == name.as_ref() {
+            return false;
+        }
+        match name {
+            Some(name) => self.world.block_names.insert(key, name),
+            None => self.world.block_names.remove(&key),
+        };
+        true
     }
 
     /// `BlockState.getCloneItemStack` of the block at `pos`, then, with
@@ -101,11 +131,26 @@ impl Game<'_> {
                 Some(t) if t == "sticky" => "minecraft:sticky_piston",
                 _ => "minecraft:piston",
             });
-        let item = clone_item(&facts.name, head.unwrap_or(&facts.item));
-        // FlowerPotBlock.getCloneItemStack: a potted plant picks as that plant
-        // (`new ItemStack(potted)`), an empty pot as the pot itself.
-        let item = picked_item(self.res.behaviours(), state, item)?;
-        let mut stack = ItemStack::new(item, 1);
+        let mut custom = None;
+        self.native_block_clone_item(&facts.name, pos, state, &mut custom);
+        let mut stack = match custom {
+            Some(stack) => {
+                if stack.count == 0
+                    || stack.item.as_ref() == "minecraft:air"
+                    || self.items().get(&stack.item).is_none()
+                {
+                    return None;
+                }
+                stack
+            }
+            None => {
+                let item = clone_item(&facts.name, head.unwrap_or(&facts.item));
+                // FlowerPotBlock.getCloneItemStack: a potted plant picks as
+                // that plant (`new ItemStack(potted)`), an empty pot as itself.
+                let item = picked_item(self.res.behaviours(), state, item)?;
+                ItemStack::new(item, 1)
+            }
+        };
         let mut patch = Compound::new();
         // BeehiveBlock.getCloneItemStack: the honey level as the item's block state.
         if include_data
@@ -281,13 +326,7 @@ impl Game<'_> {
         {
             new.state_triggered = old.state_triggered;
         }
-        // Banners and signs keep their name themselves.
-        if !matches!(entity, BlockEntity::Banner(_) | BlockEntity::Sign(_)) {
-            match save::text(placed.get("CustomName")) {
-                Some(name) => self.world.block_names.insert(key, name),
-                None => self.world.block_names.remove(&key),
-            };
-        }
+        self.load_block_name(key, &entity, &placed);
         self.world.block_entities.insert(key, entity);
         self.update_spawner_display(key);
     }

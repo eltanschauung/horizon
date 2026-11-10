@@ -205,7 +205,7 @@ Resources (bind group 3):
 | 8 | `var history: texture_2d<f32>` | Last frame's input to the last pass (what the pass before it wrote), for temporal passes (TAA, denoising): put such a pass second to last and it reads its own previous output; reproject with `frame.previous_view_projection`. Black on the first frame, after a gap of over half a second, and with a single pass. |
 | 9 | `var shadow_map_translucent: texture_depth_2d` | `shadow_map` with the translucent terrain (water, stained glass, ice) the light passes through drawn in too, read with `shadow_sampler` the same way: a point lit in `shadow_map` but not here lies under such a surface, which `shadow_color` gives the colour of. |
 | 10 | `var shadow_color: texture_2d<f32>` | The texture colour times the vertex colour (rgb: the tint, the face's directional shade and ambient occlusion) of the nearest translucent surface the light passes through at each texel of `shadow_map_translucent`, white where there is none; alpha is 1 on a fluid (water) and the texture's alpha, at most 0.99, on anything else. Read it with `textureLoad` at `shadow_position`'s xy times `textureDimensions(shadow_color)`. |
-| 11 | `var scene_surface: texture_2d<f32>` | What the material stage's `set_surface` stored for the solid terrain at each pixel, unfiltered (`textureLoad`): read it through the prelude's `surface_at`, which knows its layout and where it no longer shows. Blank without a material stage that calls `set_surface`. |
+| 11 | `var scene_surface: texture_2d<u32>` | What the material stage's `set_surface` stored for the solid terrain at each pixel, unfiltered (`textureLoad`; its texels are the bits of floats, so `bitcast<vec4<f32>>` them): read it through the prelude's `surface_at`, which knows its layout and where it no longer shows. Blank without a material stage that calls `set_surface`. |
 
 Helpers:
 
@@ -279,6 +279,20 @@ The frame, as `frame` in every stage. Positions and directions are in world axes
 | `shadow_distortion` | `f32` | 740 | How strongly the shadow map is distorted toward its centre, 0..1: a point at shadow clip `xy` is stored at `xy / (length(xy) * k + 1 - k)`, so texels near the camera cover less ground (`shadow_position` applies it). |
 | `shadow_resolution` | `f32` | 744 | The shadow map's side, in texels; 0 without a shadow map. |
 | `shadow_center_texel` | `f32` | 748 | The ground one shadow texel covers at the map's centre, in blocks (for a bias that scales with it); 0 without a shadow map. |
+
+## Anti-aliasing
+
+While a pack's `[[post]]` chain draws the frame, the player's anti-aliasing settings do not run: `taa`, `fxaa`
+and `upscaling` in `horizon-graphics.txt` have no effect, and the frame's projection is never jittered, because the
+last post pass draws the picture itself and Horizon's own resolve, which does TAA, FXAA and TAA upscaling, is the
+step it replaces. The world is still rendered at `resolutionScale` before the pack reads it.
+
+A pack that wants smooth edges draws them itself, in a post pass: a spatial filter (FXAA, SMAA and the like) works on
+`previous` as it is. A temporal pass cannot do what TAA does here, even though `history` and
+`frame.previous_view_projection` give it the last frame: nothing moves the camera by a fraction of a texel from one
+frame to the next, so a still camera gives it the same picture twice and there is no sub-pixel detail to gather.
+
+Without a pack the settings apply as the player set them.
 
 ## Options
 

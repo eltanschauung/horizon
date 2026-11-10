@@ -1,7 +1,11 @@
 //! Players coming and going: joining (P1's world through memory, or P1's server) as a profile
 //! it picks (`split_profiles`), dropping out.
 use super::*;
-use horizon_client::{gamepad::PadState, options_ui::Page};
+use horizon_client::{
+    controller_notice::{Notice, NoticeId, Priority},
+    gamepad::PadState,
+    options_ui::Page,
+};
 
 /// Whether `game` shows its profile page now.
 fn on_profiles(game: &Game<'_>) -> bool {
@@ -78,6 +82,28 @@ fn boxed(start: impl FnOnce() -> Result<Option<Game<'static>>>) -> Result<Box<Ga
     }
 }
 
+/// P1's server lets a splitscreen player in (#6399: everyone who plays elsewhere owns the
+/// game): `account`, its launcher Microsoft session (whether that has expired), else an offline
+/// profile, `unavailable` when that name is a launcher account that couldn't be handed over.
+/// An offline profile joins only a server on this computer or its local network
+/// (`local`, resolved only for it) in offline mode; a Microsoft account any server while its
+/// session holds. The refusal is its translation key.
+fn server_gate(
+    account: Option<bool>,
+    unavailable: bool,
+    local: impl FnOnce() -> bool,
+    online: bool,
+) -> std::result::Result<(), &'static str> {
+    match account {
+        Some(false) => Ok(()),
+        Some(true) => Err("horizon.splitscreen.account_expired"),
+        None if !local() => Err(LOCAL_ONLY),
+        None if !online => Ok(()),
+        None if unavailable => Err("horizon.splitscreen.account_unavailable"),
+        None => Err(ONLINE_ONLY),
+    }
+}
+
 impl Split<'_> {
     /// The first seat free (2 to `MAX_PLAYERS`).
     pub(super) fn free_seat(&self) -> Option<usize> {
@@ -100,7 +126,14 @@ impl Split<'_> {
         // Until it has a profile, a scratch options file: never P1's.
         let options = Self::folder()?.join(".joining/options.txt");
         OPTIONS.set(Some(options.clone()));
-        let game = self.start_guest(seat, &options, self.host.settings.clone());
+        let mut settings = self.host.settings.clone();
+        if pad.is_some() {
+            // The Controller setting is P1's own: a player who pressed a pad to join plays
+            // with it even when P1 turned controllers off, or its pad would be dead on the
+            // profile screen it joins into.
+            settings.controller.enabled = true;
+        }
+        let game = self.start_guest(seat, &options, settings);
         OPTIONS.set(None);
         let mut game = game?;
         if let Some(pad) = pad {
@@ -138,21 +171,29 @@ impl Split<'_> {
     }
 
     /// Whether `name` can play in P1's world, said on the profile page before it tries: P1's
-    /// own world takes anyone; a server only on this computer or its local network, and an
-    /// online-mode one no offline profile.
+    /// own world takes anyone; offline profiles require a local, offline-mode server, while
+    /// Microsoft accounts require a valid session.
     fn can_join(&self, name: &str) -> std::result::Result<(), String> {
         if self.taken().iter().any(|n| n.eq_ignore_ascii_case(name)) {
             return Err(format!("{name} is already playing."));
         }
-        if let Some(address) = self.p1_server() {
-            if !local_server(&address) {
-                return Err(horizon_client::lang::tr(LOCAL_ONLY, &[]));
-            }
-            if self.host.online_server() {
-                return Err(horizon_client::lang::tr(ONLINE_ONLY, &[]));
-            }
-        }
-        Ok(())
+        let Some(address) = self.p1_server() else {
+            return Ok(());
+        };
+        let account = self
+            .accounts
+            .iter()
+            .find(|a| a.name.eq_ignore_ascii_case(name));
+        let unavailable = launcher::unavailable()
+            .iter()
+            .any(|a| a.eq_ignore_ascii_case(name));
+        server_gate(
+            account.map(|a| a.expired()),
+            unavailable,
+            || local_server(&address),
+            self.host.online_server(),
+        )
+        .map_err(|key| horizon_client::lang::tr(key, &[&name]))
     }
 
     /// A server's resource packs: the others answer as P1 did (asked once, by P1). A player
@@ -186,20 +227,10 @@ impl Split<'_> {
         if !self.guests.iter().any(open) {
             return;
         }
-        let names = Self::folder()
-            .and_then(|f| {
-                Ok(horizon_client::split_profiles::store::names(
-                    &f.join("profiles"),
-                )?)
-            })
-            .map(|mut names| {
-                names.sort_by_key(|n| n.to_lowercase());
-                names
-            })
-            .unwrap_or_else(|e| {
-                log::warn!("Horizon: splitscreen: the profiles: {e}");
-                Vec::new()
-            });
+        let (names, accounts) = self.profile_names().unwrap_or_else(|e| {
+            log::warn!("Horizon: splitscreen: the profiles: {e}");
+            Default::default()
+        });
         for g in self.guests.iter_mut().filter(|g| open(g)) {
             let page = &mut g.game.ui.options.split_profiles;
             page.filled = true;
@@ -208,8 +239,29 @@ impl Split<'_> {
                 page.names.insert(0, me.clone());
             }
             page.taken = taken.clone();
+            page.accounts = accounts.clone();
+            page.offline_accounts = launcher::unavailable();
+            page.offline_accounts.extend(
+                self.accounts
+                    .iter()
+                    .filter(|a| a.expired())
+                    .map(|a| a.name.clone()),
+            );
             page.current = g.name.clone();
         }
+    }
+
+    /// The launcher's other Microsoft accounts, then this instance's offline profiles.
+    fn profile_names(&self) -> Result<(Vec<String>, Vec<String>)> {
+        let profiles = Self::folder()?.join("profiles");
+        let mut offline = horizon_client::split_profiles::store::names(&profiles)?;
+        let mut accounts: Vec<String> = self.accounts.iter().map(|a| a.name.clone()).collect();
+        accounts.extend(launcher::unavailable());
+        offline.retain(|n| !accounts.iter().any(|a| a.eq_ignore_ascii_case(n)));
+        offline.sort_by_key(|n| n.to_lowercase());
+        let mut names = accounts.clone();
+        names.extend(offline);
+        Ok((names, accounts))
     }
 
     /// Guest `i`, playing, switches to profile `name` where it plays: out of the world as its
@@ -235,7 +287,14 @@ impl Split<'_> {
             return Err(format!("{name:?} can't be a profile.").into());
         }
         let profiles = Self::folder()?.join("profiles");
-        if horizon_client::split_profiles::valid_name(&name) {
+        // A Microsoft account signs in as itself (its own connections and skin).
+        let account = self
+            .accounts
+            .iter()
+            .find(|a| a.name.eq_ignore_ascii_case(&name))
+            .cloned();
+        self.guests[i].game.split_auth = account.clone();
+        if account.is_none() && horizon_client::split_profiles::valid_name(&name) {
             horizon_client::split_profiles::store::restore(&profiles, &name)?;
         }
         let profile = profiles.join(&name);
@@ -244,9 +303,14 @@ impl Split<'_> {
             horizon_client::settings::Settings::load(&options)
         } else {
             std::fs::create_dir_all(&profile)?;
-            self.host.settings.save(&options);
-            self.host.settings.clone()
+            let mut new = self.host.settings.clone();
+            // The Controller setting is P1's, as on the profile page (`join`).
+            new.controller.enabled |= self.guests[i].pad.is_some();
+            new.save(&options);
+            new
         };
+        // A profile an earlier join saved with P1's off, or the player's pad would be dead.
+        settings.controller.enabled |= self.guests[i].pad.is_some();
         // P1's own world through memory (`Ok`), else P1's server over the network (`Err`).
         let via = match &self.host.integrated {
             Some(server) => Ok(server
@@ -277,6 +341,15 @@ impl Split<'_> {
             }
             return Err(e);
         }
+        // The seat plays P1's world, so mods keep its data with P1's.
+        let save = self
+            .host
+            .remote
+            .as_ref()
+            .and_then(|r| r.save_folder.clone());
+        if let Some(r) = self.guests[i].game.remote.as_mut() {
+            r.save_folder = save;
+        }
         self.guests[i].name = Some(name);
         self.guests[i].entered = false;
         Ok(())
@@ -295,8 +368,18 @@ impl Split<'_> {
                 .split_profiles
                 .take_forgotten()
             {
-                let hidden = if self.taken().iter().any(|n| n.eq_ignore_ascii_case(&name)) {
-                    Err("This profile cannot be forgotten while it is playing.".into())
+                let signed_in = self
+                    .accounts
+                    .iter()
+                    .any(|a| a.name.eq_ignore_ascii_case(&name));
+                let signed_in = signed_in
+                    || launcher::unavailable()
+                        .iter()
+                        .any(|a| a.eq_ignore_ascii_case(&name));
+                let hidden = if signed_in
+                    || self.taken().iter().any(|n| n.eq_ignore_ascii_case(&name))
+                {
+                    Err("This profile cannot be forgotten while it is playing or signed in.".into())
                 } else {
                     Self::folder().and_then(|f| {
                         Ok(horizon_client::split_profiles::store::hide(
@@ -385,12 +468,14 @@ impl Split<'_> {
         });
         let mut settings = settings;
         settings.extras.agent_control &= options.control.is_some();
-        let gui = UiResources::load(&options.resources, &options.resources)?;
+        // `options.resources` is P1's overlay when a pack is on: never the vanilla root, as a
+        // reload would rebuild that overlay out of itself.
+        let vanilla_root = host.vanilla_root();
+        let gui = UiResources::load(&options.resources, &vanilla_root)?;
         // P1's output, heard from this player's camera too (`Audio::share`).
         let audio = host.audio.share(seat as u8);
         let window = host.window.clone().ok_or("no window")?;
         let pack = host.pack.clone();
-        let resources = host.options.resources.clone();
         let mut guest = boxed(|| {
             start_game(
                 res,
@@ -399,10 +484,11 @@ impl Split<'_> {
                 options,
                 None,
                 audio,
-                resources,
+                vanilla_root,
                 Instant::now(),
                 None,
                 Some(settings),
+                None,
                 None,
             )
         })?;
@@ -415,8 +501,13 @@ impl Split<'_> {
             None,
             host.settings.horizon.api,
             host.settings.horizon.translucent_batching,
+            host.settings.horizon.wide_frame(),
             // The pack its own game loads, from its profile.
-            crate::game::shader_packs::picked_pack_draws_flat(&guest.settings),
+            crate::game::shader_packs::picked_pack_shape(&guest.settings),
+            (
+                guest.settings.file.int("textureFiltering"),
+                guest.settings.file.int("maxAnisotropyBit"),
+            ),
         )?);
         guest.window = Some(window);
         guest.world_renderer_ready = true;
@@ -438,7 +529,7 @@ impl Split<'_> {
             || (self.host.integrated.is_none() && self.host.remote.is_none());
         let before = self.guests.len();
         if p1_left {
-            self.host.split_hud.notice = None;
+            self.host.split_hud.notice.clear();
         }
         for k in (0..self.guests.len()).rev() {
             let g = &mut self.guests[k];
@@ -456,8 +547,12 @@ impl Split<'_> {
                 .then(|| turned_away(&g.game))
                 .flatten();
             if let (true, Some(name), Some(why)) = (g.entered, &g.name, &why) {
-                self.host.split_hud.notice =
-                    Some(Notice::new(format!("{name} could not stay"), why.clone()));
+                self.host.split_hud.notice.raise(Notice::new(
+                    NoticeId::PlayerLeft,
+                    Priority::Attention,
+                    format!("{name} could not stay"),
+                    why.clone(),
+                ));
             } else if let Some(why) = why {
                 let old = self.guests[k].name.take();
                 if let (Some(server), Some(old)) = (&self.host.integrated, &old) {
@@ -505,7 +600,7 @@ fn folder_name(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{folder_name, local_server};
+    use super::{LOCAL_ONLY, ONLINE_ONLY, folder_name, local_server, server_gate};
 
     #[test]
     fn a_profile_name_never_leaves_the_profiles_folder() {
@@ -540,5 +635,40 @@ mod tests {
         ] {
             assert!(!local_server(elsewhere), "{elsewhere} is not local");
         }
+    }
+
+    #[test]
+    fn only_a_microsoft_session_lifts_the_local_server_rule() {
+        const EXPIRED: &str = "horizon.splitscreen.account_expired";
+        const UNAVAILABLE: &str = "horizon.splitscreen.account_unavailable";
+        // (account: None offline, Some(expired)), unavailable, local, online => the answer.
+        let cases: [(Option<bool>, bool, bool, bool, Result<(), &str>); 11] = [
+            // An offline profile: home-network offline-mode servers only.
+            (None, false, true, false, Ok(())),
+            (None, false, false, false, Err(LOCAL_ONLY)),
+            (None, false, false, true, Err(LOCAL_ONLY)),
+            (None, false, true, true, Err(ONLINE_ONLY)),
+            // A launcher account that couldn't be handed over plays as an offline profile.
+            (None, true, false, false, Err(LOCAL_ONLY)),
+            (None, true, true, true, Err(UNAVAILABLE)),
+            (None, true, true, false, Ok(())),
+            // Its own Microsoft session: any server, while it holds.
+            (Some(false), false, false, false, Ok(())),
+            (Some(false), false, false, true, Ok(())),
+            (Some(true), false, false, true, Err(EXPIRED)),
+            (Some(true), false, true, false, Err(EXPIRED)),
+        ];
+        for (account, unavailable, local, online, want) in cases {
+            assert_eq!(
+                server_gate(account, unavailable, || local, online),
+                want,
+                "{account:?} unavailable={unavailable} local={local} online={online}"
+            );
+        }
+        // A Microsoft session never needs the address resolved.
+        assert_eq!(
+            server_gate(Some(false), false, || unreachable!(), true),
+            Ok(())
+        );
     }
 }

@@ -18,7 +18,7 @@ pub fn set_source_volumes(volumes: [f32; 11]) {
 pub fn sound_source(event: &str) -> usize {
     let e = event.trim_start_matches("minecraft:");
     let index = |name: &str| SOUND_SOURCES.iter().position(|n| *n == name).unwrap_or(0);
-    const HOSTILE: [&str; 25] = [
+    const HOSTILE: [&str; 34] = [
         "zombie",
         "skeleton",
         "creeper",
@@ -44,6 +44,16 @@ pub fn sound_source(event: &str) -> usize {
         "silverfish",
         "zombified_piglin",
         "wither_skeleton",
+        "bogged",
+        "breeze",
+        "endermite",
+        "parched",
+        "warden",
+        "zombie_villager",
+        "vex",
+        "wither",
+        // Monster's common hurt/death (e.g. Giant) and other shared sounds.
+        "hostile",
     ];
     if e == "block.potent_sulfur.noxious_gas" {
         // PotentSulfurBlock.animateTick, its only caller, plays it as AMBIENT.
@@ -144,9 +154,6 @@ pub struct Settings {
     pub discrete_scroll: bool,
     pub toggle_crouch: bool,
     pub toggle_sprint: bool,
-    /// 3D skin layers (`threeDSkinLayers`): each painted texel of a player's
-    /// outer layer drawn as a slab (`crate::...`, Options → Skin).
-    pub three_d_skin_layers: bool,
     pub auto_jump: bool,
     pub language: String,
     pub force_unicode: bool,
@@ -251,7 +258,6 @@ impl Default for Settings {
             allow_cursor_changes: true,
             toggle_crouch: false,
             toggle_sprint: false,
-            three_d_skin_layers: false,
             auto_jump: false,
             language: "en_us".into(),
             force_unicode: false,
@@ -332,32 +338,47 @@ impl Settings {
             .map_or(-1, |i| i as i32)
     }
     pub fn load(path: &Path) -> Self {
-        let horizon = path
+        let mut horizon = path
             .parent()
             .map(crate::graphics::Graphics::load)
             .unwrap_or_default();
         crate::mipmap::set_dither_cutouts(horizon.dither_cutout_mips);
+        if let Some(dir) = path.parent() {
+            let (key, _) = crate::shader_pack_list::resolve(
+                &crate::logging::shared_dir(dir).join(crate::shader_pack_list::DIR),
+                &horizon.shader_pack,
+            );
+            if key != horizon.shader_pack {
+                horizon.shader_pack = key;
+                horizon.save(dir);
+            }
+        }
         let controller = path
             .parent()
             .map(crate::gamepad::PadSettings::load)
             .unwrap_or_default();
-        let extras = path
+        let extras_text = path
             .parent()
-            .map(crate::extras::Extras::load)
+            .and_then(|dir| fs::read_to_string(dir.join(crate::extras::FILE)).ok())
             .unwrap_or_default();
+        let mut extras = crate::extras::Extras::parse(&extras_text);
         // The enabled mods are the game folder's, shared by its players (`--player-dir`).
         let mods = path
             .parent()
             .map(|dir| crate::mod_list::ModList::load(&crate::logging::shared_dir(dir)))
             .unwrap_or_default();
-        let settings = match fs::read(path) {
-            Ok(bytes) => Self {
-                horizon,
-                controller,
-                extras,
-                mods,
-                ..Self::parse(&String::from_utf8_lossy(&bytes))
-            },
+        let mut settings = match fs::read(path) {
+            Ok(bytes) => {
+                let text = String::from_utf8_lossy(&bytes);
+                extras.read_old_options(&extras_text, &text);
+                Self {
+                    horizon,
+                    controller,
+                    extras,
+                    mods,
+                    ..Self::parse(&text)
+                }
+            }
             Err(error) => Self {
                 horizon,
                 controller,
@@ -370,6 +391,9 @@ impl Settings {
                 }
             },
         };
+        // Horizon's own key bindings live in horizon-extras.txt, not in options.txt.
+        let emote = settings.extras.emote_key.clone();
+        settings.keys.set("key.emote", &emote);
         settings.describe_for_crashes();
         // Options.load: the backend asked for at startup, what a restart is measured from.
         Self {
@@ -467,7 +491,6 @@ impl Settings {
             allow_cursor_changes: f.bool("allowCursorChanges"),
             toggle_crouch: f.bool("toggleCrouch"),
             toggle_sprint: f.bool("toggleSprint"),
-            three_d_skin_layers: f.bool("threeDSkinLayers"),
             toggle_attack: f.bool("toggleAttack"),
             toggle_use: f.bool("toggleUse"),
             sprint_window: f.int("sprintWindow"),
@@ -579,7 +602,6 @@ impl Settings {
         put_b(&mut f, "allowCursorChanges", self.allow_cursor_changes);
         put_b(&mut f, "toggleCrouch", self.toggle_crouch);
         put_b(&mut f, "toggleSprint", self.toggle_sprint);
-        put_b(&mut f, "threeDSkinLayers", self.three_d_skin_layers);
         put_b(&mut f, "toggleAttack", self.toggle_attack);
         put_b(&mut f, "toggleUse", self.toggle_use);
         put_i(&mut f, "sprintWindow", self.sprint_window);
@@ -641,14 +663,17 @@ impl Settings {
     pub fn with_option(&self, key: &str, value: &str) -> Result<Self, String> {
         let mut file = self.to_file();
         file.set_text(key, value)?;
-        Ok(Self {
+        let mut next = Self {
             horizon: self.horizon.clone(),
             controller: self.controller.clone(),
             extras: self.extras.clone(),
             mods: self.mods.clone(),
             video_modes: self.video_modes.clone(),
             ..Self::from_file(file)
-        })
+        };
+        // Horizon's own bindings aren't in options.txt.
+        next.keys.set("key.emote", self.keys.get("key.emote"));
+        Ok(next)
     }
     /// The `options.txt` text (Options.save).
     pub fn serialize(&self) -> String {
@@ -656,11 +681,15 @@ impl Settings {
     }
     pub fn save(&self, path: &Path) {
         self.describe_for_crashes();
-        let _ = fs::write(path, self.serialize());
+        if let Err(e) = fs::write(path, self.serialize()) {
+            log::warn!("Horizon: options.txt is not saved: {e}");
+        }
         if let Some(dir) = path.parent() {
             self.horizon.save(dir);
             self.controller.save(dir);
-            self.extras.save(dir);
+            let mut extras = self.extras.clone();
+            extras.emote_key = self.keys.get("key.emote").to_owned();
+            extras.save(dir);
             self.mods.save(&crate::logging::shared_dir(dir));
         }
     }
@@ -805,17 +834,23 @@ pub enum Opt {
     /// Horizon's controller settings (`horizon-controller.txt`).
     PadEnabled,
     PadVibration,
+    PadPlayInBackground,
     PadAdaptiveTriggers,
     PadLightbar,
     PadLookSensitivity,
+    PadPointerSpeed,
+    PadScrollSpeed,
+    PadRepeatDelay,
+    PadRepeatInterval,
     PadInvertX,
     PadInvertY,
     PadToggleSneak,
     PadMoveDeadzone,
     PadLookDeadzone,
+    PadTriggerThreshold,
     PadGlyphs,
-    PadMenuNav,
     PadKeyboard,
+    PadGameplayGuide,
     /// `options.modelPart.*`: one skin layer (index into `options_file::MODEL_PARTS`).
     ModelPart(usize),
     /// 3D skin layers: the player's outer layer as extruded slabs.
@@ -859,7 +894,10 @@ mod tests {
         assert!(!first.fullscreen);
         assert!(!first.vsync);
         assert_eq!(first.graphics_preset, "fabulous");
-        assert_eq!(first.horizon.entity_culling, crate::graphics::EntityCullingMode::Off);
+        assert_eq!(
+            first.horizon.entity_culling,
+            crate::graphics::EntityCullingMode::Off
+        );
         assert!(
             !path.exists(),
             "loading defaults must not write player files"
@@ -880,7 +918,10 @@ mod tests {
         )
         .unwrap();
         let custom = Settings::load(&path);
-        assert_eq!(custom.horizon.entity_culling, crate::graphics::EntityCullingMode::Synchronous);
+        assert_eq!(
+            custom.horizon.entity_culling,
+            crate::graphics::EntityCullingMode::Synchronous
+        );
         assert_eq!(custom.horizon.lod_distance, 64);
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -898,6 +939,195 @@ mod tests {
             horizon_narrator::Status::Off
         );
     }
+    /// `Monster.getSoundSource`: the verified families and inherited common sounds.
+    #[test]
+    fn hostile_families_keep_their_sound_category() {
+        for (event, source) in [
+            ("entity.zombie.hurt", 5),
+            ("entity.cow.hurt", 6),
+            ("block.stone.break", 4),
+            ("entity.player.hurt", 7),
+            ("entity.arrow.hit", 7),
+            ("music_disc.13", 2),
+            ("item.goat_horn.sound.0", 2),
+            ("weather.rain", 3),
+            ("ambient.cave", 8),
+        ] {
+            assert_eq!(sound_source(event), source, "{event}");
+        }
+        // Explicit sources still take precedence, including H331's arrow route.
+        let mut audio = crate::audio::Audio::silent(Path::new("/nonexistent/h068-audio"));
+        audio.capture = Some(Vec::new());
+        audio.play_on(6, "minecraft:entity.arrow.hit", Some([1.0; 3]), 1.0, 1.0);
+        audio.play_on(4, "minecraft:entity.warden.hurt", Some([1.0; 3]), 1.0, 1.0);
+        assert_eq!(
+            audio
+                .capture
+                .as_ref()
+                .unwrap()
+                .iter()
+                .map(|s| s.source)
+                .collect::<Vec<_>>(),
+            [6, 4]
+        );
+        for family in [
+            "bogged",
+            "breeze",
+            "endermite",
+            "parched",
+            "warden",
+            "zombie_villager",
+            "vex",
+            "wither",
+            "hostile",
+        ] {
+            for suffix in ["hurt", "death"] {
+                for prefix in ["", "minecraft:"] {
+                    let event = format!("{prefix}entity.{family}.{suffix}");
+                    assert_eq!(sound_source(&event), 5, "{event}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn three_d_skin_layers_move_from_options_txt_to_the_extras_file() {
+        // #8091 wrote the switch into options.txt; a player who had it on keeps
+        // it, and the next options.txt is vanilla's again.
+        let dir = std::env::temp_dir().join(format!(
+            "horizon-skin-layers-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("options.txt"), "fov:0.5\nthreeDSkinLayers:true\n").unwrap();
+        let s = Settings::load(&dir.join("options.txt"));
+        assert!(s.extras.three_d_skin_layers);
+        assert_eq!(s.fov, 90.0);
+        assert!(!s.serialize().contains("threeDSkinLayers"));
+        assert!(crate::extras::Extras::parse(&s.extras.serialize()).three_d_skin_layers);
+        // Once horizon-extras.txt has its own line, a stale options.txt one is ignored.
+        fs::write(dir.join(crate::extras::FILE), "threeDSkinLayers:false\n").unwrap();
+        assert!(
+            !Settings::load(&dir.join("options.txt"))
+                .extras
+                .three_d_skin_layers
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "horizon-{name}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn options_txt_lists_only_vanillas_key_mappings() {
+        // Options.keyMappings has the friends key, then social interactions; Horizon's emote key
+        // (#10092 put it between them) is not in the file.
+        let out = Settings::default().serialize();
+        assert!(!out.contains("emote"), "{out}");
+        assert!(out.contains(
+            "\nkey_key.friends:key.keyboard.o\nkey_key.socialInteractions:key.keyboard.p\n"
+        ));
+        let mut s = Settings::default();
+        s.keys.set("key.emote", "key.keyboard.g");
+        assert!(!s.serialize().contains("emote"));
+    }
+
+    #[test]
+    fn the_emote_key_is_kept_in_the_extras_file() {
+        let dir = scratch("emote-key");
+        let options = dir.join("options.txt");
+        // Untouched: no extras file is made for it.
+        Settings::default().save(&options);
+        assert!(!dir.join(crate::extras::FILE).exists());
+        assert_eq!(
+            Settings::load(&options).keys.get("key.emote"),
+            "key.keyboard.b"
+        );
+        // Rebound in Controls: saved to horizon-extras.txt, and options.txt stays vanilla's.
+        let mut s = Settings::load(&options);
+        s.keys.set("key.emote", "key.keyboard.g");
+        s.save(&options);
+        assert!(!fs::read_to_string(&options).unwrap().contains("emote"));
+        let extras = fs::read_to_string(dir.join(crate::extras::FILE)).unwrap();
+        assert!(
+            extras.lines().any(|l| l == "emoteKey:key.keyboard.g"),
+            "{extras}"
+        );
+        let back = Settings::load(&options);
+        assert_eq!(back.keys.get("key.emote"), "key.keyboard.g");
+        // horizon-ctl options-set rebuilds from options.txt text and keeps it.
+        assert_eq!(
+            back.with_option("fov", "90").unwrap().keys.get("key.emote"),
+            "key.keyboard.g"
+        );
+        // Reset to B and back to the default: the file says so.
+        let mut s = back;
+        s.keys.set(
+            "key.emote",
+            crate::keybinds::KeyBinds::default_of("key.emote"),
+        );
+        s.save(&options);
+        assert_eq!(
+            Settings::load(&options).keys.get("key.emote"),
+            "key.keyboard.b"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_emote_key_moves_from_options_txt_to_the_extras_file() {
+        // #10092 wrote `key_key.emote` into options.txt; a rebound key is kept, the next
+        // options.txt is vanilla's again.
+        let dir = scratch("emote-key-move");
+        let options = dir.join("options.txt");
+        fs::write(
+            &options,
+            "version:4000\nfov:0.5\nkey_key.emote:key.keyboard.h\nkey_key.jump:key.keyboard.j\n",
+        )
+        .unwrap();
+        let s = Settings::load(&options);
+        assert_eq!(s.keys.get("key.emote"), "key.keyboard.h");
+        assert_eq!(s.keys.get("key.jump"), "key.keyboard.j");
+        s.save(&options);
+        assert!(!fs::read_to_string(&options).unwrap().contains("emote"));
+        assert_eq!(
+            Settings::load(&options).keys.get("key.emote"),
+            "key.keyboard.h"
+        );
+        // Once horizon-extras.txt has its own line, a stale options.txt one is ignored.
+        fs::write(dir.join(crate::extras::FILE), "emoteKey:key.keyboard.k\n").unwrap();
+        fs::write(&options, "version:4000\nkey_key.emote:key.keyboard.h\n").unwrap();
+        assert_eq!(
+            Settings::load(&options).keys.get("key.emote"),
+            "key.keyboard.k"
+        );
+        // A value that is no key is not adopted; an unbound emote key is.
+        fs::remove_file(dir.join(crate::extras::FILE)).unwrap();
+        fs::write(&options, "version:4000\nkey_key.emote:banana\n").unwrap();
+        assert_eq!(
+            Settings::load(&options).keys.get("key.emote"),
+            "key.keyboard.b"
+        );
+        fs::write(
+            &options,
+            "version:4000\nkey_key.emote:key.keyboard.unknown\n",
+        )
+        .unwrap();
+        assert_eq!(
+            Settings::load(&options).keys.get("key.emote"),
+            "key.keyboard.unknown"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn an_option_set_keeps_horizon_files() {
         let mut s = Settings::parse("fov:70\n");

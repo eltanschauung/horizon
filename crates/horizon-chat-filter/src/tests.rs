@@ -21,3 +21,19 @@ fn old_filter_configuration_cannot_enable_automatic_punishments() {
     assert_eq!(c, Config::default());
     assert_eq!(parse_duration("2h"), Some(7_200_000));
 }
+
+#[test]
+fn duration_parts_preserve_rounding_without_overflow() {
+    for (millis, expected) in [
+        (1, (1, DurationUnit::Minute)),
+        (60_000, (1, DurationUnit::Minute)),
+        (61_000, (2, DurationUnit::Minute)),
+        (3_600_000, (60, DurationUnit::Minute)),
+        (3_600_001, (2, DurationUnit::Hour)),
+        (172_800_000, (48, DurationUnit::Hour)),
+        (172_800_001, (3, DurationUnit::Day)),
+        (i64::MAX, (106_751_991_168, DurationUnit::Day)),
+    ] {
+        assert_eq!(duration_parts(millis), expected);
+    }
+}

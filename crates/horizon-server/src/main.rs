@@ -21,6 +21,7 @@ mod management_tls;
 mod mcp;
 mod panel;
 mod process;
+mod prune;
 mod query;
 mod rcon;
 #[cfg(test)]
@@ -51,7 +52,7 @@ Usage: horizon-server [--dir DIR] <command>
               --offline --yes)
   run         Run the server in the foreground; type console commands, Ctrl-C stops it cleanly. It
               restarts the game if it crashes.
-  start       Run the server in the background (its output goes to logs/supervisor.log)
+  start       Run the server in the background, or resume a stopped supervisor (output goes to logs/supervisor.log)
   stop, restart
   status [--json]
               Up or not, TPS, MSPT, players, RAM and CPU
@@ -100,7 +101,7 @@ Usage: horizon-server [--dir DIR] <command>
   players [--json]
               Who is online, the operators, the whitelist and the bans
   kick NAME [REASON], ban NAME [REASON], pardon NAME, ban-ip ADDRESS|NAME [REASON], pardon-ip ADDRESS
-              Moderate the running server (vanilla's commands, as from its console)
+              Moderate the running server, or edit ban files while it is stopped
 
   --dir DIR   The server folder (default: the current folder)
 

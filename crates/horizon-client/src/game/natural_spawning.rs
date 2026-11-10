@@ -311,6 +311,10 @@ pub(super) struct GameLevel<'g, 'a> {
     /// holds the game); the first ones scan, as the build costs a few scans.
     pub(super) boxes: std::cell::OnceCell<MobBoxes>,
     pub(super) box_queries: std::cell::Cell<u32>,
+    /// The entity types some biome of the level gives a spawn cost (the
+    /// nether's few): for any other the cost is none wherever it stands, and
+    /// spawning asks for one for every loaded mob each tick.
+    pub(super) costed: Vec<&'g str>,
 }
 const SCANNED_QUERIES: u32 = 8;
 /// A mob not removed: its index in `Game::mobs`, box, alive, and whether
@@ -490,6 +494,9 @@ impl NaturalLevel for GameLevel<'_, '_> {
         self.zoomed_biome(x, y, z).map(|b| &b.spawns)
     }
     fn spawn_cost(&self, entity: &str, x: i32, y: i32, z: i32) -> Option<SpawnCost> {
+        if !self.costed.contains(&entity) {
+            return None;
+        }
         self.zoomed_biome(x, y, z)?.spawn_costs.get(entity).copied()
     }
     fn creature_probability(&self, x: i32, y: i32, z: i32) -> f32 {
@@ -613,6 +620,16 @@ impl horizon_client::mobs::spawner::SpawnerLevel for GameLevel<'_, '_> {
         mobs + pending
     }
 }
+/// Every entity type with a spawn cost in some biome, each once.
+fn spawn_cost_types(biomes: &horizon_client::biome::Biomes) -> Vec<&str> {
+    let mut types: Vec<&str> = Vec::new();
+    for t in biomes.list.iter().flat_map(|b| b.spawn_costs.keys()) {
+        if !types.contains(&t.as_str()) {
+            types.push(t);
+        }
+    }
+    types
+}
 impl<'a> Game<'a> {
     pub(super) fn natural_level(&self) -> GameLevel<'_, 'a> {
         let players = self.level_players();
@@ -630,6 +647,7 @@ impl<'a> Game<'a> {
             pending_ids: Default::default(),
             boxes: Default::default(),
             box_queries: Default::default(),
+            costed: spawn_cost_types(world_biomes!(self)),
         }
     }
     /// Creates a mob the spawner accepted, finalized the game's way; the
@@ -731,15 +749,18 @@ impl<'a> Game<'a> {
         if self.world_debug {
             return;
         }
+        let mut laps = horizon_client::spans::laps();
         let players = self.level_players();
         if players.is_empty() {
             return;
         }
         let mut scratch = std::mem::take(&mut self.spawn_scratch);
         let spawnable = self.spawning_chunks(&players, &mut scratch);
+        laps.lap("sn_candidates");
         for &key in &scratch.candidates {
             *self.world.inhabited.entry(key).or_insert(0) += 1;
         }
+        laps.lap("sn_inhabited");
         let spawn_mobs = self.ui.rules.bool("spawn_mobs");
         let spawn_enemies = self.ui.rules.bool("spawn_monsters");
         let mut random = std::mem::replace(&mut self.world.random, LegacyRandom::new(0));
@@ -747,6 +768,7 @@ impl<'a> Game<'a> {
         let last_state;
         {
             let level = self.natural_level();
+            laps.lap("sn_level");
             let counted: Vec<Counted> = self
                 .mobs
                 .iter()
@@ -770,20 +792,25 @@ impl<'a> Game<'a> {
                     spectator: p.spectator,
                 })
                 .collect();
+            laps.lap("sn_materialize");
             let mut state = SpawnState::new(&level, spawnable, players, &counted, |cx, cz| {
                 self.world.chunks.contains_key(&(cx, cz))
             });
+            laps.lap("sn_state");
             last_state = state.counts();
             let categories = if spawn_mobs {
                 state.filtered_categories(spawn_enemies, self.world.game_time % 400 == 0)
             } else {
                 Vec::new()
             };
+            laps.lap("sn_categories");
             // Util.shuffle.
             for i in (1..scratch.candidates.len()).rev() {
                 let j = random.next_int_bound(i as i32 + 1).unwrap_or(0) as usize;
                 scratch.candidates.swap(i, j);
             }
+            laps.lap("sn_shuffle");
+            spawn_selection::attempt_counters(false);
             if !categories.is_empty() {
                 for chunk in scratch.candidates.drain(..) {
                     let mut spawn = |l: &GameLevel, r: &SpawnRequest| {
@@ -805,17 +832,22 @@ impl<'a> Game<'a> {
                 }
             }
         }
+        spawn_selection::attempt_counters(true);
+        laps.lap("sn_attempts");
         self.world.random = random;
         // ServerChunkCache.lastSpawnState, for the debug overlay.
         self.spawn_counts.insert(self.dim, last_state);
         self.add_spawned(pending, false);
         self.spawn_scratch = scratch;
+        laps.lap("sn_finalize");
     }
     /// `NoiseBasedChunkGenerator.spawnOriginalMobs`: creature packs for a
     /// freshly generated chunk, from the biome at its corner column's top,
     /// with the chunk's decoration-seeded random, finalized with the
-    /// region's random as generation adds them (mobs are not generated in
-    /// the End).
+    /// region's random as generation adds them. The settings' own
+    /// `disable_mob_generation` skips the pass, which is how the End's preset
+    /// keeps its chunks empty (the dimension is also checked, as before, so a
+    /// preset that fails to load cannot start filling the End).
     pub(super) fn spawn_generation_creatures(&mut self, cx: i32, cz: i32) {
         if !self.world.chunks.contains_key(&(cx, cz)) || self.dim == Dim::End {
             return;
@@ -825,6 +857,11 @@ impl<'a> Game<'a> {
         };
         // `FlatLevelSource.spawnOriginalMobs` is empty: a superflat world places no packs.
         if terrain.is_flat() {
+            return;
+        }
+        // `NoiseGeneratorSettings.disableMobGeneration`: the shipped End preset
+        // asks for no packs at generation, and so would any dimension using it.
+        if terrain.disable_mob_generation() {
             return;
         }
         let mut region = terrain.region_random(cx, cz);

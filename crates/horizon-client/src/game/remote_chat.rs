@@ -154,7 +154,9 @@ impl Game<'_> {
         }
         // Only when the server says it is in online mode (handleLogin).
         if self.remote.as_ref().is_some_and(|r| r.online_mode) {
-            auth::prepare_chat_keys(true);
+            if let Some(account) = self.auth() {
+                auth::prepare_chat_keys_for(account, true);
+            }
             self.update_chat_session();
         }
     }
@@ -169,8 +171,10 @@ impl Game<'_> {
             .as_ref()
             .is_some_and(|r| r.logged_in && r.online_mode)
         {
-            if self.remote.as_ref().is_some_and(|r| r.secure_chat.signed()) {
-                auth::prepare_chat_keys(false);
+            if self.remote.as_ref().is_some_and(|r| r.secure_chat.signed())
+                && let Some(account) = self.auth()
+            {
+                auth::prepare_chat_keys_for(account, false);
             }
             self.update_chat_session();
         }
@@ -189,7 +193,7 @@ impl Game<'_> {
         if !r.logged_in || r.profile() != account.uuid {
             return;
         }
-        let Some(keys) = auth::chat_keys() else {
+        let Some(keys) = auth::chat_keys_for(account.uuid) else {
             return;
         };
         if r.secure_chat
@@ -380,6 +384,7 @@ impl Game<'_> {
         let Some(prompt) = &self.command_prompt else {
             return;
         };
+        horizon_client::widgets::cover_frame();
         horizon_client::widgets::begin_screen(|| {
             super::screen_info::confirm(
                 "multiplayer/confirm_command",
@@ -408,8 +413,9 @@ impl Game<'_> {
                 &[],
             ),
         ];
-        self.command_prompt_layout(prompt, (w, h))
-            .draw(batch, atlas, self.cursor, &labels);
+        let mut layout = self.command_prompt_layout(prompt, (w, h));
+        layout.declare_no(1);
+        layout.draw(batch, atlas, self.cursor, &labels);
     }
 
     /// The confirmation's answer; on no, what was behind it is back.
@@ -426,7 +432,9 @@ impl Game<'_> {
                 }
             }
             // Gui.openChatAndAddText.
-            (true, CommandAccept::Suggest, _) => self.open_chat(&format!("/{}", prompt.command)),
+            (true, CommandAccept::Suggest, _) => {
+                self.open_chat(&format!("/{}", prompt.command), false)
+            }
             (true, CommandAccept::Copy, _) => {
                 use horizon_client::clipboard::Clipboard;
                 self.clipboard.set(&format!("/{}", prompt.command));

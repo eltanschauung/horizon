@@ -19,8 +19,15 @@ fn running(dir: &Path) -> Result<Client, String> {
 
 /// `start`: `run` in the background, its output in logs/supervisor.log; returns once the game is up.
 pub fn start(dir: &Path) -> Result<(), String> {
-    if Client::open(dir)?.is_some() {
-        return Err(format!("a server is already running in {}", dir.display()));
+    if let Some(client) = Client::open(dir)? {
+        let status = client.call("GET", "/api/v1/status", None)?;
+        if status["phase"] != "stopped" {
+            return Err(format!("a server is already running in {}", dir.display()));
+        }
+        client.call("POST", "/api/v1/start", None)?;
+        wait_running(&client, None)?;
+        println!("The server is running.");
+        return Ok(());
     }
     crate::config::Config::load(dir)?;
     // Left by a supervisor that was killed: the new one writes its own.
@@ -122,7 +129,7 @@ fn wait_running(client: &Client, replaced: Option<u64>) -> Result<(), String> {
         if status["phase"] == "running" && status["engine_pid"].as_u64() != replaced {
             return Ok(());
         }
-        if status["phase"] == "stopped" || status["phase"] == "stopping" {
+        if status["phase"] == "stopping" || (status["phase"] == "stopped" && replaced.is_some()) {
             return Err("the server is stopping".into());
         }
         if Instant::now() > deadline {
@@ -240,7 +247,7 @@ pub fn players(dir: &Path, as_json: bool) -> Result<(), String> {
 }
 
 /// `kick NAME [REASON]`, `ban NAME [REASON]`, `pardon NAME`, `ban-ip ADDRESS|NAME [REASON]`, `pardon-ip
-/// ADDRESS`: the vanilla command on the running server, through the control API.
+/// ADDRESS`: the vanilla command on a running server, or a file-backed edit while it is stopped.
 pub fn moderate(dir: &Path, command: &str, words: &[String]) -> Result<(), String> {
     let Some(target) = words.first() else {
         return Err(format!(
@@ -252,6 +259,11 @@ pub fn moderate(dir: &Path, command: &str, words: &[String]) -> Result<(), Strin
             }
         ));
     };
+    // File-backed moderation uses the same stopped-server path as `op` and `whitelist`; while a
+    // supervisor is running, lists::run falls through to the game's vanilla console command.
+    if command != "kick" {
+        return crate::lists::run(dir, command, words);
+    }
     let mut body = json!({});
     let key = if target.parse::<std::net::IpAddr>().is_ok() {
         "ip"

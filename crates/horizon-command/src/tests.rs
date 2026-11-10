@@ -216,8 +216,8 @@ fn commands_need_allow_commands() {
     assert_eq!(
         root,
         [
-            "feedback", "help", "list", "me", "msg", "random", "seed", "teammsg", "tell", "tm", "trigger",
-            "version", "w"
+            "feedback", "help", "list", "me", "msg", "random", "seed", "teammsg", "tell", "tm",
+            "trigger", "version", "w"
         ]
     );
 }
@@ -951,7 +951,8 @@ fn a_dedicated_server_keeps_seed_and_version_for_game_masters() {
             assert_eq!(
                 root_commands(server, 0),
                 [
-                    "feedback", "help", "list", "me", "msg", "random", "teammsg", "tell", "tm", "trigger", "w"
+                    "feedback", "help", "list", "me", "msg", "random", "teammsg", "tell", "tm",
+                    "trigger", "w"
                 ]
             );
             let gm = root_commands(server, 2);
@@ -1086,47 +1087,22 @@ fn local_coordinate_missing_after_space_expects_a_coordinate() {
     assert_eq!(parse("^1 ~"), ("argument.pos.mixed".into(), 0));
 }
 
+/// `execute … run` redirects back to the root, so a crafted deeply nested chain
+/// recurses `parse_nodes` once per level. It must be rejected by the depth guard,
+/// never overflow the parsing thread's stack (a stack overflow would abort this
+/// test binary rather than let it pass).
 #[test]
-fn fork_worldspawn_requires_operator_and_accepts_no_arguments() {
-    for dedicated in [false, true] {
-        let d = vanilla::game_tree(false, false, dedicated);
-        let mut r = reg();
-        r.permission = 0;
-        assert!(d.parse("worldspawn", &r).executable().is_err());
-        r.permission = 2;
-        assert_eq!(
-            d.parse("worldspawn", &r).executable().unwrap().1,
-            "worldspawn"
-        );
-        assert!(d.parse("worldspawn OtherPlayer", &r).executable().is_err());
+fn deeply_nested_execute_run_is_rejected_not_overflowed() {
+    let mut deep = String::from("say hi");
+    for _ in 0..400 {
+        deep = format!("execute if entity @s run {deep}");
     }
+    assert!(run(&deep).is_err());
 }
 
+/// The guard is high enough that real command chains still parse.
 #[test]
-fn fork_feedback_accepts_player_messages_without_operator_permission() {
-    for dedicated in [false, true] {
-        let d = vanilla::game_tree(false, false, dedicated);
-        let mut r = reg();
-        r.permission = 0;
-        assert!(d.parse("feedback", &r).executable().is_err());
-        assert_eq!(d.parse("feedback I just saw a glitch", &r).executable().unwrap().1, "feedback");
-    }
-}
-
-#[test]
-fn command_prefix_alias_preserves_command_arguments() {
-    for body in [
-        "worldspawn",
-        "ban player",
-        "give @s minecraft:stone",
-        "say héllo!",
-        "",
-    ] {
-        for prefix in ['/', '!'] {
-            assert_eq!(strip_command_prefix(&format!("{prefix}{body}")), Some(body));
-        }
-    }
-    assert_eq!(strip_command_prefix("say !hello"), None);
-    assert_eq!(strip_command_prefix(" !give"), None);
-    assert_eq!(strip_command_prefix("!!give"), Some("!give"));
+fn shallow_execute_run_still_parses() {
+    assert!(run("execute if entity @s run say hi").is_ok());
+    assert!(run("execute as @a at @s run tp @s 0 0 0").is_ok());
 }

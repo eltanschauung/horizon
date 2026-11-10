@@ -72,6 +72,7 @@ impl Screen {
             id,
             icon: None,
             trailing: None,
+            action: None,
         };
         let size = Self::page_size(h);
         let start = self.page(h) * size;

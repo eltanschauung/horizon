@@ -885,6 +885,7 @@ mod tests {
             sorted_indices: None,
             flat_id: None,
             gpu_id: None,
+            gpu_fading: false,
             fading: None,
             leaving: None,
             animated_layers: Box::new([]),
@@ -1039,7 +1040,14 @@ mod tests {
                 cache: None,
             })
         };
-        let mut flat = flat::Flat::new(&device, &terrain_layout, 4 * GRAIN, 0, pipeline);
+        let pipeline = &pipeline;
+        let solid = |layout: &wgpu::PipelineLayout, label: &str, _: &str, _: &str| {
+            super::super::SolidPipeline {
+                plain: pipeline(layout, label, "", "", None, None, true),
+                hdr: None,
+            }
+        };
+        let mut flat = flat::Flat::new(&device, &terrain_layout, 4 * GRAIN, 0, pipeline, solid);
         let stride = std::mem::size_of::<crate::mesher::TerrainVertex>() as u64;
         let mut translucent = Arena::translucent(&device, stride, 4 * GRAIN);
         translucent.page_limit = 4 * GRAIN;
@@ -1081,6 +1089,7 @@ mod tests {
             sorted_indices: None,
             flat_id: Some(id),
             gpu_id: None,
+            gpu_fading: false,
             fading: None,
             leaving: None,
             animated_layers: Box::new([]),
@@ -1307,6 +1316,7 @@ mod tests {
                 sorted_indices: (translucent > 0).then_some(if indices { at } else { (7, 7) }),
                 flat_id: None,
                 gpu_id: None,
+                gpu_fading: false,
                 fading: None,
                 leaving: None,
                 animated_layers: Box::new([]),

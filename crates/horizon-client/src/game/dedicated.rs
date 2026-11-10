@@ -38,6 +38,7 @@ pub(super) mod events;
 mod management;
 mod report;
 mod status;
+mod transfer;
 
 /// What the tick loop tells `ServerWatchdog`: when the tick in progress was
 /// due (`getNextTickTime`), how long a tick is, and whether the server runs.
@@ -167,6 +168,16 @@ pub(super) fn player_joined(id: u128, name: &str) {
     }
 }
 
+/// A player in the user cache by name (`UserCache::find_by_name`), on a dedicated server.
+pub(super) fn cached_user_by_name(name: &str) -> Option<NameAndId> {
+    USER_CACHE.lock().unwrap().as_ref()?.find_by_name(name)
+}
+
+/// A player in the user cache by id, on a dedicated server.
+pub(super) fn cached_user_by_id(id: u128) -> Option<NameAndId> {
+    USER_CACHE.lock().unwrap().as_mut()?.get_by_id(id)
+}
+
 /// `server.toml`'s `[anticheat]`, beside server.properties when horizon-server runs the game; the
 /// default (on) without the file or the section, off (with an error logged) when the section is wrong.
 fn load_anticheat() -> horizon_anticheat::Config {
@@ -221,6 +232,47 @@ fn load_chat_filter() -> Option<horizon_chat_filter::Guard> {
         "Operator-issued chat mutes available; automatic word filtering removed",
     );
     Some(guard)
+}
+
+/// `server.toml`'s `[combat]` (docs/pvp.md): `legacy = true` resolves melee hits by 1.8.9's rules. Off without
+/// the file or the section, and (with an error logged) when the section is wrong.
+fn load_combat() -> bool {
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Combat {
+        #[serde(default)]
+        legacy: bool,
+    }
+    let Ok(text) = std::fs::read_to_string("server.toml") else {
+        return false;
+    };
+    let section = toml::from_str::<toml::Table>(&text)
+        .map_err(|e| e.to_string())
+        .and_then(|mut t| match t.remove("combat") {
+            Some(section) => section
+                .try_into::<Combat>()
+                .map(|c| c.legacy)
+                .map_err(|e| format!("[combat]: {e}")),
+            None => Ok(false),
+        });
+    match section {
+        Ok(legacy) => {
+            if legacy {
+                log(
+                    "INFO",
+                    "1.8 combat rules on (server.toml [combat]; legacy = false turns them off)",
+                );
+            }
+            legacy
+        }
+        Err(e) => {
+            log(
+                "ERROR",
+                &format!("server.toml: {e}; fights keep 26.3's rules"),
+            );
+            false
+        }
+    }
 }
 
 /// The secret for Velocity's player information forwarding, from `forwarding.secret` beside server.properties.
@@ -362,6 +414,19 @@ pub(super) fn preflight(options: &mut Options) -> Result<bool> {
         horizon_client::command::vanilla::set_horizon_commands(true);
     }
     props.store(&settings)?;
+    // `RegionFileVersion.configure`: the compression every region file this
+    // server writes uses, from `region-file-compression`. An unknown name is
+    // logged with the ones there are, and the default (deflate) stays.
+    if !horizon_world::compression::Compression::configure(&props.region_file_compression) {
+        log(
+            "ERROR",
+            &format!(
+                "Invalid `region-file-compression` value `{}` in server.properties. Please use one of: {}",
+                props.region_file_compression,
+                horizon_world::compression::REGION_FILE_NAMES.join(",")
+            ),
+        );
+    }
     let eula_file = PathBuf::from("eula.txt");
     let agreed = match eula::agreed(&eula_file) {
         Ok(a) => a,
@@ -437,6 +502,37 @@ pub(super) struct Lists {
     pub stop: bool,
     /// `MinecraftServer.isAutoSave`: all of Horizon's server levels share this save flag.
     pub autosave: bool,
+    /// UUID prefixes (lower case, with dashes) that pass the whitelist: `whitelist-bypass.txt`.
+    pub whitelist_bypass: Vec<String>,
+}
+
+/// The lines of `whitelist-bypass.txt`: one UUID prefix each, e.g. `00000000-0000-0000-0009-` for Floodgate's
+/// Bedrock players. `#` starts a comment. A prefix has to be a dashed UUID start of at least 8 characters, so
+/// a typo can't open the whitelist to everybody.
+fn parse_whitelist_bypass(text: &str) -> std::result::Result<Vec<String>, String> {
+    let mut out = Vec::new();
+    for (n, line) in text.lines().enumerate() {
+        let line = line
+            .split('#')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        if line.is_empty() {
+            continue;
+        }
+        if line.len() < 8
+            || line.len() > 36
+            || !line.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
+        {
+            return Err(format!(
+                "whitelist-bypass.txt line {}: {line:?} is not a UUID prefix",
+                n + 1
+            ));
+        }
+        out.push(line);
+    }
+    Ok(out)
 }
 impl Lists {
     fn load() -> Self {
@@ -451,7 +547,24 @@ impl Lists {
             player_idle_timeout: 0,
             stop: false,
             autosave: true,
+            whitelist_bypass: Vec::new(),
         };
+        // Horizon only: players from a proxy's Bedrock bridge (Floodgate) are never on whitelist.json.
+        if let Ok(text) = std::fs::read_to_string("whitelist-bypass.txt") {
+            match parse_whitelist_bypass(&text) {
+                Ok(prefixes) => {
+                    log(
+                        "INFO",
+                        &format!(
+                            "whitelist-bypass.txt: {} UUID prefix(es) skip the whitelist",
+                            prefixes.len()
+                        ),
+                    );
+                    l.whitelist_bypass = prefixes;
+                }
+                Err(e) => log("ERROR", &format!("{e}; the file is ignored")),
+            }
+        }
         // Each list tells the event stream what changes in it, as vanilla's tell their `NotificationService`.
         l.ops.watch(|change| {
             let (kind, e) = listed("operators", change);
@@ -497,7 +610,16 @@ impl Lists {
     }
     /// PlayerList.isWhiteListed.
     fn whitelisted(&self, user: &NameAndId) -> bool {
-        !self.use_whitelist || self.ops.contains(user) || self.white.contains(user)
+        !self.use_whitelist
+            || self.ops.contains(user)
+            || self.white.contains(user)
+            || self.bypasses_whitelist(user.id)
+    }
+    fn bypasses_whitelist(&self, id: u128) -> bool {
+        let id = horizon_protocol::crypto::uuid_string(id);
+        self.whitelist_bypass
+            .iter()
+            .any(|p| id.starts_with(p.as_str()))
     }
     /// PlayerList.canPlayerLogin before the player count.
     fn can_login(&mut self, address: std::net::SocketAddr, user: &NameAndId) -> Option<Tag> {
@@ -705,6 +827,27 @@ fn save_all_reply(saved: bool) -> Text {
     )
 }
 
+/// `BanIpCommands.banIp`'s `commands.banip.info`: the count of affected players and
+/// `EntitySelector.joinNames` of them (a gray ", " between names). None when no one is affected,
+/// as vanilla sends no line then.
+fn ban_ip_info(names: &[&str]) -> Option<Text> {
+    if names.is_empty() {
+        return None;
+    }
+    Some(Text::translate(
+        "commands.banip.info",
+        &[
+            Text::literal(names.len().to_string()),
+            horizon_client::scoreboard_cmd::format_list(
+                names
+                    .iter()
+                    .map(|n| Text::literal((*n).to_owned()))
+                    .collect(),
+            ),
+        ],
+    ))
+}
+
 /// `MinecraftServer.isAutoSave`: all of Horizon's server levels share this save flag.
 fn auto_save(state: &ServerState) -> bool {
     state.lists.lock().unwrap().autosave
@@ -903,9 +1046,6 @@ impl Game<'_> {
         };
         self.level.set_difficulty(self.ui.difficulty);
         self.sync_rules();
-        if self.ui.difficulty == 0 {
-            self.mobs.retain(|m| !m.hostile());
-        }
         // DedicatedServer.initServer: a legacy `announce-player-achievements`
         // sets the show_advancement_messages rule once, as the file is read.
         if let Some(announce) = props.announce_player_achievements {
@@ -943,6 +1083,18 @@ impl Game<'_> {
             .filter(|b| png_size(b) == Some((64, 64)));
         // Behind a Velocity proxy: `forwarding.secret` in the server folder, like the proxy's own file.
         let forwarding_secret = forwarding_secret(online.is_some())?;
+        // `[transfer]` on: a player's only way in must be the proxy, or one who joins this server
+        // directly finds the older copy of itself that a hand-over left here, and items double.
+        let transfers = self
+            .options
+            .transfers
+            .clone()
+            .map(horizon_client::lan::arrivals::Transfers::new);
+        if transfers.is_some() && forwarding_secret.is_none() {
+            return Err("server.toml's [transfer] is on, but players can join this server without the proxy: \
+                 turn on Velocity forwarding (forwarding.secret, docs/velocity-forwarding.md) or turn [transfer] off"
+                .into());
+        }
         let net = NetConfig {
             bind: (!props.server_ip.is_empty())
                 .then(|| props.server_ip.parse().ok())
@@ -975,6 +1127,7 @@ impl Game<'_> {
                 .get("horizon-allow-portable")
                 .is_some_and(|v| v.trim() == "true"),
             forwarding_secret,
+            arrivals: transfers.as_ref().map(|t| t.expected.clone()),
             log: Some(NetLog {
                 write: Arc::new(log_from),
                 lang: Arc::new(horizon_client::net::load_language(&self.options.resources)),
@@ -989,6 +1142,11 @@ impl Game<'_> {
                 .raw
                 .get(horizon_client::lan::HORIZON_CLIENTS_ONLY)
                 .is_some_and(|v| v.trim().eq_ignore_ascii_case("true")),
+            accept_older_clients: props
+                .raw
+                .get(horizon_client::lan::ACCEPT_OLDER_CLIENTS)
+                .is_some_and(|v| v.trim().eq_ignore_ascii_case("true")),
+            older_clients_play: false,
             lod_distance: horizon_client::lod_net::distance_property(
                 props.raw.get(horizon_client::lod_net::PROPERTY),
             ),
@@ -1036,9 +1194,27 @@ impl Game<'_> {
             log("WARN", "Perhaps a server is already running on that port?");
             return Ok(());
         }
+        if let Some(transfers) = transfers
+            && let Some(host) = self.lan.as_mut()
+        {
+            let s = &transfers.settings;
+            log(
+                "INFO",
+                &format!(
+                    "Transfers on (server.toml [transfer]): players expected for {} s ({} s at most, {} at once), frozen for {} ticks and held for {} ticks at most",
+                    s.expect.as_secs(),
+                    s.max_expect.as_secs(),
+                    s.max_expected,
+                    s.max_freeze_ticks,
+                    s.max_hold_ticks
+                ),
+            );
+            host.hub.transfers = Some(transfers);
+        }
         self.sync_ops(&lists);
         let anticheat = load_anticheat();
         let chat_filter = load_chat_filter();
+        self.settings.extras.pvp.combat.rules = load_combat();
         // Horizon's far ring (docs/hosting.md): server.toml's `max_view_distance`.
         let far = props
             .raw
@@ -1107,7 +1283,9 @@ impl Game<'_> {
         let watchdog = Watchdog::start(props.max_tick_time);
         let mut braked = Instant::now();
         let mut overload_warned: Option<Instant> = None;
-        while !state.lists.lock().unwrap().stop {
+        // `/stop`, or a stop signal (the shutdown hook's `halt`): either way the players and levels are
+        // saved below.
+        while !state.lists.lock().unwrap().stop && horizon_threads::stop_requests() == 0 {
             let tick_start = Instant::now();
             if let Some(watchdog) = &watchdog {
                 watchdog.tick_due(next, self.clock.tick_duration());
@@ -1163,9 +1341,16 @@ impl Game<'_> {
             let ticked =
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     match &mut state.report {
-                        Some(recording) => self.tick_server_spans(paused, |wall, cpu, spans| {
-                            recording.add(wall, cpu, spans)
-                        }),
+                        Some(recording) => {
+                            let sampled = recording.sample_next();
+                            super::tick_profile::set_sampling(sampled);
+                            let ticked =
+                                self.tick_server_spans(paused, |wall, cpu, spans, recorded| {
+                                    recording.add(wall, cpu, spans, recorded, sampled)
+                                });
+                            super::tick_profile::set_sampling(false);
+                            ticked
+                        }
                         None => self.tick_server_timed(paused),
                     }
                 }));
@@ -1180,6 +1365,14 @@ impl Game<'_> {
                 && let Some(recording) = state.report.take()
             {
                 self.finish_report(recording, state.view, state.max_players);
+            }
+            if horizon_client::spans::trace::due()
+                && let Some(events) = horizon_client::spans::trace::stop()
+            {
+                log(
+                    "INFO",
+                    &format!("Trace written: {events} events (reports/)"),
+                );
             }
             // DedicatedServer.sendLowDiskSpaceWarning: the operators hear of it
             // (no window drains the toasts here).
@@ -1278,11 +1471,12 @@ impl Game<'_> {
     pub(super) fn update_dedicated_streaming(&mut self) {
         let rule = self.ui.rules.bool("spectators_generate_chunks");
         let guest = self.lan.as_ref().and_then(|h| {
+            // A held player (arriving from another server) is sent the level too, so it
+            // holds the world loaded around it as a placed player does.
             h.hub
-                .guests
-                .iter()
-                .find(|g| h.hub.here(g) && super::game_mode::loads_chunks(rule, g.spectator()))
-                .map(|g| g.chunk())
+                .loading_chunks(|g| super::game_mode::loads_chunks(rule, g.spectator()))
+                .first()
+                .copied()
         });
         if self.standalone_server() {
             self.streaming.radius = if guest.is_some() {
@@ -1415,10 +1609,32 @@ impl Game<'_> {
         self.admin_feedback.clear();
     }
 
+    /// `MinecraftServer.createCommandSourceStack`: the console's source is
+    /// bound to the overworld, whichever level the last server tick left in
+    /// place (the last one ticked, often the nether). Its commands run there
+    /// and the level in place is put back afterwards.
+    fn as_console_in_overworld<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
+        let back = console_level(self.dim).and_then(|dim| self.enter_command_level(dim));
+        let out = self.as_console(f);
+        if let Some(back) = back {
+            self.enter_command_level(back);
+        }
+        out
+    }
+
     /// DedicatedServer.handleConsoleInputs: one console line, run as the
     /// server (permission level 4). The dedicated-only commands are here;
     /// everything else goes to the game's dispatcher.
     fn console_command(&mut self, state: &mut ServerState, line: &str) {
+        let (mut cancel, mut replies) = (false, Vec::new());
+        let source = if self.rcon_source { "rcon" } else { "console" };
+        self.native_console_line(source, line, &mut cancel, &mut replies);
+        for reply in replies {
+            self.console_reply(reply);
+        }
+        if cancel {
+            return;
+        }
         let line = horizon_client::command::strip_command_prefix(line).unwrap_or(line);
         let mut words = line.split_whitespace();
         let Some(command) = words.next() else {
@@ -1432,6 +1648,17 @@ impl Game<'_> {
                 state.lists.lock().unwrap().stop = true;
             }
             // Horizon's own, on the console only: a performance report (report.rs).
+            "horizon-report" if rest.first() == Some(&"stop") => match state.report.take() {
+                Some(recording) => {
+                    log("INFO", "Stopping the performance report: writing it now");
+                    self.finish_report(recording, state.view, state.max_players);
+                }
+                None => log("INFO", "No performance report is being recorded"),
+            },
+            "horizon-report" if rest.first() == Some(&"status") => match &state.report {
+                Some(recording) => log("INFO", &recording.status()),
+                None => log("INFO", "No performance report is being recorded"),
+            },
             "horizon-report" => {
                 let seconds = match rest.first().map(|s| s.parse::<u32>()) {
                     None => Ok(60),
@@ -1442,7 +1669,7 @@ impl Game<'_> {
                     (Err(()), _) => log(
                         "INFO",
                         &format!(
-                            "horizon-report [SECONDS]: 1 to {} seconds, 60 by default",
+                            "horizon-report [SECONDS | stop | status]: 1 to {} seconds, 60 by default",
                             report::MAX_SECONDS
                         ),
                     ),
@@ -1450,12 +1677,44 @@ impl Game<'_> {
                         log("INFO", "A performance report is already being recorded")
                     }
                     (Ok(seconds), None) => {
-                        state.report = Some(report::Recording::start(seconds));
+                        state.report = Some(report::Recording::start(seconds, self.wire_bytes()));
                         log(
                             "INFO",
                             &format!("Recording a performance report for {seconds} s (reports/)"),
                         );
                     }
+                }
+            }
+            // Horizon's own, on the console only: every thread's spans as a timeline (report.rs).
+            "horizon-trace" if rest.first() == Some(&"stop") => {
+                match horizon_client::spans::trace::stop() {
+                    Some(events) => log("INFO", &format!("Trace stopped: {events} events written")),
+                    None => log("INFO", "No trace is being written"),
+                }
+            }
+            "horizon-trace" => {
+                let seconds = match rest.first().map(|s| s.parse::<u32>()) {
+                    None => Some(30),
+                    Some(Ok(s)) if (1..=report::TRACE_MAX_SECONDS).contains(&s) => Some(s),
+                    Some(_) => None,
+                };
+                match seconds.map(report::start_trace) {
+                    None => log(
+                        "INFO",
+                        &format!(
+                            "horizon-trace [SECONDS | stop]: 1 to {} seconds, 30 by default",
+                            report::TRACE_MAX_SECONDS
+                        ),
+                    ),
+                    Some(Ok(path)) => log(
+                        "INFO",
+                        &format!(
+                            "Writing a trace for {} s to {} (open it in ui.perfetto.dev)",
+                            seconds.unwrap_or_default(),
+                            path.display()
+                        ),
+                    ),
+                    Some(Err(e)) => log("ERROR", &format!("Could not start a trace: {e}")),
                 }
             }
             "save-all" => {
@@ -1564,7 +1823,7 @@ impl Game<'_> {
                     let replies = self.mute_command(&mut host, &words, "Server");
                     self.lan = Some(host);
                     for reply in replies {
-                        self.console_reply(lit(&reply));
+                        self.console_reply(reply.text());
                     }
                 }
             }
@@ -1575,7 +1834,7 @@ impl Game<'_> {
                     let replies = self.tempban_command(&mut host, &words, "Server");
                     self.lan = Some(host);
                     for reply in replies {
-                        self.console_reply(lit(&reply));
+                        self.console_reply(reply.text());
                     }
                 }
             }
@@ -1649,7 +1908,7 @@ impl Game<'_> {
                         ),
                     ],
                 ));
-                let banned: Vec<u128> = self
+                let banned: Vec<(u128, String)> = self
                     .lan
                     .as_ref()
                     .map(|h| {
@@ -1657,17 +1916,15 @@ impl Game<'_> {
                             .guests
                             .iter()
                             .filter(|g| g.address.ip().to_string() == ip)
-                            .map(|g| g.uuid)
+                            .map(|g| (g.uuid, g.name.clone()))
                             .collect()
                     })
                     .unwrap_or_default();
-                if !banned.is_empty() {
-                    self.console_reply(Text::translate(
-                        "commands.banip.info",
-                        &[lit(&banned.len().to_string()), lit("")],
-                    ));
+                let names: Vec<&str> = banned.iter().map(|(_, n)| n.as_str()).collect();
+                if let Some(info) = ban_ip_info(&names) {
+                    self.console_reply(info);
                 }
-                for uuid in banned {
+                for (uuid, _) in banned {
                     self.kick_uuid(uuid, translatable("multiplayer.disconnect.ip_banned", &[]));
                 }
             }
@@ -1784,7 +2041,7 @@ impl Game<'_> {
                 // A command a native mod registered goes to the mods first,
                 // looked up by the same first word the match above read.
                 if !self.perform_native_console_command(line.trim()) {
-                    self.as_console(|g| g.run_command(line));
+                    self.as_console_in_overworld(|g| g.run_command(line));
                 }
                 for text in self.chat_capture.take().unwrap_or_default() {
                     self.console_reply(text);
@@ -1909,6 +2166,15 @@ impl Game<'_> {
             lan.hub.lan.shared.set_max_players(max_players);
         }
         self.store_property("max-players", max_players.to_string());
+    }
+
+    /// `DedicatedServer.setAcceptsTransfers`: whether a transfer's handshake is accepted from
+    /// now on, and `accepts-transfers` in server.properties.
+    fn set_accepts_transfers(&mut self, accept: bool) {
+        if let Some(lan) = &self.lan {
+            lan.hub.lan.shared.set_accepts_transfers(accept);
+        }
+        self.store_property("accepts-transfers", accept.to_string());
     }
 
     /// `DedicatedServer.setEnforceWhitelist`: the flag, and `enforce-whitelist` in
@@ -2163,15 +2429,72 @@ fn png_size(bytes: &[u8]) -> Option<(u32, u32)> {
     Some((w, h))
 }
 
+/// The level a console command runs in when `active` is in place: always
+/// the overworld (`MinecraftServer.createCommandSourceStack` uses
+/// `overworld()`), so None when it already is.
+fn console_level(active: super::Dim) -> Option<super::Dim> {
+    (active != super::Dim::Overworld).then_some(super::Dim::Overworld)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{capture_log, log, log_from, overload_warning, panic_message};
+    use super::{
+        capture_log, log, log_from, overload_warning, panic_message, parse_whitelist_bypass,
+    };
     use std::{
         fs,
         io::{self, BufRead, BufReader, Read, Write},
         process::{Command, Stdio},
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    /// A console line runs in the overworld even after a server tick left the nether in place.
+    #[test]
+    fn console_commands_run_in_the_overworld() {
+        use super::super::Dim;
+        assert_eq!(super::console_level(Dim::Nether), Some(Dim::Overworld));
+        assert_eq!(super::console_level(Dim::End), Some(Dim::Overworld));
+        assert_eq!(super::console_level(Dim::Overworld), None);
+    }
+
+    /// `BanIpCommands.banIp`: the info line names the affected players, one or several, and is
+    /// absent when no one is affected.
+    #[test]
+    fn ban_ip_info_names_the_affected_players() {
+        let args = |t: &super::Text| {
+            let c = t.component();
+            c["with"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|a| a.to_string())
+                .collect::<Vec<_>>()
+        };
+        assert!(super::ban_ip_info(&[]).is_none());
+        let one = super::ban_ip_info(&["Alex"]).unwrap();
+        assert_eq!(one.translation_key(), Some("commands.banip.info"));
+        let a = args(&one);
+        assert!(a[0].contains('1') && a[1].contains("Alex"), "{a:?}");
+        let two = super::ban_ip_info(&["Alex", "Steve"]).unwrap();
+        let a = args(&two);
+        assert!(a[0].contains('2'), "{a:?}");
+        assert!(
+            a[1].contains("Alex") && a[1].contains(", ") && a[1].contains("Steve"),
+            "{a:?}"
+        );
+    }
+
+    #[test]
+    fn whitelist_bypass_file_takes_uuid_prefixes_and_refuses_junk() {
+        let ok =
+            parse_whitelist_bypass("# Bedrock\n00000000-0000-0000-0009-  # floodgate\n\n").unwrap();
+        assert_eq!(ok, vec!["00000000-0000-0000-0009-".to_owned()]);
+        assert!(
+            parse_whitelist_bypass("0-").is_err(),
+            "a short prefix would match nearly everyone"
+        );
+        assert!(parse_whitelist_bypass("not-a-uuid-at-all").is_err());
+    }
 
     /// `SaveAllCommand.saveAll`: a save that throws is the `ERROR_FAILED` the
     /// source is told about, not a log line the caller never sees.
@@ -2325,6 +2648,7 @@ mod tests {
             player_idle_timeout: 0,
             stop: false,
             autosave: true,
+            whitelist_bypass: Vec::new(),
         };
         // Every translation key and string in a message, in the order they come.
         fn words(tag: &super::Tag, out: &mut Vec<String>) {
