@@ -121,6 +121,27 @@ mod tests {
         }]).to_string())].into()
     }
     #[test]
+    fn quarter_weight_region_preserves_other_ratios_and_zero_disables_it() {
+        for extra in [0, 1] {
+            let names = ["minecraft:plains", "example:rare", "example:extra"];
+            let mut files = BTreeMap::new();
+            for (i, weight, divisor) in [(1, 2, 1), (2, extra, 4)] {
+                let mut d: Value = serde_json::from_str(&contribution(names[i], 0.)).unwrap();
+                for (key, value) in [("group", json!(names[i])), ("weight", json!(weight)),
+                    ("weight_divisor", json!(divisor)), ("region_order", json!(i)),
+                    ("region_zooms", json!(3)), ("vanilla_weight", json!(10))] { d[key] = value; }
+                files.insert(names[i].into(), d.to_string());
+            }
+            let mut presets = base();
+            extend_presets(&mut presets, &files, &names.map(String::from).into()).unwrap();
+            let entries: Vec<Value> = serde_json::from_str(&presets["minecraft:overworld"]).unwrap();
+            assert_eq!(entries[1]["horizon:weight"], json!(8.0));
+            assert_eq!(entries[2]["horizon:weight"], json!(extra as f64));
+            assert_eq!(entries[1]["horizon:vanilla_weight"], json!(40));
+            MultiNoiseBiomeSource::from_quantized_json(&presets["minecraft:overworld"]).unwrap();
+        }
+    }
+    #[test]
     fn java_region_choices_match_scalar_and_prepared_biomes() {
         use crate::worldgen::climate::ClimateSampler;
         use horizon_core::density::{ConstantSampler, DensitySampler, SamplerContext};
