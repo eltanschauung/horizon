@@ -67,8 +67,8 @@ is installed or enabled on the desktop/server.
 Overworld BOP declarations opt into nested, smoothly warped region cells with
 `region_min_quarts: 192`. Conditional seeded draws preserve the configured weight
 probabilities while separating footprint from rarity. With four BOP tiers, primary
-cells span 3072 blocks, secondary 1536, and rare/extra rare share a 768-block floor.
-The bounded shared warp preserves nesting and broad cores; climate, rivers and
+cells span 3072 blocks, secondary 2048, and rare/extra rare target 1536 blocks.
+The bounded shared warp softens boundaries; overlapping tier gates and climate, rivers and
 mountains can still clip individual biomes. Nether and declarations without this
 option retain the existing Java-oracle-compatible region sampler. Changes affect
 newly generated terrain; saved chunks are preserved.

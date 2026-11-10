@@ -88,14 +88,18 @@ impl RegionWeights {
             let b = at(0,1)*(1.0-fx)+at(1,1)*fx;
             (((a*(1.0-fz)+b*fz)*2.0-1.0) * f64::from(minimum)/8.0).round() as i64
         };
-        // A shared bounded warp preserves nesting and leaves a broad cell core.
+        // A shared bounded warp softens the tier-cell boundaries.
         let (x,z) = (i64::from(x)+warp(0x57415250), i64::from(z)+warp(0x57415251));
         let mut remaining = self.total as u64;
         for (index, &weight) in self.weights.iter().enumerate() {
             if weight == 0 { continue; }
             if remaining == u64::from(weight) { return index; }
             let shift = self.weights.len().saturating_sub(index+2).min(8);
-            let size = i64::from(minimum) << shift;
+            let size = match shift {
+                0 => i64::from(minimum) * 2,
+                1 => i64::from(minimum) * 8 / 3,
+                _ => i64::from(minimum) << shift,
+            };
             let hash = coordinate_hash(seed, index as u64 + 0x54494552, x.div_euclid(size), z.div_euclid(size));
             let roll = ((u128::from(hash)*u128::from(remaining)) >> 64) as u64;
             if roll < u64::from(weight) { return index; }
@@ -185,7 +189,7 @@ mod tests {
         let mut regions = RegionWeights::new(123, vec![40,12,8,4,1], 3).unwrap().with_min_quarts(123,192);
         let mut expected = Vec::new();
         for z in -12..12 { for x in -12..12 {
-            let (x,z) = (x*192+96,z*192+96);
+            let (x,z) = (x*1536+192,z*1536+192);
             let center = regions.sample(x,z);
             for dx in [-48,0,48] { for dz in [-48,0,48] {
                 assert_eq!(regions.sample(x+dx,z+dz),center);
