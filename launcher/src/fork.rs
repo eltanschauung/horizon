@@ -94,7 +94,7 @@ pub fn build_revision() -> Result<String, String> {
 
 /// Developer workflow: use the normal staging, compiler, profile and target cache,
 /// but only type-check. Never install an artifact or change the selected instance.
-pub(crate) fn preflight() -> bool {
+pub fn preflight() -> bool {
     std::env::var("HORIZON_FORK_PREFLIGHT").as_deref() == Ok("1")
 }
 

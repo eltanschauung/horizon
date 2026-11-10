@@ -1377,7 +1377,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
                     ),
                     false => e,
                 })?;
-                if crate::fork::preflight() {
+                if horizon_launcher::fork::preflight() {
                     println!("{}", tr("Native mod preflight passed; no build exported."));
                     return Ok(());
                 }
@@ -1434,7 +1434,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
             };
             let mut built = build()?;
             // Preflight must not try older packages or rewrite the selected instance.
-            if crate::fork::preflight() {
+            if horizon_launcher::fork::preflight() {
                 println!(
                     "{}",
                     tr("Native mod preflight passed; no build installed or selected.")

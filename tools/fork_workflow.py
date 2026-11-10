@@ -296,6 +296,7 @@ def deploy(args):
         cmd='python3 - '+shlex.quote(json.dumps(payload))
         text=subprocess.check_output(ssh+[cmd],input=runner.read_bytes(),timeout=240)
         result['server']=json.loads(text)
+        shutil.rmtree(staging)
     write(p.parent/'deployment.json',result)
     return result
 

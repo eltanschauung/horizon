@@ -34,7 +34,7 @@ def execute(payload):
     def status():return json.loads(subprocess.check_output([root/'bin/server','--dir',root,'status','--json']))
     before=status();online=players(before)
     matches={n:(root/n).is_file()and sha(root/n)==value for n,value in payload['files'].items()}
-    report={'apply':payload['apply'],'players':len(online),'packages_match':all(matches.values()),'changed':[n for n,same in matches.items()if not same],'phase':before['phase']}
+    report={'apply':payload['apply'],'players':len(online),'artifacts_match':all(matches.values()),'packages_match':all(v for n,v in matches.items()if n.startswith(('horizon-mods/','horizon-native-mods/'))),'changed':[n for n,same in matches.items()if not same],'phase':before['phase']}
     if not payload['apply']:return report
     if online:return dict(report,skipped='players_online')
     for name,value in payload['files'].items():
@@ -72,7 +72,7 @@ def execute(payload):
             game=(current.get('sample')or{}).get('game')or{}
             if current.get('phase')=='running'and game.get('tps',0)>=18:
                 if any(sha(root/n)!=v for n,v in payload['files'].items()):raise RuntimeError('Post-deploy package mismatch')
-                return dict(report,phase='running',packages_match=True,tps=game['tps'],crashes=current['crashes'],backup=str(backup))
+                return dict(report,phase='running',packages_match=True,artifacts_match=True,tps=game['tps'],crashes=current['crashes'],backup=str(backup))
             time.sleep(2)
         raise RuntimeError('Updated server did not become healthy within 120 seconds')
     except Exception as error:
