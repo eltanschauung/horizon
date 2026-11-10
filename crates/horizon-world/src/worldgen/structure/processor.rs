@@ -1683,9 +1683,7 @@ fn place_entities<W: PlacementContext>(
             nbt.insert("Rotation".into(), Tag::List(rot));
         }
         // HangingEntity.rotate/mirror: the facing turns with the template.
-        if let Some(&Tag::Byte(f)) = nbt.get(&"Facing".into()) {
-            nbt.insert("Facing".into(), Tag::Byte(turn_facing(f, mirror, rotation)));
-        }
+        transform_hanging_facing(&mut nbt, mirror, rotation);
         if settings.finalize_entities {
             nbt.insert("horizon:finalize".into(), Tag::Byte(1));
         }
@@ -1693,6 +1691,25 @@ fn place_entities<W: PlacementContext>(
     }
     Ok(())
 }
+fn transform_hanging_facing(nbt: &mut Compound, mirror: Mirror, rotation: Rotation) {
+    if let Some(&Tag::Byte(f)) = nbt.get(&"Facing".into()) {
+        nbt.insert("Facing".into(), Tag::Byte(turn_facing(f, mirror, rotation)));
+    }
+    // Paintings serialize a separate 2D direction: 0 south, 1 west,
+    // 2 north, 3 east. Rotating yaw alone cannot change their attachment.
+    if matches!(nbt.get(&"id".into()), Some(Tag::String(id))
+        if id.to_string_lossy() == "minecraft:painting")
+    {
+        let facing = match nbt.get(&"facing".into()) {
+            Some(Tag::Byte(f)) => (*f as u8 & 3) as usize,
+            _ => 0,
+        };
+        let turned = turn_facing([3, 4, 2, 5][facing], mirror, rotation);
+        let facing = match turned { 3 => 0, 4 => 1, 2 => 2, 5 => 3, _ => unreachable!() };
+        nbt.insert("facing".into(), Tag::Byte(facing));
+    }
+}
+
 /// A 3D data value (2 north, 3 south, 4 west, 5 east) mirrored then rotated.
 fn turn_facing(f: i8, mirror: Mirror, rotation: Rotation) -> i8 {
     if !(2..=5).contains(&f) {
@@ -1797,6 +1814,30 @@ fn update_shape_at_edge<W: PlacementContext>(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn painting_facing_follows_transformed_support_wall() {
+        let directions = [[0, 0, 1], [-1, 0, 0], [0, 0, -1], [1, 0, 0]];
+        for mirror in [Mirror::None, Mirror::LeftRight, Mirror::FrontBack] {
+            for rotation in [Rotation::None, Rotation::Clockwise90,
+                Rotation::Clockwise180, Rotation::Counterclockwise90] {
+                for (facing, direction) in directions.iter().enumerate() {
+                    let anchor = [3, 5, 7];
+                    let support = std::array::from_fn(|i| anchor[i] - direction[i]);
+                    let a = StructureTemplate::transform(anchor, mirror, rotation, [0; 3]);
+                    let b = StructureTemplate::transform(support, mirror, rotation, [0; 3]);
+                    let expected: [i32; 3] = std::array::from_fn(|i| a[i] - b[i]);
+                    let mut tag = Compound::new();
+                    tag.insert("id".into(), Tag::String("minecraft:painting".into()));
+                    tag.insert("facing".into(), Tag::Byte(facing as i8));
+                    transform_hanging_facing(&mut tag, mirror, rotation);
+                    let Some(Tag::Byte(actual)) = tag.get(&"facing".into()) else { panic!("missing facing"); };
+                    assert_eq!(directions[*actual as usize], expected,
+                        "painting must remain on its transformed wall: facing={facing}, mirror={mirror:?}, rotation={rotation:?}");
+                }
+            }
+        }
+    }
 
     fn spawner(value: Value) -> SpawnerMobs {
         SpawnerMobs::decode(&value, |v| {
