@@ -33,6 +33,8 @@ pub struct StartingItem {
     pub max_count: Option<u32>,
     #[serde(default = "one_count")]
     pub rolls: u32,
+    #[serde(default)]
+    pub enchantments: std::collections::BTreeMap<String, u32>,
 }
 fn one_count() -> u32 {
     1
