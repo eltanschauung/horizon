@@ -79,6 +79,7 @@ def snapshot(args):
     if not re.fullmatch(r'[a-f0-9]{40}', revision):
         raise ValueError('Expected a complete game commit')
     launcher = Path(fork_launcher()).resolve()
+    launcher_hash = digest(launcher)
     provenance = json.loads(subprocess.check_output([launcher, 'fork-info'], text=True))
     if provenance.get('dirty') or not provenance.get('revision') or 'cached-preflight' not in provenance.get('capabilities', []):
         raise ValueError('Install the committed workflow-capable fork launcher first')
@@ -100,16 +101,21 @@ def snapshot(args):
             dest = out.parent/'inputs'/folder/(info['id']+'.'+suffix)
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dest)
-            entries.append(dict(info, kind='native' if native else 'content', path=str(dest.relative_to(out.parent))))
+            frozen = package(dest, native)
+            if frozen['id'] != info['id']:raise ValueError('Package identity changed during snapshot; retry')
+            entries.append(dict(frozen, kind='native' if native else 'content', path=str(dest.relative_to(out.parent))))
     ids = {e['id'] for e in entries if e['kind']=='native'}
     if not ids or (wanted is not None and wanted != ids):
         raise ValueError('Native package selection is empty or contains missing ids')
-    src = git('show', revision+':launcher/src/rust_toolchain.rs')
+    # The compiler is shipped by the frozen launcher, which may be newer than the game.
+    src = git('show', provenance['revision']+':launcher/src/rust_toolchain.rs')
     toolchain = re.search(r'pub const VERSION: &str = "([^"]+)"', src).group(1)
     shutil.copy2(launcher, out.parent/'inputs/launcher')
+    if digest(out.parent/'inputs/launcher') != launcher_hash:
+        raise ValueError('Launcher changed during snapshot; retry')
     manifest = {'schema':1, 'created_utc':stamp, 'game_revision':revision,
                 'launcher_revision':provenance['revision'], 'launcher_tree':provenance['launcher_tree'],
-                'launcher_sha256':digest(launcher), 'launcher_version':subprocess.check_output([launcher,'--version'],text=True).strip(),
+                'launcher_sha256':launcher_hash, 'launcher_version':subprocess.check_output([out.parent/'inputs/launcher','--version'],text=True).strip(),
                 'mods_revision':subprocess.check_output(['git','-C',ROOT.parent/'horizon-mods','rev-parse','HEAD'],text=True).strip(),
                 'toolchain':toolchain, 'profile':args.profile, 'base':args.base or read(h/'instances.json').get('instances',{}).get(args.instance,{}).get('version') or read(h/'settings.json').get('selected'),
                 'instance':args.instance, 'packages':entries}
