@@ -61,6 +61,10 @@ def build_environment():
 
 
 def build(component, profile, jobs, env, cargo):
+    env = dict(env)
+    env["HORIZON_FORK_SOURCE_REVISION"] = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    env["HORIZON_FORK_LAUNCHER_TREE"] = subprocess.check_output(["git", "rev-parse", "HEAD:launcher"], cwd=ROOT, text=True).strip()
+    env["HORIZON_FORK_SOURCE_DIRTY"] = "1" if subprocess.check_output(["git", "diff", "HEAD", "--", "launcher"], cwd=ROOT) else "0"
     if not env["HORIZON_MSA_CLIENT_ID"] and component in ("all", "launcher"):
         raise RuntimeError("HORIZON_MSA_CLIENT_ID must not be empty: the launcher needs it to renew logins.")
     common = [cargo, "build", "--locked", "--profile", profile, "-j", str(jobs)]
@@ -202,7 +206,10 @@ def fork_launcher():
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    if len(sys.argv) > 1 and sys.argv[1] in {"manifest", "build-plan", "preflight", "deploy", "prune-builds"}:
+        from fork_workflow import main as workflow_main
+        sys.exit(workflow_main(sys.argv[1:]))
+    parser = argparse.ArgumentParser(description=__doc__, epilog="Workflow commands: manifest, preflight, build-plan, deploy, prune-builds (see docs/fork-workflow.md).")
     parser.add_argument("action", choices=("build", "install"), help="install builds first, then deploys")
     parser.add_argument("component", nargs="?", default="all", choices=("all", "game", "launcher", "lunatic", "modded"))
     parser.add_argument("--release", action="store_true", help="use slower release builds instead of fast")

@@ -23,6 +23,8 @@ Local commands build edits; deploy affected components only. Native mods: packag
 
 Releases: build and package locally using existing caches, then upload the artifacts; do not use GitHub Actions to build releases.
 
+Frozen builds: `manifest`, `preflight`, `build-plan`, `deploy`, `prune-builds`; see `docs/fork-workflow.md`. Deploy/prune preview by default; `--apply` writes.
+
 ## Workflow
 
 - Use `rg`; batch independent reads, retrieve bounded snippets once. Validate dependencies/resource/package formats before compilation. Reuse toolchain, target directory and profile; build after edits.

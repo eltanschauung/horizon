@@ -79,9 +79,23 @@ pub fn install_bundled_mods(version: &Path, home: &Path) -> Result<(), String> {
 pub const REQUIRED_COMMIT: &str = "b543e8e4e54d8a5a08c99f06e4a61f9c599abdfc";
 
 pub fn build_revision() -> Result<String, String> {
-    let revision = native_mods::revision_of("main")?;
+    let revision = match std::env::var("HORIZON_FORK_REVISION") {
+        Ok(revision) => {
+            if revision.len() != 40 || !revision.bytes().all(|c| c.is_ascii_hexdigit()) {
+                return Err("HORIZON_FORK_REVISION must be a full commit hash".into());
+            }
+            revision
+        }
+        Err(_) => native_mods::revision_of("main")?,
+    };
     verify_revision(&revision)?;
     Ok(revision)
+}
+
+/// Developer workflow: use the normal staging, compiler, profile and target cache,
+/// but only type-check. Never install an artifact or change the selected instance.
+pub(crate) fn preflight() -> bool {
+    std::env::var("HORIZON_FORK_PREFLIGHT").as_deref() == Ok("1")
 }
 
 pub fn verify_revision(revision: &str) -> Result<(), String> {

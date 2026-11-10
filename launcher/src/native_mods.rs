@@ -1895,7 +1895,15 @@ fn compile(
     profile: Profile,
     package: &str,
 ) -> Command {
-    let mut cmd = cargo(rust, stage, "build");
+    let mut cmd = cargo(
+        rust,
+        stage,
+        if crate::fork::preflight() {
+            "check"
+        } else {
+            "build"
+        },
+    );
     // Cargo's progress bar (units done of the total) is read from its output. Incremental
     // compilation, the `fast` profile's, is not turned off by the player's environment: the
     // toolchain's command drops `CARGO_INCREMENTAL` and `CARGO_BUILD_*`.
@@ -2394,7 +2402,7 @@ fn pipeline(
         secs: 0,
         left_out: left_out.clone(),
     };
-    if !exists {
+    if !exists || crate::fork::preflight() {
         match target {
             // The headless build links none of the sound or controller libraries: it needs
             // only a C compiler and the C library's headers ([`rust_toolchain::linker_server`]).
@@ -2539,6 +2547,9 @@ fn pipeline(
                 _ => Failed::Other(error),
             }
         })?;
+        if crate::fork::preflight() {
+            return Ok(built);
+        }
         if let Some(expected) = platform.machine {
             let executable = target_dir.join(compiled.cargo().0).join(backend::CLIENT);
             let actual = pe_machine(&executable).map_err(|error| {
@@ -2657,6 +2668,11 @@ pub fn build(
         let point = |version: &str| {
             instances::edit(&instance.id, |meta| meta.version = Some(version.to_owned()))
         };
+        if crate::fork::preflight() {
+            return run(base, true)
+                .map(|_| base.to_owned())
+                .map_err(|(error, _)| error);
+        }
         // The first build may fail outright when the mods made elsewhere are all it had (every
         // mod left out) or the ones left could not build without them: those mods still move it.
         let (first, left) = match run(base, true) {
@@ -2769,6 +2785,9 @@ pub fn build_server(
             false,
         )
         .map_err(String::from)?;
+        if crate::fork::preflight() {
+            return Ok(output.join(Target::Server.binary()));
+        }
         export(&Target::Server.directory(&built.version), &output)?;
         // Exports are independent; keep only the newest cached server builds.
         let cached = root().join("server-builds");

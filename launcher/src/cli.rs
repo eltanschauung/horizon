@@ -703,6 +703,9 @@ impl SourceArg {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Machine-readable fork build provenance and workflow capabilities
+    #[command(hide = true)]
+    ForkInfo,
     /// Write a shell completion script to stdout
     Completions { shell: clap_complete::Shell },
     /// List Horizon releases, or the installed versions
@@ -1241,6 +1244,18 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
         }
     }
     match command {
+        Cmd::ForkInfo => {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "schema": 1, "version": backend::VERSION,
+                    "revision": option_env!("HORIZON_FORK_SOURCE_REVISION"),
+                    "launcher_tree": option_env!("HORIZON_FORK_LAUNCHER_TREE"),
+                    "dirty": option_env!("HORIZON_FORK_SOURCE_DIRTY") != Some("0"),
+                    "capabilities": ["pinned-revision", "cached-preflight", "strict-mod-set"]
+                })
+            );
+        }
         Cmd::Completions { shell } => {
             clap_complete::generate(
                 shell,
@@ -1448,9 +1463,13 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
             if as_json {
                 json(serde_json::json!({ "imported": tag, "prepared": prepared }));
             } else if prepared {
-                println!("Imported {tag} and selected it. It is prepared already, from another installed version.");
+                println!(
+                    "Imported {tag} and selected it. It is prepared already, from another installed version."
+                );
             } else {
-                println!("Imported {tag} and selected it. Prepare it next: horizon-launcher prepare --version {tag}");
+                println!(
+                    "Imported {tag} and selected it. Prepare it next: horizon-launcher prepare --version {tag}"
+                );
             }
         }
         Cmd::Prepare {
@@ -2389,7 +2408,7 @@ fn github_native(
 }
 
 fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
-    use horizon_launcher::browser::{horizon, installed, java_instance, Kind, Query, SourceId};
+    use horizon_launcher::browser::{Kind, Query, SourceId, horizon, installed, java_instance};
     use horizon_launcher::modpacks;
     // What the browser installs goes into an instance's game folder; Java mods' checks are kept
     // in the default one, shared by all.
@@ -3248,13 +3267,13 @@ fn instance(action: InstanceCmd, as_json: bool) -> Result<(), String> {
                     return Err(format!(
                         "No other launcher has an instance called {name}: \
                          horizon-launcher instance others"
-                    ))
+                    ));
                 }
                 _ => {
                     return Err(format!(
                         "More than one launcher has an instance called {name}: say which \
                          with --folder."
-                    ))
+                    ));
                 }
             };
             let target = new_name.as_deref().unwrap_or(&f.name);
@@ -3342,7 +3361,7 @@ fn instance(action: InstanceCmd, as_json: bool) -> Result<(), String> {
                         "{} is a data pack: put it into a world with horizon-launcher worlds \
                          datapack-add <world> <file>",
                         file.display()
-                    ))
+                    ));
                 }
             }
         }
@@ -4013,15 +4032,17 @@ mod tests {
             _ => panic!("expected native-build"),
         }
         // A version refuses --update, as in the game mode.
-        assert!(parse(&[
-            "mods",
-            "--server-output",
-            "engine-out",
-            "--version",
-            "v2026.10.13",
-            "--update"
-        ])
-        .is_err());
+        assert!(
+            parse(&[
+                "mods",
+                "--server-output",
+                "engine-out",
+                "--version",
+                "v2026.10.13",
+                "--update"
+            ])
+            .is_err()
+        );
         // The game mode is unchanged: an instance build without --server-output.
         assert!(matches!(
             parse(&["--instance", "A"]).unwrap().command,

@@ -18,7 +18,7 @@ features move upstream or their implementation moves between modules.
 | No automatic word filtering, escalating slur mutes/bans or Discord Rich Presence. Operator-issued moderation remains supported. | `horizon-chat-filter`, `game/chat_filter.rs`, client Cargo features/modules, server config |
 | Optional installation-key portable identities alongside online accounts, explicitly enabled by the server. | `portable.rs`, `entry.rs`, `lan/conn.rs`, server config and API/reference fixtures |
 | Launcher builds **our fork main**, enforces fork ancestry, recognizes our bundled native prebuilds and manages bundled content/native packages together. A build must include **every selected mod**: report errors, never silently select a reduced mod set or fall back to upstream game code. | `launcher/src/fork.rs`, `backend.rs`, `native_mods.rs`, bundled-mod/prebuild metadata |
-| Local build/install, Lunatic content copy, selected-mod build and direct-play workflow; locally built releases. | `tools/fork.py`, `tools/play_selected.py`, `AGENTS.md` |
+| Local build/install, Lunatic content copy, selected-mod build and direct-play workflow; locally built releases. | `tools/fork.py`, `tools/fork_workflow.py`, `tools/play_selected.py`, `docs/fork-workflow.md`, `AGENTS.md` |
 
 Paths without a crate prefix above are under `crates/horizon-client/src/`;
 “render” means `crates/horizon-client-render/src/`.
