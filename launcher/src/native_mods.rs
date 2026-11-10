@@ -2613,60 +2613,10 @@ fn pipeline(
 
 /// How many times a build compiles again without the mods the compiler's errors were traced to:
 /// each costs a compile, where a mod that doesn't apply costs only horizon-mixins' run.
-const COMPILE_RETRIES: usize = 3;
 
 /// Runs `pipeline` until it builds, each time without the mods that stopped it before (they
 /// are said with `progress` as they are left out, and those needing them once it built). The
 /// error, when it can't, starts with the mods already left out; they come with it.
-fn isolated(
-    mut pipeline: impl FnMut(&[LeftOut]) -> Result<Built, Failed>,
-    progress: &impl Fn(Step),
-) -> Result<Built, (String, Vec<LeftOut>)> {
-    let mut skip: Vec<LeftOut> = Vec::new();
-    let mut compiles = 0;
-    let mut last = String::new();
-    let said = |skip: &[LeftOut], error: String| {
-        let labels: Vec<String> = skip.iter().map(LeftOut::label).collect();
-        match labels.is_empty() {
-            true => error,
-            false => format!("{}\n\n{error}", labels.join("\n")),
-        }
-    };
-    loop {
-        match pipeline(&skip) {
-            Ok(built) => {
-                for left in built.left_out.iter().filter(|l| !skip.contains(l)) {
-                    log_warning(&left.label());
-                    progress(Step::LeftOut(left.clone()));
-                }
-                return Ok(built);
-            }
-            Err(Failed::Mods {
-                left,
-                error,
-                compiling,
-            }) => {
-                compiles += usize::from(compiling);
-                let new: Vec<LeftOut> = left
-                    .into_iter()
-                    .filter(|l| !skip.iter().any(|s| s.id == l.id))
-                    .collect();
-                if new.is_empty() || compiles > COMPILE_RETRIES {
-                    return Err((said(&skip, error), skip));
-                }
-                for left in new {
-                    log_warning(&left.label());
-                    progress(Step::LeftOut(left.clone()));
-                    skip.push(left);
-                }
-                last = error;
-            }
-            Err(Failed::Nothing) => return Err((said(&skip, last), skip)),
-            Err(Failed::Other(error)) => return Err((said(&skip, error), skip)),
-        }
-    }
-}
-
 /// Builds `folder`'s mods on `base`'s commit first, pinned or not (`base` is the installed version
 /// whose game files the build reuses: a native build's own revision when it is one, [`base_for`]),
 /// and points `instance` at the build, the default one included. A mod made for another commit
@@ -2689,22 +2639,20 @@ pub fn build(
     }
     logged(|| {
         let run = |base: &str, on_base: bool| {
-            isolated(
-                |skip| {
-                    pipeline(
-                        base,
-                        folder,
-                        anyway,
-                        on_base,
-                        profile,
-                        Target::Client,
-                        &progress,
-                        skip,
-                        true,
-                    )
-                },
+            // A fork build must contain every selected mod, just as a server export does.
+            // Never select a seemingly successful build that dropped gameplay mods.
+            pipeline(
+                base,
+                folder,
+                anyway,
+                on_base,
+                profile,
+                Target::Client,
                 &progress,
+                &[],
+                false,
             )
+            .map_err(|error| (String::from(error), Vec::new()))
         };
         let point = |version: &str| {
             instances::edit(&instance.id, |meta| meta.version = Some(version.to_owned()))
