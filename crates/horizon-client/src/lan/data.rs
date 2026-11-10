@@ -151,9 +151,9 @@ fn walk(dir: &Path, out: &mut BTreeMap<String, Value>) {
     }
 }
 
-/// Content biomes join the same registry as the base pack. Their definitions
-/// must be sent even when a client acknowledges vanilla's known core pack.
-fn content_biomes(resources: &Path, entries: &mut Vec<((String, String), Value, bool)>) {
+/// Content entries join the base registry and carry their definitions even
+/// when a client acknowledges vanilla's known core pack.
+fn content_entries(resources: &Path, kind: &str, entries: &mut Vec<((String, String), Value, bool)>) {
     let Ok(namespaces) = std::fs::read_dir(resources.join("data")) else {
         return;
     };
@@ -163,7 +163,7 @@ fn content_biomes(resources: &Path, entries: &mut Vec<((String, String), Value, 
             continue;
         }
         let mut found = BTreeMap::new();
-        walk(&namespace.path().join("worldgen/biome"), &mut found);
+        walk(&namespace.path().join(kind), &mut found);
         entries.extend(found.into_iter().map(|(p, v)| ((ns.clone(), p), v, true)));
     }
 }
@@ -363,8 +363,8 @@ impl SyncData {
                 .into_iter()
                 .map(|(p, v)| (("minecraft".to_owned(), p), v, false))
                 .collect();
-            if *key == "minecraft:worldgen/biome" {
-                content_biomes(resources, &mut entries);
+            if matches!(*key, "minecraft:worldgen/biome" | "minecraft:enchantment") {
+                content_entries(resources, path, &mut entries);
             }
             let mut damage_entries = None;
             if *key == "minecraft:damage_type" {
