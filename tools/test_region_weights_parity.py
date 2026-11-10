@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--bop', type=Path, default=Path.home()/'Desktop/biomesoplenty-horizon')
+    p.add_argument('--bop', type=Path, default=Path.home()/'Desktop/horizon-lunatic/biomesoplenty-horizon')
     p.add_argument('--java-home', type=Path)
     p.add_argument('--update', action='store_true', help='Replace the checked-in numeric oracle vectors')
     a = p.parse_args()

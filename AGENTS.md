@@ -1,11 +1,11 @@
 # Horizon fork
 
-- Checkout `/home/xxlib/Desktop/horizon`; game + launcher: `eltanschauung/horizon`, mods: sibling `horizon-mods`. Push to `origin`, never `upstream`; VPS connects via `ssh horizon-desktop`.
+- Checkout `/home/xxlib/Desktop/horizon-lunatic/horizon`; game + launcher: `eltanschauung/horizon`, mods: sibling `horizon-mods`. Push to `origin`, never `upstream`; VPS connects via `ssh horizon-desktop`.
 - Before upstream sync, read `FORK_FEATURES.md`. Consult only relevant sections of `docs/architecture.md` / `CONTRIBUTING.md`; game `crates/horizon-client/src/game/`, terrain `crates/horizon-world/src/worldgen/`, launcher `launcher/src/`.
 
 ## Build and deploy
 
-- Commands: `./tools/fork.py`; cache/toolchain config `.local/fork-build.json`; frozen workflow details in `docs/fork-workflow.md` (read when needed).
+- Commands: `./tools/fork.py`; cache/toolchain config `.local/fork-build.json` (`CARGO_HOME=~/.cargo`, `RUSTUP_HOME=~/.rustup`); frozen workflow details in `docs/fork-workflow.md` (read when needed).
 - Native/upstream work: package/install changed mods, then `manifest`; inspect its package set. Use that same manifest for `preflight`, `build-plan`, and `deploy`; pin exact revisions rather than mutable `main`. Recreate only when inputs change.
 - Preflight the affected target(s) before expensive builds; it uses the managed native compiler/cache without installing or selecting a build. Client/server stages run sequentially.
 - `build-plan PLAN --target client|server|both` records verified artifacts; client builds select the instance. `deploy PLAN --target local|server|both` previews; `--apply` installs. Inspect JSON for missing mods, hash mismatches, skips and server health; never accept a reduced mod set.
