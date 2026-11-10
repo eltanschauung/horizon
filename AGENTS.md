@@ -1,43 +1,30 @@
 # Horizon fork
 
-- Rust game for Minecraft 26.3: `eltanschauung/horizon`; push to `origin`, never `upstream`.
-- Upstream sync preservation checklist for both forks: `FORK_FEATURES.md`.
-- Checkout: `/home/xxlib/Desktop/horizon`; from VPS: `ssh horizon-desktop`. Inspect status/diffs; preserve unrelated edits.
-- Paths/checks: `docs/architecture.md`, `CONTRIBUTING.md` (read matching sections). Game: `crates/horizon-client/src/game.rs` + `game/`; worldgen: `crates/horizon-world/src/worldgen/`; launcher: `launcher/src/`; mods: sibling repos.
+- Checkout `/home/xxlib/Desktop/horizon`; game + launcher: `eltanschauung/horizon`, mods: sibling `horizon-mods`. Push to `origin`, never `upstream`; VPS connects via `ssh horizon-desktop`.
+- Before upstream sync, read `FORK_FEATURES.md`. Consult only relevant sections of `docs/architecture.md` / `CONTRIBUTING.md`; game `crates/horizon-client/src/game/`, terrain `crates/horizon-world/src/worldgen/`, launcher `launcher/src/`.
 
 ## Build and deploy
 
-Rust/cache config: `.local/fork-build.json`. Run here:
+- Commands: `./tools/fork.py`; cache/toolchain config `.local/fork-build.json`; frozen workflow details in `docs/fork-workflow.md` (read when needed).
+- Native/upstream work: package/install changed mods, then `manifest`; inspect its package set. Use that same manifest for `preflight`, `build-plan`, and `deploy`; pin exact revisions rather than mutable `main`. Recreate only when inputs change.
+- Preflight the affected target(s) before expensive builds; it uses the managed native compiler/cache without installing or selecting a build. Client/server stages run sequentially.
+- `build-plan PLAN --target client|server|both` records verified artifacts; client builds select the instance. `deploy PLAN --target local|server|both` previews; `--apply` installs. Inspect JSON for missing mods, hash mismatches, skips and server health; never accept a reduced mod set.
+- `prune-builds --dry-run` previews; `--apply` removes eligible old installations. Explicit `--exports DIR` cleans export executables only. Never sweep Cargo targets/dependencies/caches, SDKs, source or player data.
+- Small edits: `build game`, `build launcher`, `build lunatic` (also installs content). `install game` selects the plain fork, not native mods. Existing `build modded` pushes committed main and builds installed/enabled native mods.
+- Releases build/package locally using existing caches, then upload. Launcher version stamping: `HORIZON_LAUNCHER_VERSION=0.2.58 ./tools/fork.py install launcher` (update the version on the next launcher sync).
+- Server builds/deployments only for server/multiplayer work; `telemazer@74.91.116.171`, `~/lunatic-server`, `lunatic-horizon.service`, port 25565. Skip deployment when players are online.
 
-```sh
-./tools/fork.py build             # Game + launcher; optimized fast profile
-./tools/fork.py install           # Build + deploy both; selects plain fork-local
-./tools/fork.py build game        # Or: launcher
-./tools/fork.py build modded      # Push committed main; build installed/enabled native mods + game; select in launcher
-./tools/fork.py build lunatic     # Package Lunatic + install .hmod; restart game
-./tools/fork.py install launcher  # Or: game
-./tools/fork.py build --release   # Optional maximum optimization
-```
+## Efficient work
 
-Local commands build edits; deploy affected components only. Native mods: package/install in their repo, then launcher Build with selected mods. It fetches pushed fork `main`; push game changes first; preserve ancestry checks/separate installs. Local installs select the plain fork without native mods. Server builds only for server/multiplayer work; telemazer:25565.
-
-Releases: build and package locally using existing caches, then upload the artifacts; do not use GitHub Actions to build releases.
-
-Frozen builds: `manifest`, `preflight`, `build-plan`, `deploy`, `prune-builds`; see `docs/fork-workflow.md`. Deploy/prune preview by default; `--apply` writes.
-
-## Workflow
-
-- Use `rg`; batch independent reads, retrieve bounded snippets once. Validate dependencies/resource/package formats before compilation. Reuse toolchain, target directory and profile; build after edits.
-- Build checks: wait 30–55s, keep session handles, read new output/errors only. Avoid repeated log dumps and unrelated commands during waits.
-- Skip tests for small tasks and builds for documentation. Otherwise run focused checks once; broaden only for new failures/unresolved risk.
-- Handoff in existing docs or ignored `.local/`: completed/next work, exact commands, validation, running handles. Resume there instead of rereading chat history.
+- Inspect status/diffs; preserve unrelated edits. Use `rg`, batch independent bounded reads, and avoid repeated history/file dumps.
+- Prefer workflow JSON summaries; inspect only new errors in the referenced log. During builds, retain session handles and wait 30–55s between checks.
+- Reuse the same compiler, target directory and profile. Run focused checks once; broaden only for new failures or unresolved risk. Skip tests for small tasks and all builds for documentation.
+- Resume from an existing `.local/` handoff before rereading chat: completed/next steps, exact commands, manifest/log paths and running handles. Keep durable behavior in `FORK_FEATURES.md`, not growing handoffs in this file.
 
 ## Safety and feedback
 
-- Before deploying the dedicated server, check its player count; if above 0, ask permission before deployment.
-- Preserve accounts, keyring, Minecraft resources, skins and worlds; never restart running apps. Test only with temporary game/launcher/XDG homes.
-- Preserve Cargo caches/fingerprints/dependencies. Packages below 5 GB; at the limit retain newest/running builds; exclude caches from cleanup.
-- Never commit credentials, Minecraft JARs/assets, prepared resources, logs or player data. Before committing: `git diff --check`, `python3 tools/check_public_tree.py`; add `Co-Authored-By:`. Upstream issues/PRs require a request.
-- Finish with validation/limits and commit HEADs for repos committed this turn.
-- `/feedback <message>`: receiving server's `<HORIZON_HOME>/feedback.sqlite3` (desktop `~/.local/share/horizon/feedback.sqlite3`), table `feedback(time,message)`; UTC ISO timestamps.
-- When desktop and server mods differ, sync both to the version furthest ahead of their shared upstream history, preserving local work.
+- Preserve accounts, keyring, assets, skins, worlds and settings. Test with temporary game/launcher/XDG homes. Packages below 5 GB; retain newest/running builds and exclude caches from cleanup.
+- Desktop/server mods should use the furthest-ahead compatible work in shared upstream history; compare package contents/hashes, not version labels alone.
+- Never commit credentials, Minecraft assets, logs or player data. Before committing: `git diff --check`, `python3 tools/check_public_tree.py`; include agent attribution.
+- `/feedback`: server's `<HORIZON_HOME>/feedback.sqlite3`, table `feedback(time,message)`, UTC ISO timestamps; desktop `~/.local/share/horizon/feedback.sqlite3`.
+- Finish with outcome, validation/limits and commit HEADs for repos committed this turn.
