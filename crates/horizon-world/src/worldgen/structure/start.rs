@@ -102,6 +102,7 @@ pub enum StructureKind {
 }
 #[derive(Debug)]
 pub struct StructureDef {
+    pub surface: Option<super::surface_terrain::Config>,
     pub name: String,
     pub kind: StructureKind,
     pub biomes: BTreeSet<BiomeId>,
@@ -422,7 +423,31 @@ impl StructureRegistry {
                 },
                 other => StructureKind::Unsupported(other.to_owned()),
             };
+            let eligible = matches!(&kind,
+                StructureKind::Jigsaw(j) if j.project_to == Some(HeightmapType::WorldSurfaceWg))
+                || matches!(
+                    &kind,
+                    StructureKind::DesertPyramid
+                        | StructureKind::JungleTemple
+                        | StructureKind::Mansion
+                        | StructureKind::Igloo
+                );
+            let surface = if eligible {
+                let c = v
+                    .get("horizon:surface_placement")
+                    .map(|v| serde_json::from_value::<super::surface_terrain::Config>(v.clone()))
+                    .transpose()
+                    .map_err(|_| DecodeError::Field("horizon:surface_placement"))?
+                    .unwrap_or_default();
+                if !c.valid() {
+                    return Err(DecodeError::Field("horizon:surface_placement"));
+                }
+                c.enabled.then_some(c)
+            } else {
+                None
+            };
             defs.push(StructureDef {
+                surface,
                 name: name.clone(),
                 kind,
                 biomes: biome_set(&v["biomes"])?,
@@ -835,6 +860,7 @@ fn corner_heights(context: &mut impl StartContext, x: i32, sx: i32, z: i32, sz: 
 }
 #[derive(Debug)]
 pub struct StructureStart {
+    pub surface: Option<super::surface_terrain::Plan>,
     pub structure: usize,
     pub name: String,
     pub chunk: ChunkPos,
@@ -848,11 +874,19 @@ impl StructureStart {
     /// which only locating structures makes: 0 in a freshly made world.
     pub fn save(&self) -> Option<crate::nbt::Tag> {
         use crate::nbt::Tag;
-        let children: Option<Vec<Tag>> = self
+        let mut children: Option<Vec<Tag>> = self
             .pieces
             .iter()
             .map(|p| p.save().map(Tag::Compound))
             .collect();
+        if let Some(plan) = &self.surface
+            && let Some(Tag::Compound(first)) = children.as_mut().and_then(|v| v.first_mut())
+        {
+            first.insert(
+                "horizon:surface_plan".into(),
+                Tag::String(serde_json::to_string(plan).ok()?.as_str().into()),
+            );
+        }
         Some(Tag::compound([
             ("id", Tag::String(self.name.as_str().into())),
             ("ChunkX", Tag::Int(self.chunk.x)),
@@ -900,6 +934,11 @@ impl NoiseColumn {
 
 /// Biome and height queries for one structure generation attempt.
 pub trait StartContext: JigsawContext {
+    /// Flat generators already have suitable ground and keep vanilla placement.
+    fn surface_fitting(&self) -> bool {
+        true
+    }
+
     /// A chunk an older version generated: its structure starts are the ones
     /// it saved, which are in its blocks, not the ones this generator would
     /// make there.
@@ -1019,12 +1058,100 @@ pub(crate) fn try_generate(
     chunk: ChunkPos,
     any_biome: bool,
 ) -> Option<StructureStart> {
-    match generate(
-        registry, resources, bindings, context, structure, chunk, any_biome, false,
-    )? {
-        Generated::Start(start) => Some(start),
-        Generated::Stub => None,
+    let def = &registry.structures[structure];
+    // Forced placement keeps the requested position. Natural starts keep their
+    // seeded owner/rarity slot, searching a fixed neighbourhood once per cache entry.
+    let config = def
+        .surface
+        .as_ref()
+        .filter(|_| !any_biome && context.surface_fitting() && !context.is_old_chunk(chunk));
+    let mut best = None;
+    let mut best_score = f64::INFINITY;
+    for [dx, dz] in [
+        [0, 0],
+        [-1, 0],
+        [1, 0],
+        [0, -1],
+        [0, 1],
+        [-1, -1],
+        [-1, 1],
+        [1, -1],
+        [1, 1],
+    ] {
+        if config.is_none() && [dx, dz] != [0, 0] {
+            break;
+        }
+        let at = ChunkPos::new(chunk.x + dx, chunk.z + dz);
+        let Some(Generated::Start(mut start)) = generate(
+            registry, resources, bindings, context, structure, at, any_biome, false,
+        ) else {
+            continue;
+        };
+        if let Some(config) = config {
+            let floors = super::surface_terrain::settle(&mut start, |x, z| {
+                context.base_height(x, z, HeightmapType::WorldSurfaceWg)
+            });
+            if let Some(Piece::Pool(root)) = start.pieces.first() {
+                let b = root.bounding_box;
+                let y = floors[0].unwrap_or(b.min[1] + root.ground_level_delta);
+                let q = [
+                    ((b.min[0] + b.max[0]) / 2) >> 2,
+                    y >> 2,
+                    ((b.min[2] + b.max[2]) / 2) >> 2,
+                ];
+                if !def.biomes.contains(&context.noise_biome(q)) {
+                    continue;
+                }
+            }
+            let pieces = std::mem::take(&mut start.pieces);
+            start = StructureStart::new(structure, def, at, pieces);
+            let Some((plan, score)) =
+                super::surface_terrain::Plan::evaluate(&start, context, config, &floors)
+            else {
+                continue;
+            };
+            if score >= best_score {
+                continue;
+            }
+            start.bounding_box.encapsulate(&plan.bounds());
+            start.surface = Some(plan);
+            best_score = score;
+        }
+        start.chunk = chunk;
+        best = Some(start);
+        if config.is_none() || best_score == 0.0 {
+            break;
+        }
     }
+    best
+}
+/// Restore a saved fitted start at its recorded site without searching again.
+pub(crate) fn restore_surface_start(
+    registry: &StructureRegistry,
+    resources: &StructureResources,
+    bindings: &FeatureBlockBindings<'_>,
+    context: &mut impl StartContext,
+    structure: usize,
+    owner: ChunkPos,
+    plan: super::surface_terrain::Plan,
+) -> Option<StructureStart> {
+    let Generated::Start(mut start) = generate(
+        registry,
+        resources,
+        bindings,
+        context,
+        structure,
+        ChunkPos::new(plan.site[0], plan.site[1]),
+        true,
+        false,
+    )?
+    else {
+        return None;
+    };
+    start.chunk = owner;
+    start.bounding_box.encapsulate(&plan.bounds());
+    start.surface = Some(plan);
+    Some(start)
 }
 /// `StructureCheck.canCreateStructure`: whether `structure` may start in `chunk`, by
 /// `Structure.findValidGenerationPoint` alone. A jigsaw's start piece is placed and its biome
@@ -1039,6 +1166,9 @@ pub(crate) fn may_start(
     structure: usize,
     chunk: ChunkPos,
 ) -> bool {
+    if registry.structures[structure].surface.is_some() {
+        return true;
+    }
     generate(
         registry, resources, bindings, context, structure, chunk, false, true,
     )
@@ -1421,6 +1551,7 @@ impl StructureStart {
         }
         Self {
             structure,
+            surface: None,
             name: def.name.clone(),
             chunk,
             pieces,
@@ -1496,6 +1627,9 @@ pub fn beardifier(
     let mut kernels: Option<BoundingBox> = None;
     for start in starts {
         let def = &registry.structures[start.structure];
+        if start.surface.is_some() {
+            continue;
+        }
         if let Some(enhanced) = &def.enhanced_terrain
             && let Some(b) =
                 enhanced.collect(start, chunk, &mut kernel_pieces, &mut kernel_junctions)

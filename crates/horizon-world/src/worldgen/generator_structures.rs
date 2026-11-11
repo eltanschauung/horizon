@@ -457,6 +457,19 @@ impl StructureState {
             .filter_map(|start| {
                 let index = (self.registry.structures.iter()).position(|s| s.name == start.name)?;
                 let def = &self.registry.structures[index];
+                let surface = start.pieces.iter().find_map(|p| {
+                    let crate::nbt::Tag::Compound(map) = p else {
+                        return None;
+                    };
+                    let crate::nbt::Tag::String(s) = map.get(&"horizon:surface_plan".into())?
+                    else {
+                        return None;
+                    };
+                    serde_json::from_str::<super::structure::surface_terrain::Plan>(
+                        &s.to_string_lossy(),
+                    )
+                    .ok()
+                });
                 if !start.pieces.is_empty()
                     && let Some(pieces) = start
                         .pieces
@@ -464,7 +477,24 @@ impl StructureState {
                         .map(|piece| self.saved_pool_piece(piece))
                         .collect::<Option<Vec<_>>>()
                 {
-                    return Some(Arc::new(StructureStart::new(index, def, chunk, pieces)));
+                    let mut loaded = StructureStart::new(index, def, chunk, pieces);
+                    if let Some(plan) = &surface {
+                        loaded.bounding_box.encapsulate(&plan.bounds());
+                    }
+                    loaded.surface = surface;
+                    return Some(Arc::new(loaded));
+                }
+                if let Some(plan) = surface.clone() {
+                    return super::structure::start::restore_surface_start(
+                        &self.registry,
+                        &self.resources,
+                        &self.bindings,
+                        context,
+                        index,
+                        chunk,
+                        plan,
+                    )
+                    .map(Arc::new);
                 }
                 if let Some(bounds) = start.bounds {
                     let made = generated.get_or_insert_with(|| {
@@ -498,6 +528,7 @@ impl StructureState {
                     chunk.z * 16 + 15,
                 ]);
                 Some(Arc::new(StructureStart {
+                    surface,
                     structure: index,
                     name: start.name,
                     chunk,
@@ -755,8 +786,8 @@ impl StructureState {
         chunk: ChunkPos,
     ) -> Vec<Arc<StructureStart>> {
         let (bx, bz) = (chunk.x * 16, chunk.z * 16);
-        let around: Vec<ChunkPos> = (chunk.x - 8..=chunk.x + 8)
-            .flat_map(|sx| (chunk.z - 8..=chunk.z + 8).map(move |sz| ChunkPos::new(sx, sz)))
+        let around: Vec<ChunkPos> = (chunk.x - 11..=chunk.x + 11)
+            .flat_map(|sx| (chunk.z - 11..=chunk.z + 11).map(move |sz| ChunkPos::new(sx, sz)))
             .collect();
         // Workers generating neighbouring chunks ask for the same starts in the
         // same order: build those no other worker is building first, and wait

@@ -325,6 +325,7 @@ mod tests {
                 "top": "none", "bottom": "none"}))),
         );
         let start = StructureStart {
+            surface: None,
             structure: 0,
             name: "test".into(),
             chunk: ChunkPos::new(0, 0),

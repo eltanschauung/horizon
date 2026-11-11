@@ -1785,6 +1785,22 @@ where
             )
             .map_err(stage("noise"))?;
         }
+        let mut boundary_water = HashMap::new();
+        super::structure::surface_terrain::apply(
+            &mut chunk,
+            &references,
+            self.settings.default_block,
+            data.registry.default_state("minecraft:air").unwrap(),
+            self.settings.sea_level,
+            |x, z| {
+                *boundary_water.entry((x, z)).or_insert_with(|| {
+                    let surface = self.base_height(x, z, HeightmapType::WorldSurfaceWg);
+                    let floor = self.base_height(x, z, HeightmapType::OceanFloorWg);
+                    (surface > floor).then_some(surface)
+                })
+            },
+        )
+        .map_err(stage("surface fitting"))?;
         let generation = self.generation();
         worker.timings.noise += lap(&mut clock);
         // The surface rule, compiled by this worker's first chunk.
@@ -2124,6 +2140,9 @@ where
     }
     fn sea_level(&self) -> i32 {
         self.pipeline.settings.sea_level
+    }
+    fn surface_fitting(&self) -> bool {
+        self.pipeline.flat.is_none()
     }
     fn generator_min_y(&self) -> i32 {
         if self.pipeline.flat.is_some() {
