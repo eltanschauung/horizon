@@ -302,6 +302,12 @@ pub fn state(
 
 /// A placed structure piece.
 pub trait LegacyPiece: std::fmt::Debug + Send + Sync {
+    /// First free Y above a fixed foundation. None means the piece projects
+    /// itself onto the terrain later (temples and igloos, for example).
+    fn fixed_surface_floor(&self) -> Option<i32> {
+        None
+    }
+
     fn bounding_box(&self) -> BoundingBox;
     /// The vanilla StructurePieceType id, for diagnostics and comparisons.
     fn type_name(&self) -> &'static str;

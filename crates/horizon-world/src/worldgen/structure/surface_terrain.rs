@@ -79,6 +79,15 @@ pub struct Plan {
     pub config: Config,
     pub patches: Vec<Patch>,
 }
+fn fixed_legacy_floor(pieces: &[Piece]) -> Option<i32> {
+    pieces
+        .iter()
+        .filter_map(|p| match p {
+            Piece::Legacy(p) => p.fixed_surface_floor(),
+            Piece::Pool(_) => None,
+        })
+        .min()
+}
 impl Plan {
     /// Sample noise-only terrain; never ask neighbouring generated chunks.
     pub fn evaluate(
@@ -90,6 +99,7 @@ impl Plan {
         let mut patches = Vec::new();
         let mut score = 0.0;
         let sea = context.sea_level();
+        let legacy_floor = fixed_legacy_floor(&start.pieces);
         'pieces: for (index, piece) in start.pieces.iter().enumerate() {
             let b = piece.bounding_box();
             let xs = [b.min[0], (b.min[0] + b.max[0]) / 2, b.max[0]];
@@ -117,7 +127,7 @@ impl Plan {
                     floors[index].unwrap_or(b.min[1] + p.ground_level_delta),
                     p.element.projection() == Projection::TerrainMatching,
                 ),
-                Piece::Legacy(_) => (median, false),
+                Piece::Legacy(_) => (legacy_floor.unwrap_or(median), false),
             };
             // Upper storeys need no independent ground platform.
             if start.pieces.iter().any(|other| {
@@ -722,6 +732,35 @@ mod settlement_tests {
         assert_eq!(start.pieces[2].bounding_box().min[1], 71);
         assert_eq!(start.pieces[3].bounding_box().min[1], 64);
         assert_eq!(start.pieces[4].bounding_box().min[1], 73);
+    }
+    #[test]
+    fn surface_terrain_fixed_legacy_floor_preserves_mansion_storeys() {
+        use super::super::legacy::{TemplateHandler, TemplatePiece};
+        use super::super::{Mirror, processor::ProcessorList};
+        let template = |y, handler| {
+            Piece::Legacy(Box::new(TemplatePiece::new(
+                "minecraft:wmp",
+                "test:room",
+                Arc::new(StructureTemplate::empty()),
+                [0, y, 0],
+                Rotation::None,
+                Mirror::None,
+                [0; 3],
+                Arc::new(ProcessorList::default()),
+                true,
+                vec![],
+                handler,
+            )))
+        };
+        let pieces = vec![
+            template(70, TemplateHandler::Mansion),
+            template(78, TemplateHandler::Mansion),
+        ];
+        // Room floors share one terrain platform even where sampled natural
+        // terrain would put the second room's local median much higher.
+        assert_eq!(fixed_legacy_floor(&pieces).unwrap_or(94), 71);
+        let projected = vec![template(90, TemplateHandler::Igloo)];
+        assert_eq!(fixed_legacy_floor(&projected).unwrap_or(94), 94);
     }
     #[test]
     fn surface_terrain_preserves_exact_saved_slopes() {

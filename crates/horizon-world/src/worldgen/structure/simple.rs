@@ -280,6 +280,10 @@ impl TemplatePiece {
     }
 }
 impl LegacyPiece for TemplatePiece {
+    fn fixed_surface_floor(&self) -> Option<i32> {
+        matches!(self.handler, TemplateHandler::Mansion).then_some(self.position[1] + 1)
+    }
+
     fn bounding_box(&self) -> BoundingBox {
         self.bounding_box
     }

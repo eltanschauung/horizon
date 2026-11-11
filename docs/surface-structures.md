@@ -57,3 +57,6 @@ Flat generators retain original placement. Saved plans retain their original lim
 configuration changes affect new starts. Waterfront pieces are penalized during site
 selection and retain their original water footprint. Excavation beside fluids is
 clamped to their level; edge queries use cached noise-only neighbour columns.
+
+Fixed-height legacy templates (mansions) retain a shared foundation at their
+original ground floor. Height-projecting legacy pieces keep their normal projection.

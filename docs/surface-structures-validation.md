@@ -30,7 +30,7 @@ neighbouring chunks are generated in reverse order using fresh generators. They
 also assert exact complete structure-start NBT equality after loading the saved
 start through `OldWorld`; the desert cases require a fitted desert pyramid.
 
-Horizon library tests: 411 passed, two existing ignored. Tectonic tests: 14 passed.
+Horizon library tests: 412 passed, two existing ignored. Tectonic tests: 14 passed.
 Focused tests cover independent building settlement with preserved upper storeys and basements,
 exact persisted floating-point slopes, cavity/fluid preservation, bounded fill,
 unchanged distant columns, fluid protection across chunk edges and continuous
@@ -49,3 +49,26 @@ This is deterministic generation and regression validation, not a visual survey
 of every possible terrain/layout combination. Tightened limits can reject sites;
 fluids and thin cave roofs take precedence over terrain fitting. Existing chunks
 are not retroactively reshaped.
+
+## Gensouworks content overlay
+
+The installed package definitions, pools, biome tags and templates were also
+loaded as a local resource overlay for the same census.
+
+| Mode | Seed | Gensouworks starts |
+| --- | --- | --- |
+| vanilla | 1234 | 15 |
+| vanilla | -9182 | 1 |
+| vanilla | 42 | 14 |
+| vanilla-original | 1234 | 13 |
+| vanilla-original | -9182 | 1 |
+| vanilla-original | 42 | 12 |
+| tectonic | 1234 | 15 |
+| tectonic | -9182 | 11 |
+| tectonic | 42 | 9 |
+| tectonic-original | 1234 | 15 |
+| tectonic-original | -9182 | 10 |
+| tectonic-original | 42 | 9 |
+
+Fixed-height legacy template tests additionally preserve a shared mansion
+foundation when local terrain medians differ between its storeys.
