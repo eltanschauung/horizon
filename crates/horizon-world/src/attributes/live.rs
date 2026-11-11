@@ -379,6 +379,15 @@ impl<G: FnMut() -> i32> LiveAttributes<G> {
         let key = self.key(name).ok_or(Error::MissingAttribute)?;
         self.cached_value(Some(&key))
     }
+    /// Effective value for an immutable reader, including unsynchronized modifiers.
+    /// Clean instances reuse the same cache as `value`.
+    pub fn current_value_of(&self, name: &str) -> Result<f64, Error> {
+        let key = self.key(name).ok_or(Error::MissingAttribute)?;
+        if let Some(handle) = self.map.instances.get(Some(&key)) {
+            return Ok(self.data.node(&handle)?.value.current_value());
+        }
+        self.cached_value(Some(&key))
+    }
     pub fn modifier_value(&mut self, key: Option<Key>, id: &str) -> Result<f64, Error> {
         self.map
             .modifier_value(key, id, &mut self.data)

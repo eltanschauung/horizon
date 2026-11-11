@@ -816,14 +816,19 @@ impl Guest {
         f64::from(self.dimensions().eye_height)
     }
     /// `Player.isWithinBlockInteractionRange(pos, buffer)` for the guest:
-    /// its block interaction range is 4.5, 5 in creative.
+    /// Honor the live interaction attribute, including temporary scale/reach modifiers.
     pub fn within_block_range(&self, pos: [i32; 3], buffer: f64) -> bool {
         let eye = [
             self.position[0],
             self.position[1] + self.eye_height(),
             self.position[2],
         ];
-        let range = if self.creative() { 5.0 } else { 4.5 };
+        let otherwise = if self.creative() { 5.0 } else { 4.5 };
+        let range = self
+            .motion
+            .as_ref()
+            .and_then(|m| m.attributes.current_value_of("minecraft:block_interaction_range").ok())
+            .unwrap_or(otherwise);
         within_block_range(eye, range + buffer, pos)
     }
     /// `Player.isWithinBlockInteractionRange(pos, 1.0)`, which the server

@@ -276,20 +276,28 @@ impl Instance {
         }
         Ok(())
     }
+    /// Read the effective value without changing the cache or dirty state.
+    /// Immutable menu validity checks must see modifiers even before their next sync.
+    pub fn current_value(&self) -> f64 {
+        if !self.dirty {
+            return self.cached;
+        }
+        let mut base = self.base;
+        for m in self.operation_modifiers(Operation::AddValue) {
+            base += m.amount();
+        }
+        let mut value = base;
+        for m in self.operation_modifiers(Operation::AddMultipliedBase) {
+            value += base * m.amount();
+        }
+        for m in self.operation_modifiers(Operation::AddMultipliedTotal) {
+            value *= 1.0 + m.amount();
+        }
+        self.definition.sanitize(value)
+    }
     pub fn value(&mut self) -> f64 {
         if self.dirty {
-            let mut base = self.base;
-            for m in self.operation_modifiers(Operation::AddValue) {
-                base += m.amount();
-            }
-            let mut value = base;
-            for m in self.operation_modifiers(Operation::AddMultipliedBase) {
-                value += base * m.amount();
-            }
-            for m in self.operation_modifiers(Operation::AddMultipliedTotal) {
-                value *= 1.0 + m.amount();
-            }
-            self.cached = self.definition.sanitize(value);
+            self.cached = self.current_value();
             self.dirty = false;
         }
         self.cached
