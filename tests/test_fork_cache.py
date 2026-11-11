@@ -43,3 +43,28 @@ class ResourceCacheTests(unittest.TestCase):
             self.assertTrue(unrelated.exists())
             self.assertTrue(external.exists())
             self.assertTrue((root/'registry-v1.bin').exists())
+
+    def test_launcher_limits_preserve_references_and_compiler_cache(self):
+        import sys
+        import json
+        tools = str(Path(__file__).resolve().parents[1]/'tools')
+        with tempfile.TemporaryDirectory() as temp, patch.object(sys, 'path', [tools]+sys.path):
+            home = Path(temp)
+            native = home/'fork-native'
+            for family, width in [('source',40), ('patched',64), ('server-builds',0), ('versions',0)]:
+                parent = home/'fork-versions' if family=='versions' else native/family
+                for i in range(4):
+                    name = f'{i:0{width}x}' if width else f'native-abcd-{i:04x}'
+                    p = parent/name; p.mkdir(parents=True); (p/'artifact').write_text('cache')
+                    os.utime(p, (100+i,100+i))
+            target = native/'target';target.mkdir();(target/'precious').write_text('compiled')
+            (home/'settings.json').write_text(json.dumps({'selected':'native-abcd-0000'}))
+            with patch('fork_workflow.running_paths', return_value=[]):
+                preview = cache.purge_launcher_cache(home, apply=False)
+                self.assertEqual(len(preview['families']['server-builds']['candidates']),2)
+                result = cache.purge_launcher_cache(home)
+                again = cache.purge_launcher_cache(home, apply=False)
+            self.assertEqual(len(result['removed']),7)
+            self.assertTrue(all(not v['candidates'] for v in again['families'].values()))
+            self.assertEqual(len(list((home/'fork-versions').iterdir())),3)
+            self.assertTrue((target/'precious').exists())

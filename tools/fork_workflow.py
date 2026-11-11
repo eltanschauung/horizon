@@ -207,8 +207,9 @@ def build(args):
         write(p.parent/'artifacts.json',results)
     report = {'manifest':str(p),'check_only':args.command=='preflight','targets':args.target,'artifacts':results if args.command!='preflight' else {},'logs':str(p.parent)}
     if args.command != 'preflight':
-        from fork_cache import purge_resource_cache
+        from fork_cache import purge_resource_cache, purge_launcher_cache
         report['resource_cache'] = purge_resource_cache(homes()[1])
+        report['launcher_cache'] = purge_launcher_cache(h, workflow_locked=True)
     return report
 
 
@@ -308,8 +309,10 @@ def deploy(args):
         result['server']=json.loads(text)
         shutil.rmtree(staging)
     if 'local' in targets:
-        from fork_cache import purge_resource_cache
+        from fork_cache import purge_resource_cache, purge_launcher_cache
         result['resource_cache'] = purge_resource_cache(game, apply=args.apply)
+    from fork_cache import purge_launcher_cache
+    result['launcher_cache'] = purge_launcher_cache(h, apply=args.apply, workflow_locked=True)
     write(p.parent/'deployment.json',result)
     return result
 

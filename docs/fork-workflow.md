@@ -93,3 +93,11 @@ deployments retain the three most recently used generated resource folders in
 `<HORIZON_HOME>/.horizon-cache`, counted across `mod-content` and `resourcepacks`.
 Small cache files and bundled packs stay. Cleanup defers while a Horizon client
 or engine is running. Preflight never purges; deployment previews report candidates.
+
+Successful builds and applied deployments also retain the newest two snapshots per
+launcher family: `fork-native/server-builds`, `fork-native/source` (downloaded
+revision copies), `fork-native/patched`, and managed native `fork-versions`.
+Selected/instance-referenced/running builds and the cached build's source revision
+remain protected even beyond two. Compiler activity defers launcher cleanup.
+Cargo targets, dependencies, SDKs, staging, user source checkouts and player data
+are excluded. Preview deployments report candidates without deleting them.
