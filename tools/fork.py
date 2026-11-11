@@ -236,6 +236,7 @@ def build_gensouworks():
 
 
 def main():
+    from fork_cache import cleanup_after_build
     if len(sys.argv) > 1 and sys.argv[1] in {"manifest", "build-plan", "preflight", "deploy", "prune-builds"}:
         from fork_workflow import main as workflow_main
         sys.exit(workflow_main(sys.argv[1:]))
@@ -264,6 +265,7 @@ def main():
             subprocess.run([fork_launcher(), "native-build", "--instance", "horizon", "--trust-native-code", "--allow-version-mismatch", "--profile", "release" if args.release else "performance"], cwd=ROOT, check=True)
         except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
             parser.exit(1, f"fork: {error}\n")
+        cleanup_after_build()
         return
     if args.component == "lunatic":
         if args.action != "build":
@@ -283,6 +285,7 @@ def main():
             print(f"Installed Lunatic content: {destination}. Restart Horizon to load it.", flush=True)
         except (OSError, subprocess.CalledProcessError) as error:
             parser.exit(1, f"fork: {error}\n")
+        cleanup_after_build()
         return
     try:
         env, cargo = build_environment()
@@ -290,6 +293,7 @@ def main():
         build(args.component, profile, args.jobs, env, cargo)
         if args.action == "install":
             install(args.component, profile, env)
+        cleanup_after_build()
     except (OSError, ValueError, KeyError, RuntimeError, subprocess.CalledProcessError) as error:
         parser.exit(1, f"fork: {error}\n")
 

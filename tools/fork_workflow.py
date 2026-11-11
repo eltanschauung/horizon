@@ -205,7 +205,11 @@ def build(args):
         results[target]={'directory':str(folder),'version':version,'files':{f:digest(folder/f)for f in files}}
         results['manifest_sha256']=digest(p)
         write(p.parent/'artifacts.json',results)
-    return {'manifest':str(p),'check_only':args.command=='preflight','targets':args.target,'artifacts':results if args.command!='preflight' else {},'logs':str(p.parent)}
+    report = {'manifest':str(p),'check_only':args.command=='preflight','targets':args.target,'artifacts':results if args.command!='preflight' else {},'logs':str(p.parent)}
+    if args.command != 'preflight':
+        from fork_cache import purge_resource_cache
+        report['resource_cache'] = purge_resource_cache(homes()[1])
+    return report
 
 
 def build_home(home):
@@ -303,6 +307,9 @@ def deploy(args):
         text=subprocess.check_output(ssh+[cmd],input=runner.read_bytes(),timeout=240)
         result['server']=json.loads(text)
         shutil.rmtree(staging)
+    if 'local' in targets:
+        from fork_cache import purge_resource_cache
+        result['resource_cache'] = purge_resource_cache(game, apply=args.apply)
     write(p.parent/'deployment.json',result)
     return result
 

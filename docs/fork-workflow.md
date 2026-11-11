@@ -87,3 +87,9 @@ build. It reuses Lunatic's cached content packager, building that tool only if
 missing. Source/package failures stop the workflow before the native build.
 This refreshes content JSON changes such as structure rates without requiring a
 manual package-copy step. It does not deploy to the dedicated server.
+
+Successful local builds (`build`, `install`, `build-plan`) and applied local
+deployments retain the three most recently used generated resource folders in
+`<HORIZON_HOME>/.horizon-cache`, counted across `mod-content` and `resourcepacks`.
+Small cache files and bundled packs stay. Cleanup defers while a Horizon client
+or engine is running. Preflight never purges; deployment previews report candidates.
