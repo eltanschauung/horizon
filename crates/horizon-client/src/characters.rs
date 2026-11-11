@@ -52,6 +52,7 @@ fn character_size<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f32, D::Erro
 }
 
 fn default_chest() -> f32 { 1.0 }
+fn flat_chest(value: &f32) -> bool { *value == 1.0 }
 fn character_chest<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f32, D::Error> {
     #[derive(Deserialize)]
     #[serde(untagged)]
@@ -88,6 +89,7 @@ pub struct Character {
     pub size: f32,
     pub health: f32,
     pub hunger: i32,
+    #[serde(skip_serializing_if = "flat_chest")]
     pub chest: f32,
     #[serde(default)]
     pub starting_items: Vec<StartingItem>,
