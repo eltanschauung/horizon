@@ -74,3 +74,5 @@ The bounded shared warp softens boundaries; overlapping tier gates and climate, 
 mountains can still clip individual biomes. Nether and declarations without this
 option retain the existing Java-oracle-compatible region sampler. Changes affect
 newly generated terrain; saved chunks are preserved.
+
+Bamboo features accept an optional `patch` selector (`block`, `size` 4–256 blocks, `chance` 0–1). Seeded irregular patches replace complete stalks and caps without consuming feature randomness; absent selectors preserve vanilla generation. Lunatic enables this for Bushy Bamboo.
