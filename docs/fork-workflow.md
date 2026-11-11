@@ -77,3 +77,13 @@ chatheads, classic_music, eatinganimation, justenoughitems, lunatic, minimap, no
 tectonic_horizon and zoom. JEI 1.1.0 and Classic Music 0.1.0 are client features;
 include their bundles in both deployment snapshots so clients keep the same defaults.
 Content packages include Arcadian Dream, Biomes O’ Plenty and Lunatic.
+
+## Local modded shortcut
+
+`./tools/fork.py build modded` first packages and checks the sibling
+`horizon-mods/native/gensouworks-horizon` content source, atomically installs its
+`.hmod` into the active game home, then starts the normal installed native-mod
+build. It reuses Lunatic's cached content packager, building that tool only if
+missing. Source/package failures stop the workflow before the native build.
+This refreshes content JSON changes such as structure rates without requiring a
+manual package-copy step. It does not deploy to the dedicated server.

@@ -205,6 +205,30 @@ def fork_launcher():
     raise RuntimeError("Install the fork launcher first or set HORIZON_FORK_LAUNCHER")
 
 
+
+def build_gensouworks():
+    """Refresh the local content port before the launcher reads installed packages."""
+    source = ROOT.parent / "horizon-mods/native/gensouworks-horizon"
+    if not (source / "horizon-mod.toml").is_file():
+        raise RuntimeError(f"Gensouworks source missing: {source}")
+    env, cargo = build_environment()
+    target = ROOT.parent / "Lunatic/target/tools"
+    tool = target / "debug/cargo-horizon-mod"
+    if not tool.is_file():
+        env["CARGO_TARGET_DIR"] = str(target)
+        subprocess.run([cargo, "build", "--locked", "-p", "cargo-horizon-mod", "-j", "2"],
+                       cwd=ROOT, env=env, check=True)
+    subprocess.run([str(tool), "build"], cwd=source, env=env, check=True)
+    package = source / "target/horizon-mod/gensouworks_horizon.hmod"
+    subprocess.run([str(tool), "check", str(package), "--json"],
+                   cwd=source, env=env, check=True)
+    data = Path(env.get("XDG_DATA_HOME", str(Path.home() / ".local/share")))
+    game_home = Path(env.get("HORIZON_HOME", str(data / "horizon")))
+    destination = game_home / "horizon-mods/gensouworks_horizon.hmod"
+    atomic_copy(package, destination)
+    print(f"Installed Gensouworks content: {destination}", flush=True)
+
+
 def main():
     if len(sys.argv) > 1 and sys.argv[1] in {"manifest", "build-plan", "preflight", "deploy", "prune-builds"}:
         from fork_workflow import main as workflow_main
@@ -229,6 +253,7 @@ def main():
             if branch != "main":
                 raise RuntimeError("Run build modded from main")
             subprocess.run(["git", "push", "origin", "main"], cwd=ROOT, check=True)
+            build_gensouworks()
             subprocess.run([fork_launcher(), "native-build", "--instance", "horizon", "--trust-native-code", "--allow-version-mismatch", "--profile", "release" if args.release else "performance"], cwd=ROOT, check=True)
         except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
             parser.exit(1, f"fork: {error}\n")
