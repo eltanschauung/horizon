@@ -157,7 +157,7 @@ impl Game<'_> {
         }
     }
 
-    /// The player `uuid`'s food level (0 to 20), saturation and exhaustion,
+    /// The player `uuid`'s food level (0 to the character capacity), saturation and exhaustion,
     /// as vanilla's `FoodData` holds them. None for a player not reached.
     /// API @API:player_status@.
     pub(super) fn native_player_food(&self, uuid: u128) -> Option<(i32, f32, f32)> {
@@ -178,7 +178,7 @@ impl Game<'_> {
         }
     }
 
-    /// Sets what is given of the player `uuid`'s health, food (level 0 to 20,
+    /// Sets what is given of the player `uuid`'s health, food (level 0 to the character capacity,
     /// saturation, exhaustion) and experience (level, progress 0 to 1 toward
     /// the next, total points), as Bukkit's `setHealth`, `setFoodLevel`,
     /// `setSaturation`, `setExhaustion`, `setLevel`, `setExp` and
@@ -207,13 +207,14 @@ impl Game<'_> {
         let food = food.map(|(level, saturation, exhaustion)| {
             // FoodData.addExhaustion's cap.
             (
-                level.clamp(0, 20),
+                level.clamp(0, 100),
                 saturation.max(0.0),
                 exhaustion.clamp(0.0, 40.0),
             )
         });
         self.native_player_turn(uuid, |game| {
             if let (Some((level, saturation, exhaustion)), Some(p)) = (food, game.player.as_mut()) {
+                let level=level.min(p.health.food.max_food);
                 p.health.food.food = level;
                 p.health.food.saturation = saturation;
                 p.health.food.exhaustion = exhaustion;

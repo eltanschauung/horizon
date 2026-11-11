@@ -2773,7 +2773,7 @@ mod hub_tests {
         use horizon_world::nbt::Tag;
         let (mut source, i) = exported_guest();
         let g = &mut source.guests[i];
-        g.loaded_body = Some(crate::lan::guest::SavedBody {
+        g.loaded_body = Some(crate::lan::guest::SavedBody { food_capacity:20,
             fire_ticks: 100,
             air: 40,
             fall_distance: 2.5,
@@ -2828,7 +2828,7 @@ mod hub_tests {
     fn the_body_values_follow_their_parts() {
         let record = record_with_a_body();
         let (mut hub, _seen, _mine) = held_for(&record);
-        let mine = crate::lan::guest::SavedBody {
+        let mine = crate::lan::guest::SavedBody { food_capacity:20,
             fire_ticks: -20,
             air: 300,
             fall_distance: 0.0,
@@ -2868,7 +2868,7 @@ mod hub_tests {
             ("rotation not a number", |g| g.yaw = f32::INFINITY),
             ("health past max_health's 1024", |g| g.health = 2000.0),
             ("food exhaustion past 40", |g| {
-                g.loaded_body = Some(crate::lan::guest::SavedBody {
+                g.loaded_body = Some(crate::lan::guest::SavedBody { food_capacity:20,
                     fire_ticks: -20,
                     air: 300,
                     fall_distance: 0.0,

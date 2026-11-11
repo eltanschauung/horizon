@@ -49,3 +49,18 @@ impl FoodData {
         tag.insert("foodExhaustionLevel".into(), float(self.exhaustion));
     }
 }
+
+#[cfg(test)]
+mod capacity_tests {
+    use super::*;
+    #[test]
+    fn nonstandard_capacity_roundtrips_without_refilling_hunger() {
+        let mut food=FoodData::default(); food.set_capacity(30); food.food=25;
+        let mut tag=Compound::new(); food.write_nbt(&mut tag);
+        let mut loaded=FoodData::default(); loaded.read_nbt(&tag);
+        loaded.set_capacity(30);
+        assert_eq!((loaded.food,loaded.max_food),(25,30));
+        let mut vanilla=Compound::new(); FoodData::default().write_nbt(&mut vanilla);
+        assert!(!vanilla.contains_key(&JavaString::from("horizon:foodCapacity")));
+    }
+}

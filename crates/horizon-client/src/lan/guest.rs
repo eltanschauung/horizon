@@ -37,6 +37,7 @@ pub struct SavedBody {
     /// `foodExhaustionLevel` and `foodTickTimer` (FoodData); the food level
     /// and saturation live on the guest.
     pub food_exhaustion: f32,
+    pub food_capacity: i32,
     pub food_tick_timer: i32,
     /// `TicksFrozen`: the time spent in powder snow.
     pub ticks_frozen: i32,
@@ -52,6 +53,7 @@ impl SavedBody {
             fall_distance: motion.fall_distance,
             velocity: [v.x, v.y, v.z],
             food_exhaustion: motion.health.food.exhaustion,
+            food_capacity: motion.health.food.max_food,
             food_tick_timer: motion.health.food.timer,
             ticks_frozen: motion.ticks_frozen,
         }
@@ -63,6 +65,7 @@ impl SavedBody {
         motion.fall_distance = self.fall_distance;
         let [x, y, z] = self.velocity;
         motion.velocity = Vec3::new(x, y, z);
+        motion.health.food.max_food = self.food_capacity;
         motion.health.food.exhaustion = self.food_exhaustion;
         motion.health.food.timer = self.food_tick_timer;
         motion.ticks_frozen = self.ticks_frozen;

@@ -176,7 +176,7 @@ pub fn apply(guest: &mut Guest, level: &Level) {
     };
     // Entity.load: a component of Motion over 10 blocks a tick reads as 0.
     let motion = level.motion.map(|v| if v.abs() > 10.0 { 0.0 } else { v });
-    guest.loaded_body = Some(SavedBody {
+    guest.loaded_body = Some(SavedBody { food_capacity:short("horizon:foodCapacity",20).clamp(1,100),
         fire_ticks: short("Fire", -20),
         air: short("Air", 300),
         fall_distance: level.fall_distance,
@@ -476,6 +476,8 @@ pub fn store(guest: &Guest, level: &mut Level, vehicle: Option<Tag>) {
             .get_or_insert_with(|| horizon_world::nbt::Tag::Compound(Default::default()));
         if let horizon_world::nbt::Tag::Compound(map) = extra {
             let short = |v: i32| horizon_world::nbt::Tag::Short(v.clamp(-32768, 32767) as i16);
+            if body.food_capacity != 20 { map.insert("horizon:foodCapacity".into(), horizon_world::nbt::Tag::Int(body.food_capacity)); }
+            else { map.remove(&horizon_world::nbt::JavaString::from("horizon:foodCapacity")); }
             map.insert("Fire".into(), short(body.fire_ticks));
             map.insert("Air".into(), short(body.air));
             // Entity.saveWithoutId writes TicksFrozen only above 0, so a
@@ -854,7 +856,7 @@ mod tests {
         // A player saved burning in mid-fall (#1323, #1327): Entity.saveWithoutId's
         // Fire, Air and fall_distance, read back for the next body.
         let mut g = guest();
-        g.loaded_body = Some(SavedBody {
+        g.loaded_body = Some(SavedBody { food_capacity:20,
             fire_ticks: 96,
             air: 250,
             fall_distance: 9.5,
@@ -921,7 +923,7 @@ mod tests {
         // Entity.saveWithoutId writes Motion, the delta movement, as it is;
         // Entity.load reads each component back, as 0 when it is over 10.
         let mut g = guest();
-        g.loaded_body = Some(SavedBody {
+        g.loaded_body = Some(SavedBody { food_capacity:20,
             fire_ticks: -20,
             air: 300,
             fall_distance: 0.0,
@@ -945,7 +947,7 @@ mod tests {
         // FoodData.addAdditionalSaveData writes foodExhaustionLevel (a float)
         // and foodTickTimer (an int) with the food level and saturation.
         let mut g = guest();
-        g.loaded_body = Some(SavedBody {
+        g.loaded_body = Some(SavedBody { food_capacity:30,
             fire_ticks: -20,
             air: 300,
             fall_distance: 0.0,
@@ -962,6 +964,7 @@ mod tests {
         assert_eq!(tag.get("foodTickTimer"), Some(&Tag::Int(37)));
         let body = back.loaded_body.expect("a body");
         assert_eq!((body.food_exhaustion, body.food_tick_timer), (2.75, 37));
+        assert_eq!(body.food_capacity,30);
     }
 
     #[test]
@@ -989,7 +992,7 @@ mod tests {
     fn a_saved_freeze_comes_back_and_a_thaw_clears_it() {
         // Entity.saveWithoutId writes TicksFrozen (an int) only when it is
         // above 0; Entity.load reads it with 0 for a missing key.
-        let frozen = |ticks| SavedBody {
+        let frozen = |ticks| SavedBody { food_capacity:20,
             fire_ticks: -20,
             air: 300,
             fall_distance: 0.0,
