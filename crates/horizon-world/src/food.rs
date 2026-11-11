@@ -91,7 +91,7 @@ impl FoodData {
                 self.add_exhaustion(amount);
                 self.timer = 0;
             }
-        } else if regenerate && self.food >= self.max_food - 2 && world.is_hurt(self)? {
+        } else if regenerate && self.food >= (self.max_food * 9 + 9) / 10 && world.is_hurt(self)? {
             self.timer = self.timer.wrapping_add(1);
             if self.timer >= 80 {
                 world.heal(self, 1.0)?;

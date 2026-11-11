@@ -744,7 +744,7 @@ impl HealthHud {
                     out.push(sprite(half, x, y, 9, 9));
                 }
             }
-            y_air -= 10;
+            y_air -= 10 * ((i.max_food + 19) / 20);
         }
         // Hud.extractAirBubbles.
         let max_air = i.max_air.max(1);
