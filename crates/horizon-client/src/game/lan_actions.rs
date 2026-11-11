@@ -4157,9 +4157,9 @@ impl Game<'_> {
                 continue;
             }
             // Native mods, at the start of ServerPlayer.tick: before the
-            // player's digging, item use and cooldowns. Swapping the guest in
-            // costs a player's state each tick: only when a mod can listen.
-            if !horizon_client::mod_api::mods().is_empty() {
+            // player's digging, item use and cooldowns. Core magic also needs
+            // this stage when source-native mods have no mod_api::Hooks entries.
+            if self.pack.magic_catalog.page.is_some() || !horizon_client::mod_api::mods().is_empty() {
                 self.as_guest(host, conn, |g| g.native_player_tick_pre());
             }
             let play = host.play.entry(conn).or_default();
