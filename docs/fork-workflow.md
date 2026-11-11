@@ -74,7 +74,7 @@ not prune VPS backups, GitHub releases or arbitrary folders.
 
 Keep these native mods installed/enabled when freezing a full deployment: arcadiandream,
 chatheads, classic_music, eatinganimation, justenoughitems, lunatic, minimap, no_copper,
-tectonic_horizon and zoom. JEI 1.1.0 and Classic Music 0.1.0 are client features;
+tectonic_horizon, worldedit and zoom. JEI 1.1.0 and Classic Music 0.1.0 are client features;
 include their bundles in both deployment snapshots so clients keep the same defaults.
 Content packages include Arcadian Dream, Biomes O’ Plenty and Lunatic.
 

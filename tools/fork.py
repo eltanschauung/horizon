@@ -206,6 +206,12 @@ def fork_launcher():
 
 
 
+def build_worldedit():
+    """Keep our default WorldEdit source bundle installed before native selection."""
+    source = ROOT.parent / "horizon-mods/native/worldedit/tools/build.py"
+    subprocess.run([sys.executable, str(source), "--horizon", str(ROOT), "--install"], check=True)
+
+
 def build_gensouworks():
     """Refresh the local content port before the launcher reads installed packages."""
     source = ROOT.parent / "horizon-mods/native/gensouworks-horizon"
@@ -253,6 +259,7 @@ def main():
             if branch != "main":
                 raise RuntimeError("Run build modded from main")
             subprocess.run(["git", "push", "origin", "main"], cwd=ROOT, check=True)
+            build_worldedit()
             build_gensouworks()
             subprocess.run([fork_launcher(), "native-build", "--instance", "horizon", "--trust-native-code", "--allow-version-mismatch", "--profile", "release" if args.release else "performance"], cwd=ROOT, check=True)
         except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
