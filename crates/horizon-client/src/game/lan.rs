@@ -2825,6 +2825,7 @@ impl Game<'_> {
         self.flush_far_terrain(&mut host);
         lan::flush_all(host.hub.guests.iter().map(|g| &g.sender));
         self.lan = Some(host);
+        self.magic_flush_impacts();
         self.flush_native_sounds();
         // `tick_server` resets the pass after all dimensions; outside a pass
         // the packet gate is per-tick.

@@ -2805,6 +2805,7 @@ impl Game<'_> {
     /// player. Players still tick under `/tick freeze`; a dead player
     /// doesn't. API @API:player_tick_pre@.
     pub(super) fn native_player_tick_pre(&mut self) {
+        self.magic_player_pre();
         mod_api::dispatch_player_tick_pre(self, mod_api::mods());
     }
     /// A living player's server tick ends (`ServerPlayer.tick`): once a tick
@@ -2813,6 +2814,7 @@ impl Game<'_> {
     /// Players still tick under `/tick freeze`; a dead player doesn't, nor
     /// does one killed earlier in the same tick. API 31.
     pub(super) fn native_player_tick(&mut self) {
+        self.magic_player_post();
         mod_api::dispatch_player_tick(self, mod_api::mods());
     }
     /// The player-health HUD rows, once a frame the HUD draws them
@@ -8396,11 +8398,13 @@ impl Game<'_> {
     /// player's own bytes, checked by nothing. Runs in the tick after it
     /// arrives, with no player's state swapped in. Server-side. API 40.
     pub(super) fn native_net_from_client(&mut self, player: u128, channel: &str, data: &[u8]) {
+        if channel == horizon_client::magic::CHANNEL { self.magic_from_client(player, data); return; }
         mod_api::dispatch_net_from_client(self, mod_api::mods(), player, channel, data);
     }
     /// A message from the server on `channel` (`mod_id:name`), whose `data`
     /// is the sender's own bytes. The window's game only. API 40.
     pub(super) fn native_net_from_server(&mut self, channel: &str, data: &[u8]) {
+        if channel == horizon_client::magic::CHANNEL { self.magic_from_server(data); return; }
         mod_api::dispatch_net_from_server(self, mod_api::mods(), channel, data);
     }
     /// A play packet from the server reached the window's game, decoded,
@@ -8487,6 +8491,7 @@ impl Game<'_> {
     /// before it saves, with them still listed and able to get a last message.
     /// Server-side. API 57.
     pub(super) fn native_player_logged_out(&mut self, player: u128, name: &str) {
+        self.magic_forget(player);
         self.character_logged_out(player);
         mod_api::dispatch_player_logged_out(self, mod_api::mods(), player, name);
     }
@@ -8741,6 +8746,7 @@ impl Game<'_> {
     /// every player of the world, whether death messages are shown or not.
     /// API 40.
     pub(super) fn native_player_died(&mut self, player: u128, cause: Option<&str>) {
+        self.magic_forget(player);
         mod_api::dispatch_player_died(self, mod_api::mods(), player, cause);
     }
     /// A new mob of `kind` joined `dimension` at `pos`: `natural` when the

@@ -78,6 +78,8 @@ pub struct Character {
     #[serde(default)]
     pub starting_items: Vec<StartingItem>,
     #[serde(default)]
+    pub starting_spells: Vec<String>,
+    #[serde(default)]
     pub model: Model,
     #[serde(default)]
     pub character_chat: bool,
@@ -100,6 +102,8 @@ struct CharacterDefinition {
     health: f32,
     #[serde(default)]
     starting_items: Vec<StartingItem>,
+    #[serde(default)]
+    starting_spells: Vec<String>,
     #[serde(default = "default_character_model")]
     model: Model,
     #[serde(default = "default_character_chat")]
@@ -117,7 +121,7 @@ impl From<CharacterDefinition> for Character {
             ).unwrap_or_default()
         });
         Self { id: value.id, name: value.name, texture, race: value.race,
-            size: value.size, health: value.health, starting_items: value.starting_items, model: value.model,
+            size: value.size, health: value.health, starting_items: value.starting_items, starting_spells: value.starting_spells, model: value.model,
             character_chat: value.character_chat, color: value.color }
     }
 }

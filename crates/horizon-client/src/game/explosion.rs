@@ -153,6 +153,7 @@ fn blast_direction(center: [f64; 3], origin: [f64; 3]) -> [f64; 3] {
 struct ExplosionHookContext<'a> {
     center: [f64; 3],
     blocks: &'a [[i32; 3]],
+    excluded_player: Option<u128>,
 }
 
 /// An entity in the blast's reach: how far (as a share of the blast's
@@ -395,7 +396,8 @@ impl Game<'_> {
         attacker: Option<&(u32, Text)>,
         cause: Option<&horizon_client::advancements::EntityView>,
     ) -> Option<[f64; 3]> {
-        let ExplosionHookContext { center, blocks } = *context;
+        let ExplosionHookContext { center, blocks, excluded_player } = *context;
+        if excluded_player.is_some_and(|id| id == self.native_acting_id()) { return None; }
         let diameter = f64::from(radius * 2.0);
         // Blast protection: `EXPLOSION_KNOCKBACK_RESISTANCE` (0.15 per level and
         // piece, so two Blast Protection IV pieces cancel it).
@@ -550,6 +552,7 @@ impl Game<'_> {
         damage_type: &str,
         interaction: BlockInteraction,
         blocks: &[[i32; 3]],
+        excluded_player: Option<u128>,
     ) -> Vec<(u32, [f64; 3])> {
         if radius < 1.0e-5 {
             return Vec::new();
@@ -574,7 +577,7 @@ impl Game<'_> {
         // same for all of them (`onExplosionHit(this.source)`).
         let attacker = self.blast_attacker();
         let blast_source = self.combat.explosion_cause.clone();
-        let context = ExplosionHookContext { center, blocks };
+        let context = ExplosionHookContext { center, blocks, excluded_player };
         let own = self.explosion_hurt_player(
             &context,
             radius,
@@ -881,6 +884,17 @@ impl Game<'_> {
         damage_type: &str,
         resists: Option<([i32; 3], f32)>,
     ) -> Result<()> {
+        self.server_explode_inner(center, radius, interaction, fire, damage_type, resists, None)
+    }
+    pub(super) fn server_explode_excluding(
+        &mut self, center: [f64; 3], radius: f32, interaction: BlockInteraction, player: u128,
+    ) -> Result<()> {
+        self.server_explode_inner(center, radius, interaction, false, "minecraft:player_explosion", None, Some(player))
+    }
+    fn server_explode_inner(
+        &mut self, center: [f64; 3], radius: f32, interaction: BlockInteraction,
+        fire: bool, damage_type: &str, resists: Option<([i32; 3], f32)>, excluded_player: Option<u128>,
+    ) -> Result<()> {
         if self.serving.is_some() || self.options.dedicated.is_some() {
             self.native_explosion_prime(center, radius);
         }
@@ -900,7 +914,7 @@ impl Game<'_> {
         let dimension = self.dim.id();
         self.native_explosion_detonate(dimension, center, &mut targets);
         let pushed =
-            self.explosion_hurt_entities(center, radius, damage_type, interaction, &targets);
+            self.explosion_hurt_entities(center, radius, damage_type, interaction, &targets, excluded_player);
         if interaction != BlockInteraction::Keep {
             // Util.shuffle(list, level.random)
             for i in (2..=targets.len()).rev() {

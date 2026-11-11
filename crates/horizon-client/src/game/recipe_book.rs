@@ -142,6 +142,7 @@ impl Game<'_> {
     /// How far the open book pushes the menu to the right
     /// (`RecipeBookComponent.updateScreenPosition`).
     pub(super) fn recipe_book_shift(&self, width: f32) -> f32 {
+        if self.magic_available() { return 0.0; }
         match self.active_book() {
             Some(book) if self.book_open(book) && width >= NARROW => 77.0,
             _ => 0.0,
@@ -151,15 +152,18 @@ impl Game<'_> {
     /// visible in a window narrower than `NARROW`: the book covers the menu,
     /// so no slot is hovered or clicked.
     pub(super) fn book_covers_menu(&self, width: f32) -> bool {
+        if self.magic_available() { return false; }
         width < NARROW && self.active_book().is_some_and(|b| self.book_open(b))
     }
     /// Whether typed keys go to the search box.
     pub(super) fn recipe_search_focused(&self) -> bool {
+        if self.magic_available() { return false; }
         self.active_book().is_some_and(|b| self.book_open(b))
             && self.recipe_ui.search.as_ref().is_some_and(|s| s.focused)
     }
     /// `keyChat` focuses the search box.
     pub(super) fn recipe_focus_search(&mut self) {
+        if self.magic_available() { return; }
         if self.active_book().is_some_and(|b| self.book_open(b))
             && let Some(s) = self.recipe_ui.search.as_mut()
         {
@@ -620,6 +624,15 @@ impl Game<'_> {
         let Some(batch) = self.batch_for_size() else {
             return false;
         };
+        if self.magic_available() {
+            let (ox, _) = self.inventory_origin(&batch);
+            let (bx, by) = self.book_button_pos(book_type, ox, &batch);
+            if inside(self.cursor, bx, by, 20.0, 18.0) {
+                if !right { self.magic_button_press(); }
+                return true;
+            }
+            return false;
+        }
         self.ensure_book();
         let cursor = self.cursor;
         let (ox, _) = self.inventory_origin(&batch);
@@ -770,6 +783,7 @@ impl Game<'_> {
     /// the recipe clicked last again, key repeats included, as many as fit
     /// with Shift. The focused search box takes the key first.
     pub(super) fn recipe_book_key(&mut self, key: winit::keyboard::KeyCode) -> bool {
+        if self.magic_available() { return false; }
         use winit::keyboard::KeyCode;
         if !matches!(key, KeyCode::Enter | KeyCode::NumpadEnter | KeyCode::Space) {
             return false;
@@ -1331,6 +1345,12 @@ impl Game<'_> {
 
     /// The book button, ghost recipe and the open book.
     pub(super) fn draw_recipe_book(&mut self, batch: &mut HudBatch) {
+        if self.magic_available() {
+            let (ox, _) = self.inventory_origin(batch);
+            let (bx, by) = self.book_button_pos(BookType::Crafting, ox, batch);
+            self.draw_magic_button(batch, bx, by);
+            return;
+        }
         let Some(book_type) = self.active_book() else {
             return;
         };

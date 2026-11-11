@@ -1407,6 +1407,8 @@ impl Game<'_> {
                     .and_then(|h| p.attributes.instance(&h).ok())
                     .map(|i| i.cached_value()),
                 "food": p.health.food.food,
+                "scale": p.scale,
+                "dimensions": [p.dimensions.width, p.dimensions.height, p.dimensions.eye_height],
             })
         });
         let target = self.pick().map(|hit| {
@@ -1550,6 +1552,7 @@ impl Game<'_> {
         status["destroying"] = json!(destroying);
         status["physical_keys"] = json!(physical_keys);
         status["heard"] = json!(self.audio.heard);
+        status["magic"] = self.magic_control_state();
         status["stopped_sounds"] = json!(self.audio.stopped);
         // Boats, minecarts, armor stands, item frames and paintings.
         status["objects"] = json!(self.objects_status());

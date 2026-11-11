@@ -185,5 +185,6 @@ pub use horizon_items::items;
 pub use horizon_items::random_sequences;
 
 pub mod characters;
+pub mod magic;
 
 pub mod worldgen_mods;
