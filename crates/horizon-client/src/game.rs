@@ -6018,7 +6018,7 @@ impl Game<'_> {
                         self.award_custom_stat("eat_cake_slice", 1);
                         if let Some(p) = self.player.as_mut() {
                             let food = &mut p.health.food;
-                            food.food = (food.food + 2).min(20);
+                            food.food = (food.food + 2).min(food.max_food);
                             food.saturation = (food.saturation + 0.4).min(food.food as f32);
                         }
                     }
@@ -7542,7 +7542,7 @@ impl Game<'_> {
                 || self
                     .player
                     .as_ref()
-                    .is_some_and(|p| p.health.food.food < 20),
+                    .is_some_and(|p| p.health.food.needs_food()),
             game_master: self.can_use_game_master_blocks(),
         }
     }
@@ -8685,7 +8685,7 @@ impl Game<'_> {
                 // Hud.extractAirBubbles: `isEyeInFluidMatching`, so the eyes are below
                 // the surface, not merely in the water block.
                 let under_water = p.is_eye_in_fluid(horizon_client::motion::WATER);
-                let inputs = hud_layout::HealthInputs {
+                let inputs = hud_layout::HealthInputs { max_food:p.health.food.max_food,
                     tick: visual_ticks as i32,
                     millis: visual_millis,
                     health: p.health.health(),
@@ -9066,6 +9066,7 @@ impl Game<'_> {
     }
 
     fn slot_at(&self, batch: &HudBatch, x: f32, y: f32) -> Option<usize> {
+        if self.magic_page_open() { return None; }
         if self.book_covers_menu(batch.width) {
             return None;
         }

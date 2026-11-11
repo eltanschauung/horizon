@@ -28,6 +28,8 @@ pub enum Kind {
 pub struct Spell {
     pub id: String,
     pub name: String,
+    #[serde(default)]
+    pub description: String,
     pub icon: String,
     pub color: u32,
     pub kind: Kind,
@@ -81,6 +83,7 @@ impl Spell {
             && identifier(&self.icon)
             && self.name.len() <= 80
             && !self.name.is_empty()
+            && self.description.len() <= 2048
             && (0..=20).contains(&self.hunger)
             && self.scale.is_finite()
             && (0.125..=8.0).contains(&self.scale)
@@ -242,9 +245,76 @@ impl Request {
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Update {
+    #[serde(default)]
+    pub swap_revision: Option<u64>,
     pub ledger: Ledger,
     pub started: bool,
     pub error: Option<String>,
+}
+
+/// Client-side prediction over a server-owned ledger. Only one swap is sent at
+/// once; further drags display immediately and replay after each acknowledgement.
+#[derive(Default)]
+pub struct Prediction {
+    pub ledger: Ledger,
+    confirmed: Ledger,
+    pending: std::collections::VecDeque<Swap>,
+}
+#[derive(Clone)]
+struct Swap {
+    from: usize,
+    to: usize,
+    revision: u64,
+}
+impl Swap {
+    fn request(&self) -> Request {
+        Request::Swap {
+            from: self.from,
+            to: self.to,
+            revision: self.revision,
+        }
+    }
+}
+impl Prediction {
+    pub fn pending(&self) -> bool {
+        !self.pending.is_empty()
+    }
+    pub fn swap(&mut self, from: usize, to: usize) -> Option<Request> {
+        if self.pending.len() >= 64 {
+            return None;
+        }
+        let revision = self.ledger.revision;
+        if !self.ledger.swap(from, to, revision) {
+            return None;
+        }
+        self.pending.push_back(Swap { from, to, revision });
+        (self.pending.len() == 1).then(|| self.pending.front().unwrap().request())
+    }
+    pub fn reset(&mut self) {
+        self.pending.clear();
+        self.ledger = self.confirmed.clone();
+    }
+    pub fn receive(&mut self, update: &Update) -> Option<Request> {
+        if let Some(front) = self.pending.front() {
+            // Unrelated/stale replies must never overwrite predicted positions.
+            if update.swap_revision != Some(front.revision) {
+                return None;
+            }
+            let accepted =
+                update.error.is_none() && update.ledger.revision == front.revision.wrapping_add(1);
+            self.pending.pop_front();
+            if !accepted {
+                self.pending.clear();
+            }
+        }
+        self.confirmed = update.ledger.clone();
+        self.ledger = self.confirmed.clone();
+        self.pending.retain_mut(|swap| {
+            swap.revision = self.ledger.revision;
+            self.ledger.swap(swap.from, swap.to, swap.revision)
+        });
+        self.pending.front().map(Swap::request)
+    }
 }
 
 #[cfg(test)]
@@ -253,6 +323,80 @@ mod tests {
     fn spell() -> Spell {
         serde_json::from_value(serde_json::json!({"id":"test:giant","name":"Giant","icon":"test:gui/giant","color":0,"kind":"giant","hunger":6,"scale":8.,"transition_ticks":80,"duration_ticks":400,"ending_ticks":80,"effects":["test:growing","test:giant","test:shrinking"]})).unwrap()
     }
+    #[test]
+    fn prediction_keeps_chained_moves_visible_until_acknowledged() {
+        let mut p = Prediction::default();
+        let mut l = Ledger::default();
+        l.slots[0] = Some("test:giant".into());
+        p.receive(&Update {
+            ledger: l.clone(),
+            started: false,
+            error: None,
+            swap_revision: None,
+        });
+        assert!(p.swap(0, 8).is_some());
+        assert!(p.ledger.slots[0].is_none());
+        assert!(p.swap(8, 35).is_none());
+        assert!(p.ledger.slots[8].is_none());
+        assert_eq!(p.ledger.slots[35].as_deref(), Some("test:giant"));
+        l.swap(0, 8, 0);
+        let next = p.receive(&Update {
+            ledger: l.clone(),
+            started: false,
+            error: None,
+            swap_revision: Some(0),
+        });
+        assert!(matches!(
+            next,
+            Some(Request::Swap {
+                from: 8,
+                to: 35,
+                revision: 1
+            })
+        ));
+        assert_eq!(p.ledger.slots[35].as_deref(), Some("test:giant"));
+        // A duplicate acknowledgement cannot flash the icon back to slot 8.
+        p.receive(&Update {
+            ledger: l.clone(),
+            started: false,
+            error: None,
+            swap_revision: Some(0),
+        });
+        assert_eq!(p.ledger.slots[35].as_deref(), Some("test:giant"));
+        l.swap(8, 35, 1);
+        p.receive(&Update {
+            ledger: l.clone(),
+            started: false,
+            error: None,
+            swap_revision: Some(1),
+        });
+        assert!(!p.pending());
+        assert_eq!(p.ledger, l);
+    }
+    #[test]
+    fn rejected_prediction_restores_authoritative_slots() {
+        let mut p = Prediction::default();
+        let mut l = Ledger::default();
+        l.slots[0] = Some("test:giant".into());
+        p.receive(&Update {
+            ledger: l.clone(),
+            started: false,
+            error: None,
+            swap_revision: None,
+        });
+        p.swap(0, 8);
+        p.swap(8, 35);
+        p.receive(&Update {
+            ledger: l.clone(),
+            started: false,
+            error: Some("rejected".into()),
+            swap_revision: Some(0),
+        });
+        assert!(!p.pending());
+        assert_eq!(p.ledger, l);
+        assert!(p.ledger.valid());
+    }
+
     #[test]
     fn sizes_and_stage_boundaries() {
         let s = spell();
@@ -265,11 +409,11 @@ mod tests {
         assert_eq!(s.scale_at(520), 4.5);
         assert_eq!(s.scale_at(560), 1.);
         let mut tiny = s;
-        tiny.scale = 0.125;
+        tiny.scale = 0.2;
         tiny.transition_ticks = 60;
         tiny.duration_ticks = 600;
         tiny.ending_ticks = 60;
-        assert_eq!(tiny.scale_at(60), 0.125);
+        assert_eq!(tiny.scale_at(60), 0.2);
         assert_eq!(tiny.phase(660), Phase::Returning);
         assert_eq!(tiny.scale_at(720), 1.);
     }

@@ -396,8 +396,14 @@ impl Game<'_> {
         attacker: Option<&(u32, Text)>,
         cause: Option<&horizon_client::advancements::EntityView>,
     ) -> Option<[f64; 3]> {
-        let ExplosionHookContext { center, blocks, excluded_player } = *context;
-        if excluded_player.is_some_and(|id| id == self.native_acting_id()) { return None; }
+        let ExplosionHookContext {
+            center,
+            blocks,
+            excluded_player,
+        } = *context;
+        if excluded_player.is_some_and(|id| id == self.native_acting_id()) {
+            return None;
+        }
         let diameter = f64::from(radius * 2.0);
         // Blast protection: `EXPLOSION_KNOCKBACK_RESISTANCE` (0.15 per level and
         // piece, so two Blast Protection IV pieces cancel it).
@@ -577,7 +583,11 @@ impl Game<'_> {
         // same for all of them (`onExplosionHit(this.source)`).
         let attacker = self.blast_attacker();
         let blast_source = self.combat.explosion_cause.clone();
-        let context = ExplosionHookContext { center, blocks, excluded_player };
+        let context = ExplosionHookContext {
+            center,
+            blocks,
+            excluded_player,
+        };
         let own = self.explosion_hurt_player(
             &context,
             radius,
@@ -884,16 +894,42 @@ impl Game<'_> {
         damage_type: &str,
         resists: Option<([i32; 3], f32)>,
     ) -> Result<()> {
-        self.server_explode_inner(center, radius, interaction, fire, damage_type, resists, None)
+        self.server_explode_inner(
+            center,
+            radius,
+            interaction,
+            fire,
+            damage_type,
+            resists,
+            None,
+        )
     }
     pub(super) fn server_explode_excluding(
-        &mut self, center: [f64; 3], radius: f32, interaction: BlockInteraction, player: u128,
+        &mut self,
+        center: [f64; 3],
+        radius: f32,
+        interaction: BlockInteraction,
+        player: u128,
     ) -> Result<()> {
-        self.server_explode_inner(center, radius, interaction, false, "minecraft:player_explosion", None, Some(player))
+        self.server_explode_inner(
+            center,
+            radius,
+            interaction,
+            false,
+            "minecraft:player_explosion",
+            None,
+            Some(player),
+        )
     }
     fn server_explode_inner(
-        &mut self, center: [f64; 3], radius: f32, interaction: BlockInteraction,
-        fire: bool, damage_type: &str, resists: Option<([i32; 3], f32)>, excluded_player: Option<u128>,
+        &mut self,
+        center: [f64; 3],
+        radius: f32,
+        interaction: BlockInteraction,
+        fire: bool,
+        damage_type: &str,
+        resists: Option<([i32; 3], f32)>,
+        excluded_player: Option<u128>,
     ) -> Result<()> {
         if self.serving.is_some() || self.options.dedicated.is_some() {
             self.native_explosion_prime(center, radius);
@@ -913,8 +949,14 @@ impl Game<'_> {
         let mut targets = self.exploded_positions(center, radius, resists);
         let dimension = self.dim.id();
         self.native_explosion_detonate(dimension, center, &mut targets);
-        let pushed =
-            self.explosion_hurt_entities(center, radius, damage_type, interaction, &targets, excluded_player);
+        let pushed = self.explosion_hurt_entities(
+            center,
+            radius,
+            damage_type,
+            interaction,
+            &targets,
+            excluded_player,
+        );
         if interaction != BlockInteraction::Keep {
             // Util.shuffle(list, level.random)
             for i in (2..=targets.len()).rev() {
@@ -965,6 +1007,54 @@ impl Game<'_> {
             });
         self.lan_explode(center, small, radius, block_count, pushed);
         Ok(())
+    }
+    /// Clear an expanding entity's occupied cells through normal explosion block
+    /// hooks/drops, before collision dimensions grow. Never removes resistant
+    /// blocks or fluids; damage and audiovisual bursts are queued separately.
+    pub(super) fn explosion_clearance(
+        &mut self,
+        min: [f64; 3],
+        max: [f64; 3],
+        radius: f32,
+    ) -> Result<usize> {
+        if min.into_iter().chain(max).any(|v| !v.is_finite()) {
+            return Ok(0);
+        }
+        let lo = min.map(|v| v.floor() as i32);
+        let hi = max.map(|v| (v - 1.0e-6).floor() as i32);
+        if (0..3).any(|i| hi[i] < lo[i] || hi[i] - lo[i] > 32) {
+            return Ok(0);
+        }
+        let mut targets = Vec::new();
+        for x in lo[0]..=hi[0] {
+            for y in lo[1]..=hi[1] {
+                for z in lo[2]..=hi[2] {
+                    let state = self.world.block(x, y, z);
+                    let facts = self.res.facts().get(state);
+                    if !self.res.facts().is_air(state)
+                        && facts.fluid == Fluid::None
+                        && facts.explosion_resistance < 1200.0
+                    {
+                        targets.push([x, y, z]);
+                    }
+                }
+            }
+        }
+        if targets.is_empty() {
+            return Ok(0);
+        }
+        let center = std::array::from_fn(|i| (min[i] + max[i]) * 0.5);
+        self.native_explosion_detonate(self.dim.id(), center, &mut targets);
+        let count = targets.len();
+        let mut stacks = Vec::new();
+        let interaction = self.destroy_type("tnt_explosion_drop_decay");
+        for pos in targets {
+            self.explosion_hit_block(pos, radius, interaction, &mut stacks)?;
+        }
+        for (pos, stack) in stacks {
+            self.pop_resource(pos, stack);
+        }
+        Ok(count)
     }
     /// `BlockBehaviour.onExplosionHit` (TNT: `wasExploded` primes a short fuse).
     fn explosion_hit_block(

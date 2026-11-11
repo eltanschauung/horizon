@@ -101,6 +101,11 @@ fn in_attack_range(distance: f64, (min, max, margin): (f32, f32, f32), buffer: f
 }
 
 impl Game<'_> {
+    fn attack_reach_with_effects(&self, range: &serde_json::Value) -> (f32, f32, f32) {
+        let (min, max, margin) = attack_reach(range, self.creative);
+        (min, max + self.magic_reach_bonus(), margin)
+    }
+
     /// `getAttributeValue` of an interaction range of the player in place (a
     /// guest swapped in on a server): creative's modifiers are on it
     /// (`update_player_attributes`), as are `/attribute`'s and the items'.
@@ -135,7 +140,7 @@ impl Game<'_> {
                 .cloned()
         });
         let reach = match &range {
-            Some(r) => attack_reach(r, self.creative),
+            Some(r) => self.attack_reach_with_effects(r),
             None => {
                 let range = self.interaction_range("minecraft:entity_interaction_range", 3.0, 5.0);
                 (0.0, range as f32, 0.0)
@@ -291,7 +296,7 @@ impl Game<'_> {
     ) -> Option<Option<(usize, f64, [f64; 3])>> {
         let eye = v3(self.eye_position()?);
         let look = v3(super::view_vector(self.yaw, self.pitch));
-        let reach = attack_reach(range, self.creative);
+        let reach = self.attack_reach_with_effects(range);
         let camera = self.remote_camera_id();
         let boxes: Vec<(usize, Aabb)> = (self.mobs.iter().enumerate())
             .filter(|(_, m)| !m.removed && Some(m.id) != self.riding && Some(m.id) != camera)
@@ -593,7 +598,7 @@ impl Game<'_> {
         let spear = range.as_ref().and_then(|r| {
             let eye = self.eye_position()?;
             let look = super::view_vector(self.yaw, self.pitch);
-            let reach = attack_reach(r, self.creative);
+            let reach = self.attack_reach_with_effects(r);
             let boxes = self.hittable_mob_boxes();
             let clip = |from: Vec3, to: Vec3| {
                 let length = from.distance_squared(to).sqrt();

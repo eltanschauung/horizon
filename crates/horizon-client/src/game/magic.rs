@@ -21,7 +21,7 @@ pub(super) struct State {
 #[derive(Default)]
 pub(super) struct Ui {
     pub open: bool,
-    ledger: Ledger,
+    inventory: magic::Prediction,
     ready: bool,
     page: usize,
     drag: Option<(usize, (f32, f32))>,
@@ -42,6 +42,7 @@ struct Cast {
     airborne_ticks: u32,
     highest: f64,
     last_impact: u32,
+    last_growth_blast: Option<u32>,
 }
 struct Impact {
     owner: u128,
@@ -86,8 +87,25 @@ impl Game<'_> {
         });
         serde_json::json!({"enabled": self.pack.magic_catalog.page.is_some(),
             "open": self.magic_page_open(), "ready": self.magic.ui.ready,
-            "slots": self.magic.ui.ledger.slots, "revision": self.magic.ui.ledger.revision,
+            "slots": self.magic.ui.inventory.ledger.slots, "revision": self.magic.ui.inventory.ledger.revision,
             "error": self.magic.ui.error, "geometry": geometry})
+    }
+    /// The temporary Giant reach modifier, also applied to items whose explicit
+    /// attack_range component would otherwise bypass entity_interaction_range.
+    pub(super) fn magic_reach_bonus(&self) -> f32 {
+        let Some(player) = self.player.as_ref() else {
+            return 0.0;
+        };
+        let key = player.attributes.key("minecraft:entity_interaction_range");
+        key.as_ref()
+            .and_then(|key| player.attributes.lookup(Some(key)))
+            .and_then(|handle| player.attributes.instance(&handle).ok())
+            .and_then(|instance| {
+                instance
+                    .modifier("horizon:magic_reach")
+                    .map(|m| m.amount() as f32)
+            })
+            .unwrap_or(0.0)
     }
     pub(super) fn magic_available(&self) -> bool {
         self.pack.magic_catalog.page.is_some()
@@ -133,7 +151,10 @@ impl Game<'_> {
         }
     }
     fn magic_receive(&mut self, update: Update) {
-        self.magic.ui.ledger = update.ledger;
+        let next = self.magic.ui.inventory.receive(&update);
+        if let Some(request) = next {
+            self.magic_request(request);
+        }
         self.magic.ui.ready = true;
         self.magic.ui.error = update.error;
         if update.started {
@@ -149,6 +170,7 @@ impl Game<'_> {
                     .native_net_send_to_server(magic::CHANNEL, &bytes)
                     .is_err()
             {
+                self.magic.ui.inventory.reset();
                 self.magic.ui.error = Some("This server does not support magic.".into());
             }
         } else {
@@ -159,8 +181,16 @@ impl Game<'_> {
             }
         }
     }
-    fn magic_update(&mut self, player: u128, actor: &Actor, started: bool, error: Option<String>) {
+    fn magic_update(
+        &mut self,
+        player: u128,
+        actor: &Actor,
+        started: bool,
+        error: Option<String>,
+        swap_revision: Option<u64>,
+    ) {
         let update = Update {
+            swap_revision,
             ledger: actor.ledger.clone(),
             started,
             error,
@@ -221,6 +251,10 @@ impl Game<'_> {
         }
         let requests = self.magic.requests.remove(&player).unwrap_or_default();
         for request in requests {
+            let swap_revision = match &request {
+                Request::Swap { revision, .. } => Some(*revision),
+                _ => None,
+            };
             let mut started = false;
             let mut error = None;
             if !actor.writable {
@@ -267,6 +301,7 @@ impl Game<'_> {
                                     airborne_ticks: 0,
                                     highest: body.position.y,
                                     last_impact: 0,
+                                    last_growth_blast: None,
                                 });
                                 self.swing_arm();
                                 started = true;
@@ -275,7 +310,7 @@ impl Game<'_> {
                     }
                 }
             }
-            self.magic_update(player, &actor, started, error);
+            self.magic_update(player, &actor, started, error, swap_revision);
         }
         if let Some(mut cast) = actor.active.take() {
             if self.magic_tick_cast(&mut cast) {
@@ -363,6 +398,8 @@ impl Game<'_> {
     fn magic_reset_body(&mut self) {
         for (attribute, key) in [
             ("minecraft:scale", "horizon:magic_scale"),
+            ("minecraft:entity_interaction_range", "horizon:magic_reach"),
+            ("minecraft:block_interaction_range", "horizon:magic_reach"),
             ("minecraft:movement_speed", "horizon:magic_casting"),
             ("minecraft:movement_speed", "horizon:magic_speed"),
             ("minecraft:attack_damage", "horizon:magic_strength"),
@@ -443,7 +480,32 @@ impl Game<'_> {
             self.magic_motes(cast, true);
         }
         let scale = cast.spell.scale_at(cast.age);
-        if (scale - cast.scale).abs() > 1.0e-8 {
+        let scale_changed = (scale - cast.scale).abs() > 1.0e-8;
+        if scale_changed {
+            if cast.spell.kind == Kind::Giant && phase == Phase::Changing {
+                if let Some(p) = self.player.as_ref() {
+                    let ratio = scale / cast.scale;
+                    let half = f64::from(p.dimensions.width) * ratio / 2.0 + 0.1;
+                    let height = f64::from(p.dimensions.height) * ratio + 0.1;
+                    let at = [p.position.x, p.position.y, p.position.z];
+                    let min = [at[0] - half, at[1] + 0.01, at[2] - half];
+                    let max = [at[0] + half, at[1] + height, at[2] + half];
+                    if self.explosion_clearance(min, max, 3.0).unwrap_or(0) > 0
+                        && cast
+                            .last_growth_blast
+                            .is_none_or(|age| cast.age >= age + 10)
+                    {
+                        let owner = self.native_acting_id();
+                        self.magic.impacts.push(Impact {
+                            owner,
+                            conn: self.lan_acting,
+                            dimension: self.dim,
+                            at: [at[0], at[1] + height * 0.5, at[2]],
+                        });
+                        cast.last_growth_blast = Some(cast.age);
+                    }
+                }
+            }
             self.magic_modifier(
                 "minecraft:scale",
                 "horizon:magic_scale",
@@ -454,6 +516,18 @@ impl Game<'_> {
                 let _ = p.refresh_dimensions();
             }
             cast.scale = scale;
+            if cast.spell.kind == Kind::Giant {
+                let bonus = self.player.as_ref().map_or(0.0, |p| {
+                    let eye = f64::from(p.dimensions.eye_height);
+                    (eye - eye / scale).max(0.0)
+                });
+                for attr in [
+                    "minecraft:entity_interaction_range",
+                    "minecraft:block_interaction_range",
+                ] {
+                    self.magic_modifier(attr, "horizon:magic_reach", bonus, "add_value");
+                }
+            }
         }
         if phase != Phase::Active {
             if cast.age % 4 == 0 {
@@ -648,7 +722,7 @@ impl Game<'_> {
         }
         if self.magic.ui.ready
             && let Some(slot) = self.magic_slot_at(&batch)
-            && self.magic.ui.ledger.slots[slot].is_some()
+            && self.magic.ui.inventory.ledger.slots[slot].is_some()
         {
             self.magic.ui.drag = Some((slot, self.cursor));
         }
@@ -668,20 +742,21 @@ impl Game<'_> {
             return;
         };
         if from != to {
-            self.magic_request(Request::Swap {
-                from,
-                to,
-                revision: self.magic.ui.ledger.revision,
-            });
+            if let Some(request) = self.magic.ui.inventory.swap(from, to) {
+                self.magic_request(request);
+            }
         } else if (self.cursor.0 - start.0).abs() + (self.cursor.1 - start.1).abs() < 5.
-            && let Some(id) = self.magic.ui.ledger.slots[from].clone()
+            && let Some(id) = self.magic.ui.inventory.ledger.slots[from].clone()
         {
-            self.magic_request(Request::Cast { id });
+            if !self.magic.ui.inventory.pending() {
+                self.magic_request(Request::Cast { id });
+            }
         }
     }
     fn magic_pages(&self) -> usize {
         self.magic
             .ui
+            .inventory
             .ledger
             .slots
             .iter()
@@ -731,7 +806,7 @@ impl Game<'_> {
             {
                 continue;
             }
-            if let Some(id) = &self.magic.ui.ledger.slots[slot]
+            if let Some(id) = &self.magic.ui.inventory.ledger.slots[slot]
                 && let Some(spell) = self.pack.magic_catalog.spells.get(id)
                 && let Some(rect) = atlas.sprites.get(&spell.icon).copied()
             {
@@ -755,7 +830,7 @@ impl Game<'_> {
         }
         self.draw_recipe_book(batch);
         if let Some((slot, _)) = &self.magic.ui.drag {
-            if let Some(spell) = self.magic.ui.ledger.slots[*slot]
+            if let Some(spell) = self.magic.ui.inventory.ledger.slots[*slot]
                 .as_ref()
                 .and_then(|id| self.pack.magic_catalog.spells.get(id))
                 && let Some(rect) = self.gui.atlas.sprites.get(&spell.icon).copied()
@@ -770,22 +845,41 @@ impl Game<'_> {
                 );
             }
         } else if let Some(spell) = hovered
-            .and_then(|slot| self.magic.ui.ledger.slots[slot].as_ref())
+            .and_then(|slot| self.magic.ui.inventory.ledger.slots[slot].as_ref())
             .and_then(|id| self.pack.magic_catalog.spells.get(id))
         {
-            let lines = vec![
-                (spell.name.clone(), rgb(spell.color)),
+            let atlas = &self.gui.atlas;
+            let cost = format!("Cost: {}", spell.hunger);
+            let cost_width = atlas.font.width(&cost);
+            let mut lines = vec![
                 (
-                    format!("{} hunger points", spell.hunger),
-                    rgba(170, 170, 170, 255),
+                    horizon_client::text::Text::literal(&spell.name),
+                    rgb(spell.color),
                 ),
                 (
-                    "Click to cast; drag to rearrange".into(),
+                    horizon_client::text::Text::literal(&cost),
                     rgba(170, 170, 170, 255),
                 ),
-                ("Permanently unlocked".into(), rgba(170, 170, 170, 255)),
             ];
-            self.draw_tooltip_lines(batch, &lines, self.cursor.0, self.cursor.1);
+            let width = (batch.width - 24.0).min(250.0).max(80.0);
+            for text in atlas.font.split_formatted(
+                &horizon_client::text::Text::literal(&spell.description),
+                width,
+            ) {
+                lines.push((text, rgba(170, 170, 170, 255)));
+            }
+            let (tx, ty, tw, th) = Self::tooltip_geometry(
+                atlas,
+                &lines,
+                self.cursor,
+                (batch.width, batch.height),
+                [cost_width + 12.0, 0.0],
+            );
+            self.tooltip_box(batch, None, tx, ty, tw, th);
+            Self::tooltip_text(batch, atlas, &lines, tx, ty);
+            if let Some(icon) = atlas.sprites.get("gui/sprites/hud/food_full").copied() {
+                batch.rect_uv(tx + cost_width + 3.0, ty + 11.0, 9.0, 9.0, icon, u32::MAX);
+            }
         }
         if let Some(error) = &self.magic.ui.error {
             self.draw_tooltip_lines(
