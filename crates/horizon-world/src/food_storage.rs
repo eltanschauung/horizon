@@ -30,6 +30,7 @@ impl FoodData {
     /// Numeric values are converted without clamping the resulting food state.
     pub fn read_nbt(&mut self, tag: &Compound) {
         let get = |s: &str| tag.get(&JavaString::from(s));
+        self.max_food = int(get("horizon:foodCapacity"), 20).clamp(1,100);
         self.food = int(get("foodLevel"), 20);
         self.timer = int(get("foodTickTimer"), 0);
         self.saturation = float(get("foodSaturationLevel"), 5.0);
@@ -39,6 +40,9 @@ impl FoodData {
     /// tag factories normalize both signed zeros to the shared positive zero.
     pub fn write_nbt(&self, tag: &mut Compound) {
         let float = |v: f32| Tag::Float(if v == 0.0 { 0 } else { v.to_bits() });
+        if self.max_food != 20 {
+            tag.insert("horizon:foodCapacity".into(), Tag::Int(self.max_food));
+        } else { tag.remove(&JavaString::from("horizon:foodCapacity")); }
         tag.insert("foodLevel".into(), Tag::Int(self.food));
         tag.insert("foodTickTimer".into(), Tag::Int(self.timer));
         tag.insert("foodSaturationLevel".into(), float(self.saturation));
