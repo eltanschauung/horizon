@@ -967,7 +967,7 @@ impl Game<'_> {
             }
             EffectAction::Eat(nutrition, saturation) => {
                 let food = &mut p.health.food;
-                food.food = (food.food + nutrition).clamp(0, 20);
+                food.food = (food.food + nutrition).clamp(0, food.max_food);
                 food.saturation = (food.saturation + nutrition as f32 * saturation * 2.0)
                     .clamp(0.0, food.food as f32);
             }

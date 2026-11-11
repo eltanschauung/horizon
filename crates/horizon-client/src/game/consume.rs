@@ -59,7 +59,7 @@ impl Game<'_> {
             if let Some(p) = self.player.as_mut() {
                 // FoodData.eat(nutrition, saturation)
                 let food = &mut p.health.food;
-                food.food = (food.food + nutrition as i32).clamp(0, 20);
+                food.food = (food.food + nutrition as i32).clamp(0, food.max_food);
                 food.saturation = (food.saturation + saturation).clamp(0.0, food.food as f32);
             }
             // Mth.randomBetween(random, 0.9, 1.0)

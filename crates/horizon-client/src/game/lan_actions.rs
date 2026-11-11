@@ -767,7 +767,7 @@ impl Game<'_> {
                     p.health.food.food = from;
                     p.health.food.saturation = saturation;
                 } else if to != now {
-                    p.health.food.food = to.clamp(0, 20);
+                    p.health.food.food = to.clamp(0, p.health.food.max_food);
                     p.health.food.saturation =
                         p.health.food.saturation.min(p.health.food.food as f32);
                 }

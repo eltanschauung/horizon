@@ -9443,13 +9443,14 @@ impl Game<'_> {
         if let Some(consumable) = &info.consumable {
             self.emit_consume(consumable, &stack, 16);
         }
+        let food_capacity = self.player.as_ref().map_or(20, |p| p.health.food.max_food);
         if let Some((nutrition, saturation)) = info.food
             && let Some(r) = self.remote.as_mut()
         {
             // FoodData.eat(nutrition, saturation), as finish_consuming does;
             // the next ClientboundSetHealth replaces it.
             let (_, food, sat) = &mut r.health;
-            *food = (*food + nutrition as i32).clamp(0, 20);
+            *food = (*food + nutrition as i32).clamp(0, food_capacity);
             *sat = (*sat + saturation).clamp(0.0, *food as f32);
             self.apply_remote_health();
         }

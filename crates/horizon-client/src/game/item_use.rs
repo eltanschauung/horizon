@@ -204,7 +204,7 @@ impl Game<'_> {
             || self
                 .player
                 .as_ref()
-                .is_some_and(|p| p.health.food.food < 20);
+                .is_some_and(|p| p.health.food.needs_food());
         self.native_can_eat(stack, &mut can_eat);
         can_eat
     }
