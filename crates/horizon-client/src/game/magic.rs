@@ -53,7 +53,7 @@ impl Actor {
     fn load(extra: Option<&Tag>) -> Self {
         let (ledger, writable) = match extra {
             None => (Ledger::default(), true),
-            Some(Tag::Compound(map)) => match map.get(SAVE_KEY) {
+            Some(Tag::Compound(_)) => match extra.and_then(|tag| tag.get(SAVE_KEY)) {
                 None => (Ledger::default(), true),
                 Some(Tag::String(raw)) => match raw
                     .to_string()
