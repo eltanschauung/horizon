@@ -78,3 +78,5 @@ newly generated terrain; saved chunks are preserved.
 Bamboo features accept an optional `patch` selector (`block`, `size` 4–256 blocks, `chance` 0–1). Seeded irregular patches replace complete stalks and caps without consuming feature randomness; absent selectors preserve vanilla generation. Lunatic enables this for Bushy Bamboo.
 
 Item cooldowns support independent `/action/` groups with latest-action display priority and fallback; `/action_update/` retimes without stealing display priority. Characters support numeric/string `hunger` (default 20), derived food capacity, extra HUD rows and persisted nonstandard capacity.
+
+Character presentation supports numeric/string `chest` (default 1, clamped 1–2; wide models resolve to 1), carried to local/remote avatar models and an optional selection-preview model hook. Lunatic supplies the skin-only geometry and motion.

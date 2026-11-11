@@ -51,6 +51,14 @@ fn character_size<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f32, D::Erro
     })
 }
 
+fn default_chest() -> f32 { 1.0 }
+fn character_chest<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f32, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Chest { Number(f32), Text(String) }
+    let value = match Chest::deserialize(d)? { Chest::Number(v) => v, Chest::Text(v) => v.parse().unwrap_or(1.0) };
+    Ok(if value.is_finite() { value.clamp(1.0, 2.0) } else { 1.0 })
+}
 fn default_hunger() -> i32 { 20 }
 fn character_hunger<'de, D: serde::Deserializer<'de>>(d: D) -> Result<i32, D::Error> {
     character_health(d).map(|v| v.clamp(1.0,100.0) as i32)
@@ -80,6 +88,7 @@ pub struct Character {
     pub size: f32,
     pub health: f32,
     pub hunger: i32,
+    pub chest: f32,
     #[serde(default)]
     pub starting_items: Vec<StartingItem>,
     #[serde(default)]
@@ -107,6 +116,8 @@ struct CharacterDefinition {
     health: f32,
     #[serde(default = "default_hunger", deserialize_with = "character_hunger")]
     hunger: i32,
+    #[serde(default = "default_chest", deserialize_with = "character_chest")]
+    chest: f32,
     #[serde(default)]
     starting_items: Vec<StartingItem>,
     #[serde(default)]
@@ -128,12 +139,16 @@ impl From<CharacterDefinition> for Character {
             ).unwrap_or_default()
         });
         Self { id: value.id, name: value.name, texture, race: value.race,
-            size: value.size, health: value.health, hunger: value.hunger, starting_items: value.starting_items, starting_spells: value.starting_spells, model: value.model,
+            size: value.size, health: value.health, hunger: value.hunger, chest: if value.model == Model::Slim { value.chest } else { 1.0 }, starting_items: value.starting_items, starting_spells: value.starting_spells, model: value.model,
             character_chat: value.character_chat, color: value.color }
     }
 }
 
 impl Character {
+    /// Character renderers may replace a model while preserving its posed bones.
+    pub fn presentation_model(&self, _model: &crate::mobs::Part, _slim: bool) -> Option<crate::mobs::Part> {
+        None
+    }
     pub fn has_race(&self, race: &str) -> bool {
         !race.is_empty()
             && self
@@ -303,6 +318,20 @@ pub fn save(instance: &Path, character: &Character) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn chest_defaults_clamps_and_excludes_wide_models() {
+        let base = serde_json::json!({"id":"lunatic:test", "name":"Test"});
+        let c: Character = serde_json::from_value(base.clone()).unwrap();
+        assert_eq!(c.chest, 1.0);
+        for (value, expected) in [(serde_json::json!(1.3),1.3),(serde_json::json!("1.6"),1.6),(serde_json::json!(3),2.0),(serde_json::json!(0),1.0),(serde_json::json!("invalid"),1.0)] {
+            let mut row = base.clone(); row["chest"] = value;
+            let c: Character = serde_json::from_value(row.clone()).unwrap();
+            assert_eq!(c.chest, expected);
+            assert_eq!(serde_json::from_value::<Character>(serde_json::to_value(&c).unwrap()).unwrap().chest, expected);
+            row["model"] = serde_json::json!("wide");
+            assert_eq!(serde_json::from_value::<Character>(row).unwrap().chest, 1.0);
+        }
+    }
     #[test]
     fn health_accepts_numbers_strings_and_safe_defaults() {
         for (value, expected) in [(serde_json::json!("16"), 16.0), (serde_json::json!(16), 16.0), (serde_json::json!("invalid"), 20.0), (serde_json::json!(-1), 20.0)] {

@@ -5931,7 +5931,9 @@ impl Game<'_> {
             let kind = self.mobs[i].kind.clone();
             let skin_3d = self.skin_3d_model(&kind, &skin, is_slim);
             let cape = capes.get(&uuid).filter(|c| self.again_skin(c)).cloned();
+            let chest = self.character_for(uuid).map_or(1.0, |c| c.chest);
             let mob = &mut self.mobs[i];
+            mob.character_chest = chest;
             mob.skin = Some(skin);
             mob.slim = is_slim;
             mob.skin_3d = skin_3d;
@@ -5949,7 +5951,9 @@ impl Game<'_> {
             let skin_3d = kind
                 .as_ref()
                 .and_then(|kind| self.skin_3d_model(kind, &skin, is_slim));
+            let chest = self.character_for(own).map_or(1.0, |c| c.chest);
             if let Some(mob) = self.player_model.as_mut() {
+                mob.character_chest = chest;
                 mob.skin = Some(skin);
                 mob.slim = is_slim;
                 mob.skin_3d = skin_3d;

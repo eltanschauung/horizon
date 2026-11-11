@@ -204,6 +204,8 @@ impl Screen {
                 self.model.as_ref()
             };
             if let Some(model) = model {
+                let presentation = character.presentation_model(model, character.is_slim(atlas));
+                let model = presentation.as_ref().unwrap_or(model);
                 let bounds = [
                     left,
                     top + 12.0 + lines.len() as f32 * 10.0,

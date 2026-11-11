@@ -1554,6 +1554,8 @@ pub struct Mob {
     pub skin: Option<String>,
     /// `PlayerSkin.model` is `SLIM`: the player model with 3-pixel arms.
     pub slim: bool,
+    /// Optional character presentation, interpreted by Lunatic; 1 is unchanged.
+    pub character_chest: f32,
     /// The 3D skin layers feature's model for this player: its outer layer
     /// with every painted texel extruded (`skin_layers`, off by default).
     pub skin_3d: Option<Arc<Part>>,
@@ -3258,6 +3260,7 @@ impl Mob {
             outbox: Vec::new(),
             skin: None,
             slim: false,
+            character_chest: 1.0,
             skin_3d: None,
             cape: None,
             emote: None,
