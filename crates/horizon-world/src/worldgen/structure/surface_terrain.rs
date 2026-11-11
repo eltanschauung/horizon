@@ -389,12 +389,14 @@ pub fn settle(
             at += 1;
         }
         let mut box_ = start.pieces[first].bounding_box();
-        let mut floor = i32::MAX;
+        // The first generated piece anchors this building. A cellar must
+        // remain below that anchor rather than becoming the ground floor.
+        let Piece::Pool(anchor) = &start.pieces[first] else {
+            unreachable!()
+        };
+        let floor = anchor.bounding_box.min[1] + anchor.ground_level_delta;
         for &i in &group {
             box_.encapsulate(&start.pieces[i].bounding_box());
-            if let Piece::Pool(p) = &start.pieces[i] {
-                floor = floor.min(p.bounding_box.min[1] + p.ground_level_delta);
-            }
         }
         let mut heights = Vec::new();
         for x in [box_.min[0], (box_.min[0] + box_.max[0]) / 2, box_.max[0]] {
@@ -710,14 +712,16 @@ mod settlement_tests {
                 piece(0, 70, false),
                 piece(24, 64, false),
                 piece(10, 64, true),
+                piece(0, 58, false),
             ],
         };
         let floors = settle(&mut start, |x, _| if x < 16 { 80 } else { 72 });
-        assert_eq!(floors, vec![Some(80), Some(80), Some(72), None]);
+        assert_eq!(floors, vec![Some(80), Some(80), Some(72), None, Some(80)]);
         assert_eq!(start.pieces[0].bounding_box().min[1], 79);
         assert_eq!(start.pieces[1].bounding_box().min[1], 85);
         assert_eq!(start.pieces[2].bounding_box().min[1], 71);
         assert_eq!(start.pieces[3].bounding_box().min[1], 64);
+        assert_eq!(start.pieces[4].bounding_box().min[1], 73);
     }
     #[test]
     fn surface_terrain_preserves_exact_saved_slopes() {

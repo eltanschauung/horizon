@@ -31,7 +31,7 @@ also assert exact complete structure-start NBT equality after loading the saved
 start through `OldWorld`; the desert cases require a fitted desert pyramid.
 
 Horizon library tests: 411 passed, two existing ignored. Tectonic tests: 14 passed.
-Focused tests cover independent building settlement with preserved upper storeys,
+Focused tests cover independent building settlement with preserved upper storeys and basements,
 exact persisted floating-point slopes, cavity/fluid preservation, bounded fill,
 unchanged distant columns, fluid protection across chunk edges and continuous
 blending at foundation edges.
