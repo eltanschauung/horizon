@@ -85,10 +85,15 @@ impl Game<'_> {
             serde_json::json!({"origin": [ox, oy], "scale": batch.scale,
                 "button": [ox + 104., (batch.height / 2.).floor() - 22.]})
         });
+        let physical_hover = self.renderer.as_ref().and_then(|r| {
+            let batch = HudBatch::new([r.config.width, r.config.height]);
+            self.slot_at(&batch, self.cursor.0, self.cursor.1)
+        });
         serde_json::json!({"enabled": self.pack.magic_catalog.page.is_some(),
             "open": self.magic_page_open(), "ready": self.magic.ui.ready,
+            "pending_swaps": self.magic.ui.inventory.pending(),
             "slots": self.magic.ui.inventory.ledger.slots, "revision": self.magic.ui.inventory.ledger.revision,
-            "error": self.magic.ui.error, "geometry": geometry})
+            "error": self.magic.ui.error, "geometry": geometry, "physical_hover_slot": physical_hover})
     }
     /// The temporary Giant reach modifier, also applied to items whose explicit
     /// attack_range component would otherwise bypass entity_interaction_range.
