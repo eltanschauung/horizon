@@ -26,7 +26,7 @@ impl World<'_> {
     fn reset(&mut self) {
         for i in 0..2 {
             let v = &self.state()["foods"][i];
-            self.foods[i] = FoodData {
+            self.foods[i] = FoodData { max_food: 20,
                 food: v["food"].as_i64().unwrap() as i32,
                 exhaustion: single(&v["exhaustion"]),
                 ..FoodData::default()

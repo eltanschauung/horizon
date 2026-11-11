@@ -49,7 +49,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut out = io::BufWriter::new(fs::File::create(dir.join("rust.txt"))?);
     for line in fs::read_to_string(dir.join("inputs.txt"))?.lines() {
         let f: Value = serde_json::from_str(line)?;
-        let mut food = FoodData {
+        let mut food = FoodData { max_food: 20,
             food: -9,
             saturation: -7.,
             timer: 83,
@@ -64,7 +64,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             food.read_nbt(&t);
         } else {
-            food = FoodData {
+            food = FoodData { max_food: 20,
                 food: f["food"].as_i64().unwrap() as i32,
                 timer: f["timer"].as_i64().unwrap() as i32,
                 saturation: single(&f["saturation"]),

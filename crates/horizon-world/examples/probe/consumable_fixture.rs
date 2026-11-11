@@ -85,7 +85,7 @@ impl<R: RandomSource> World<'_, R> {
             .set(0, c["damage"].as_i64().map(|v| Component::Damage(v as i32)))
             .unwrap();
         s.components.set(1, food_component(&c)).unwrap();
-        self.food = FoodData {
+        self.food = FoodData { max_food: 20,
             food: n(&c, "food"),
             saturation: fl(&c, "saturation"),
             exhaustion: 0.0,

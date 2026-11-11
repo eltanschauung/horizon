@@ -504,7 +504,7 @@ fn run<A: FixtureAttributes>(dir: &Path, output: &str) -> Result<(), Box<dyn std
                 value: single(&f["absorption"]),
             },
         ])?;
-        let mut food = FoodData {
+        let mut food = FoodData { max_food: 20,
             exhaustion: single(&f["exhaustion"]),
             ..FoodData::default()
         };

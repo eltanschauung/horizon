@@ -375,7 +375,7 @@ pub fn main() -> Result<()> {
                     };
                 }
                 "food" => {
-                    world.player.health.food = horizon_world::food::FoodData {
+                    world.player.health.food = horizon_world::food::FoodData { max_food: 20,
                         food: op["food"].as_i64().unwrap() as i32,
                         saturation: single(&op["saturation"]),
                         exhaustion: single(&op["exhaustion"]),

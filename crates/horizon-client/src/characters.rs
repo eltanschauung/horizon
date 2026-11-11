@@ -51,6 +51,10 @@ fn character_size<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f32, D::Erro
     })
 }
 
+fn default_hunger() -> i32 { 20 }
+fn character_hunger<'de, D: serde::Deserializer<'de>>(d: D) -> Result<i32, D::Error> {
+    character_health(d).map(|v| v.clamp(1.0,100.0) as i32)
+}
 fn default_health() -> f32 { 20.0 }
 fn character_health<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f32, D::Error> {
     #[derive(Deserialize)]
@@ -75,6 +79,7 @@ pub struct Character {
     #[serde(default = "default_size", deserialize_with = "character_size")]
     pub size: f32,
     pub health: f32,
+    pub hunger: i32,
     #[serde(default)]
     pub starting_items: Vec<StartingItem>,
     #[serde(default)]
@@ -100,6 +105,8 @@ struct CharacterDefinition {
     size: f32,
     #[serde(default = "default_health", deserialize_with = "character_health")]
     health: f32,
+    #[serde(default = "default_hunger", deserialize_with = "character_hunger")]
+    hunger: i32,
     #[serde(default)]
     starting_items: Vec<StartingItem>,
     #[serde(default)]
@@ -121,7 +128,7 @@ impl From<CharacterDefinition> for Character {
             ).unwrap_or_default()
         });
         Self { id: value.id, name: value.name, texture, race: value.race,
-            size: value.size, health: value.health, starting_items: value.starting_items, starting_spells: value.starting_spells, model: value.model,
+            size: value.size, health: value.health, hunger: value.hunger, starting_items: value.starting_items, starting_spells: value.starting_spells, model: value.model,
             character_chat: value.character_chat, color: value.color }
     }
 }

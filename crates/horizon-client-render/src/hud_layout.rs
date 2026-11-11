@@ -502,6 +502,7 @@ pub struct HealthInputs {
     pub absorption: f32,
     pub armor: i32,
     pub food: i32,
+    pub max_food: i32,
     pub saturation: f32,
     pub kind: HeartKind,
     pub regeneration: bool,
@@ -729,12 +730,12 @@ impl HealthHud {
             } else {
                 ("hud/food_empty", "hud/food_half", "hud/food_full")
             };
-            for n in 0..10 {
-                let mut y = y_base;
+            for n in 0..((i.max_food+1)/2) {
+                let mut y = y_base - (n / 10) * 10;
                 if i.saturation <= 0.0 && i.tick % (i.food * 3 + 1) == 0 {
                     y += next(3) - 1;
                 }
-                let x = x_right - n * 8 - 9;
+                let x = x_right - (n % 10) * 8 - 9;
                 out.push(sprite(empty, x, y, 9, 9));
                 if n * 2 + 1 < i.food {
                     out.push(sprite(full, x, y, 9, 9));

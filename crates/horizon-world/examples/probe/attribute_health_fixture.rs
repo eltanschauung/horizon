@@ -200,7 +200,7 @@ fn run<A: TestAttributes>(dir: &Path, output: &str) -> Result<(), Box<dyn std::e
                 .unwrap(),
         ];
         let t = &f["food"];
-        let mut food = FoodData {
+        let mut food = FoodData { max_food: 20,
             food: t["food"].as_i64().unwrap() as i32,
             saturation: single(&t["saturation"]),
             exhaustion: single(&t["exhaustion"]),

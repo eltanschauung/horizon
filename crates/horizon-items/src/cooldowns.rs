@@ -75,24 +75,38 @@ pub fn group(stack: &ItemStack, default: Option<&UseCooldown>) -> Arc<str> {
 #[derive(Clone, Debug, Default)]
 pub struct Cooldowns {
     tick_count: i32,
+    serial: u64,
+    order: HashMap<Arc<str>, u64>,
     entries: HashMap<Arc<str>, (i32, i32)>,
 }
 impl Cooldowns {
     /// `getCooldownPercent`: what is left of the entry, from 1 to 0.
     pub fn percent(&self, group: &str, partial_tick: f32) -> f32 {
-        let Some((start, end)) = self.entries.get(group) else {
-            return 0.0;
-        };
+        let entry = self.entries.iter().filter(|(key, (_, end))| {
+            (key.as_ref() == group || key.strip_prefix(group).is_some_and(|suffix| suffix.starts_with("#action:")))
+                && *end as f32 > self.tick_count as f32 + partial_tick
+        }).max_by_key(|(key, _)| self.order.get(*key).copied().unwrap_or(0));
+        let Some((_, (start, end))) = entry else { return 0.0; };
         let duration = end.wrapping_sub(*start) as f32;
         let remaining = *end as f32 - (self.tick_count as f32 + partial_tick);
         (remaining / duration).clamp(0.0, 1.0)
     }
     /// `isOnCooldown`: whether the group still has time to run.
     pub fn is_on_cooldown(&self, group: &str) -> bool {
-        self.percent(group, 0.0) > 0.0
+        self.entries.get(group).is_some_and(|(_, end)| *end > self.tick_count)
     }
     /// `addCooldown`.
     pub fn add(&mut self, group: Arc<str>, ticks: i32) {
+        if let Some((base, action)) = group.split_once("#action-update:") {
+            let canonical: Arc<str> = Arc::from(format!("{base}#action:{action}"));
+            if let Some((_, end)) = self.entries.get_mut(&canonical) {
+                *end = self.tick_count.wrapping_add(ticks);
+                return;
+            }
+            return self.add(canonical, ticks);
+        }
+        self.serial = self.serial.wrapping_add(1);
+        self.order.insert(group.clone(), self.serial);
         self.entries.insert(
             group,
             (self.tick_count, self.tick_count.wrapping_add(ticks)),
@@ -109,11 +123,13 @@ impl Cooldowns {
             .map(|(group, _)| Arc::clone(group))
             .collect();
         self.entries.retain(|_, (_, end)| *end > self.tick_count);
+        for group in &done { self.order.remove(group); }
         done
     }
     /// `removeCooldown`.
     pub fn remove(&mut self, group: &str) {
         self.entries.remove(group);
+        self.order.remove(group);
     }
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
@@ -129,6 +145,25 @@ mod tests {
         ItemStack::new(item, 1)
     }
 
+    #[test]
+    fn action_display_falls_back_without_blocking_other_actions() {
+        let mut c=Cooldowns::default();
+        c.add(Arc::from("gourd"),4800);
+        for _ in 0..20 { c.tick(); }
+        c.add(Arc::from("gourd#action:primary"),80);
+        assert_eq!(c.percent("gourd",0.0),1.0);
+        for _ in 0..40 { c.tick(); }
+        assert_eq!(c.percent("gourd",0.0),0.5);
+        c.add(Arc::from("gourd"),4800);
+        c.add(Arc::from("gourd#action-update:primary"),10);
+        assert_eq!(c.percent("gourd",0.0),1.0); // Retiming cannot steal focus from a newer action.
+        for _ in 0..10 { c.tick(); }
+        assert!(c.percent("gourd",0.0)>0.99);
+        c.remove("gourd");
+        c.add(Arc::from("gourd#action:primary"),40);
+        assert!(!c.is_on_cooldown("gourd"));
+        assert!(c.is_on_cooldown("gourd#action:primary"));
+    }
     #[test]
     fn the_percent_falls_from_one_to_zero_over_the_entry() {
         let mut c = Cooldowns::default();

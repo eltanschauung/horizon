@@ -9,6 +9,7 @@ pub enum Difficulty {
 #[derive(Clone, Copy, Debug)]
 pub struct FoodData {
     pub food: i32,
+    pub max_food: i32,
     pub saturation: f32,
     pub exhaustion: f32,
     pub timer: i32,
@@ -17,6 +18,7 @@ impl Default for FoodData {
     fn default() -> Self {
         Self {
             food: 20,
+            max_food: 20,
             saturation: 5.0,
             exhaustion: 0.0,
             timer: 0,
@@ -45,11 +47,19 @@ fn clamp(v: f32, lo: f32, hi: f32) -> f32 {
     if v < lo { lo } else { min(v, hi) }
 }
 impl FoodData {
+    pub fn set_capacity(&mut self, capacity: i32) {
+        let capacity = capacity.clamp(1,100);
+        if capacity != self.max_food {
+            self.food = (self.food as i64 * capacity as i64 / self.max_food.max(1) as i64).clamp(0,capacity as i64) as i32;
+            self.max_food = capacity;
+            self.saturation = self.saturation.min(self.food as f32);
+        }
+    }
     pub fn eat(&mut self, nutrition: i32, saturation_modifier: f32) {
         self.eat_properties(nutrition, nutrition as f32 * saturation_modifier * 2.0);
     }
     pub fn eat_properties(&mut self, nutrition: i32, saturation: f32) {
-        self.food = nutrition.wrapping_add(self.food).clamp(0, 20);
+        self.food = nutrition.wrapping_add(self.food).clamp(0, self.max_food);
         self.saturation = clamp(saturation + self.saturation, 0.0, self.food as f32);
     }
     pub fn add_exhaustion(&mut self, value: f32) {
@@ -59,7 +69,7 @@ impl FoodData {
         self.food as f32 > 6.0
     }
     pub fn needs_food(&self) -> bool {
-        self.food < 20
+        self.food < self.max_food
     }
     pub fn tick<W: FoodWorld>(&mut self, world: &mut W) -> Result<(), W::Error> {
         let level = world.level(self)?;
@@ -73,7 +83,7 @@ impl FoodData {
             }
         }
         let regenerate = world.natural_regeneration(level, self)?;
-        if regenerate && self.saturation > 0.0 && world.is_hurt(self)? && self.food >= 20 {
+        if regenerate && self.saturation > 0.0 && world.is_hurt(self)? && self.food >= self.max_food {
             self.timer = self.timer.wrapping_add(1);
             if self.timer >= 10 {
                 let amount = min(self.saturation, 6.0);
@@ -81,7 +91,7 @@ impl FoodData {
                 self.add_exhaustion(amount);
                 self.timer = 0;
             }
-        } else if regenerate && self.food >= 18 && world.is_hurt(self)? {
+        } else if regenerate && self.food >= self.max_food - 2 && world.is_hurt(self)? {
             self.timer = self.timer.wrapping_add(1);
             if self.timer >= 80 {
                 world.heal(self, 1.0)?;

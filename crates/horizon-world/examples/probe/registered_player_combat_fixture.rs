@@ -448,7 +448,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                 value: single(&f["absorption"]),
             },
         ])?;
-        let mut food = FoodData {
+        let mut food = FoodData { max_food: 20,
             exhaustion: single(&f["exhaustion"]),
             ..FoodData::default()
         };

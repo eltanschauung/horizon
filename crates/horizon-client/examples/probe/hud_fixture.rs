@@ -234,7 +234,7 @@ fn decorations(c: &Value, atlas: &HudAtlas) -> Vec<GuiDraw> {
         } else {
             HeartKind::Normal
         };
-        let inputs = HealthInputs {
+        let inputs = HealthInputs { max_food:20,
             tick: int("tick", 0),
             millis,
             health: float("health", 20.0),

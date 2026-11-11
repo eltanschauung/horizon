@@ -44,7 +44,7 @@ impl<R: RandomSource> World<'_, R> {
         );
         for i in 0..2 {
             let f = &c["foods"][i];
-            self.foods[i] = FoodData {
+            self.foods[i] = FoodData { max_food: 20,
                 food: n(f, "food"),
                 saturation: fl(f, "saturation"),
                 exhaustion: fl(f, "exhaustion"),
