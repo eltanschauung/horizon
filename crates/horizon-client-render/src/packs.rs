@@ -508,6 +508,10 @@ pub fn discover(resources: &Path, packs_dir: &Path) -> Vec<Pack> {
         Ok(path) => if let Some(p) = pack("pacp".into(), Text::literal("Programmer Art Continuation Project 2.5.4"), Source::Zip(path)) { out.push(p); },
         Err(e) => log::warn!("Could not materialize bundled PACP: {e}"),
     }
+    match bundled::mushrooms_plus(packs_dir) {
+        Ok(path) => if let Some(p) = pack("mushrooms_plus".into(), Text::literal("MushroomsPlus 26.3 v1.4 by Futureazoo"), Source::Zip(path)) { out.push(p); },
+        Err(e) => log::warn!("Could not materialize bundled MushroomsPlus: {e}"),
+    }
     out.extend(folder(packs_dir, RESOURCE_FORMAT));
     out
 }
@@ -1819,9 +1823,10 @@ mod tests {
         let packs = discover(&base.join("vanilla"), &base.join("packs"));
         let pacp = packs.iter().find(|p| p.id == "pacp").expect("bundled PACP");
         assert!(pacp.icon_png().unwrap().starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert!(packs.iter().any(|p| p.id == "mushrooms_plus" && p.compatible));
         let icons: Vec<_> = packs
             .iter()
-            .filter(|p| p.id != "pacp")
+            .filter(|p| p.id != "pacp" && p.id != "mushrooms_plus")
             .map(|p| (p.id.as_str(), p.icon_png()))
             .collect();
         assert_eq!(

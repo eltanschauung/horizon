@@ -280,7 +280,7 @@ impl Default for Settings {
             show_subtitles: false,
             notification_display_time: 1.0,
             main_hand_left: false,
-            resource_packs: vec!["programmer_art".into(), "pacp".into()],
+            resource_packs: vec!["programmer_art".into(), "pacp".into(), "mushrooms_plus".into()],
             keys: KeyBinds::default(),
             file: OptionsFile::default(),
             invert_x: false,
@@ -527,7 +527,12 @@ impl Settings {
             show_subtitles: f.bool("showSubtitles"),
             notification_display_time: f.double("notificationDisplayTime") as f32,
             main_hand_left: f.name("mainHand") == "left",
-            resource_packs: f.list("resourcePacks"),
+            resource_packs: {
+                let mut packs = f.list("resourcePacks");
+                for id in &mut packs { if id == "file/MushroomsPlus_26.3_v1.4.zip" { *id = "mushrooms_plus".into(); } }
+                packs.dedup();
+                packs
+            },
             keys,
             file: f,
         }
