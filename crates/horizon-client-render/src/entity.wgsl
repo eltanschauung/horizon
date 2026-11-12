@@ -307,7 +307,7 @@ fn entity_color(in: Out, front: bool) -> vec4<f32> {
         // clouds.fsh: alpha fades out towards the cloud fog end.
         return vec4(color.rgb, color.a * (1.0 - linear_fog(in.fog_distance.x, 0.0, globals.fog_ends.y)));
     }
-    if color.a < 0.1 || (in.cull != 0u && !front) { discard; }
+    if texel.a < 0.1 || color.a <= 0.0 || (in.cull != 0u && !front) { discard; }
     // entity.fsh calculateFinalColor: the overlay (hurt red, TNT white) over the
     // lit texture, then the lightmap, then the glint and fog.
     color = vec4(mix(in.overlay_color.rgb, color.rgb, in.overlay_color.a), color.a);

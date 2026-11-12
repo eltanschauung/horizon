@@ -383,6 +383,8 @@ impl Game<'_> {
     /// player: the weapon's side of it, as `weapon_hit` does for a mob. A
     /// smash stops the fall and its Wind Burst (a `post_attack` explosion on
     /// the attacker) launches the attacker.
+    /// A successful server-authoritative PvP melee hit, before weapon wear.
+    pub(super) fn accepted_player_melee(&mut self, _id: u32) {}
     pub(super) fn weapon_hit_player(&mut self, victim_on_ground: bool) {
         let Some(stack) = self.held().cloned() else {
             return;

@@ -297,6 +297,11 @@ impl Game<'_> {
                                     .food
                                     .saturation
                                     .min(body.health.food.food as f32);
+                                if spell.kind == Kind::Effect {
+                                    self.add_player_effect(horizon_client::effects::EffectInstance::new(
+                                        &spell.effects[1], spell.duration_ticks as i32, 0));
+                                    started = true;
+                                } else {
                                 actor.active = Some(Cast {
                                     spell,
                                     age: 0,
@@ -310,6 +315,7 @@ impl Game<'_> {
                                 });
                                 self.swing_arm();
                                 started = true;
+                                }
                             }
                         }
                     }

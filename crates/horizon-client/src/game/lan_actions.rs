@@ -3436,6 +3436,7 @@ impl Game<'_> {
             {
                 let on_ground = Self::pvp_victim_on_ground(host, victim);
                 self.as_guest(host, conn, |g| {
+                    g.accepted_player_melee(id as u32);
                     g.weapon_hit_player(on_ground);
                     g.pvp_exhaustion();
                     if strike.stops_sprint() {

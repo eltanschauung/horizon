@@ -367,6 +367,7 @@ impl Game<'_> {
                         m.position.z.floor() as i32,
                     );
                     tags.push(NameTag {
+                opacity: self.player_presentation_opacity(m, camera),
                         at: p,
                         lines: vec![(text, 0.0)],
                         light: l,
@@ -417,6 +418,7 @@ impl Game<'_> {
                 m.position.z.floor() as i32,
             );
             tags.push(NameTag {
+                opacity: self.player_presentation_opacity(m, camera),
                 at,
                 lines,
                 light: l,
@@ -519,6 +521,7 @@ impl Game<'_> {
                 at.z.floor() as i32,
             );
             tags.push(NameTag {
+                opacity: 1.0,
                 at: glam::DVec3::new(at.x, at.y + height + 0.5, at.z),
                 lines,
                 light: l,
@@ -570,6 +573,7 @@ impl Game<'_> {
                 // 0.3 toward its facing and -0.25 vertically.
                 let step = frame.step();
                 tags.push(NameTag {
+                opacity: 1.0,
                     at: center
                         + glam::DVec3::new(
                             f64::from(step[0] as f32 * 0.3),
@@ -614,6 +618,8 @@ impl Game<'_> {
             !mod_api::mods().is_empty(),
             self.view_frustum.as_ref(),
         ) {
+            let first = out.len();
+            let first_see = see_through.len();
             let o = tag.at - camera;
             // `gbuffers_entities` draws name tag text (2.3); a sneaking player's faded tag, on its
             // background, blends.
@@ -632,6 +638,7 @@ impl Game<'_> {
                     tag.marks,
                     Some(&mut layouts),
                 ));
+                super::player_presentation::fade_vertices(&mut out[first..], tag.opacity);
                 continue;
             }
             // LightCoordsUtil.lightCoordsWithEmission(lightCoords, 2).
@@ -663,6 +670,8 @@ impl Game<'_> {
                 tag.marks,
                 Some(&mut layouts),
             ));
+            super::player_presentation::fade_vertices(&mut out[first..], tag.opacity);
+            super::player_presentation::fade_vertices(&mut see_through[first_see..], tag.opacity);
         }
         layouts.end_frame();
         self.name_tag_layouts = layouts;
@@ -923,6 +932,7 @@ pub(super) fn cosmetic_lift(top: f32, scale: f32) -> f64 {
 /// A name tag: where it hangs, its lines (text, lift), the packed light at
 /// the entity and whether it is discrete.
 struct NameTag {
+    opacity: f32,
     at: glam::DVec3,
     lines: Vec<(Text, f64)>,
     light: u8,

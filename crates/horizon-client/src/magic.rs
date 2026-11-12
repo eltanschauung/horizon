@@ -22,6 +22,7 @@ pub struct Page {
 pub enum Kind {
     Giant,
     Tiny,
+    Effect,
 }
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]

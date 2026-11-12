@@ -908,7 +908,7 @@ impl Game<'_> {
     pub(super) fn mob_world_base<'s>(&'s self, others: &'s [Seen]) -> MobWorld<'s> {
         let (rain, thunder) = self.weather_levels(1.0);
         let weather = self.can_have_weather();
-        let player = self.player_view();
+        let player = self.player_view().filter(|p| self.player_sensory_visible(horizon_client::lan::playerdata::ints_uuid(p.uuid)));
         MobWorld {
             world: &self.world,
             registry: self.pack.assets.registry,
@@ -1105,6 +1105,7 @@ impl Game<'_> {
         let ticking = self.entity_ticking_area();
         // With guests on, each mob sees its nearest player (game/lan_mobs.rs).
         let mut guests = self.lan_guest_views();
+        guests.retain(|(_, view)| self.player_sensory_visible(horizon_client::lan::playerdata::ints_uuid(view.uuid)));
         // What stands in a guest's slot while a mob holds that guest's view for
         // its tick (see `lent` below).
         let mut spare = guests.first().map(|g| g.1.clone());
@@ -7507,9 +7508,10 @@ impl Game<'_> {
             if culling.hides_entity() {
                 continue;
             }
+            let opacity = if is_player { self.player_presentation_opacity(mob, camera).clamp(0.0, 1.0) } else { 1.0 };
             let entity_start = out.len();
             self.mark_motion(entity_start, (1 << 32) | u64::from(mob.id));
-            self.mark_entity(entity_start, &mob.kind.id);
+            if opacity < 1.0 { self.mark_translucent_entity(entity_start, &mob.kind.id); } else { self.mark_entity(entity_start, &mob.kind.id); }
             self.rendered_mobs.set(self.rendered_mobs.get() + 1);
             // `EntityRenderer.getPackedLightCoords`: the block the mob's light
             // probe (its eye) is in, at the position this frame draws rather
@@ -7556,6 +7558,7 @@ impl Game<'_> {
                 !is_player && self.mod_mob_geometry(mob, alpha as f32, camera, packed, out)
             };
             if modded {
+                super::player_presentation::fade_vertices(&mut out[entity_start..], opacity);
                 if let Some(rgb) = outline {
                     self.mark_outline(&out[entity_start..], rgb);
                     if mob.invisible {
@@ -7675,7 +7678,7 @@ impl Game<'_> {
             {
                 let mark = self.skin_frame.borrow().mark();
                 let base = horizon_client::mobs::render::base_transform(mob, alpha as f32, camera);
-                let gpu = skinning;
+                let gpu = skinning && opacity == 1.0;
                 if let Some((lo, hi)) = self.cosmetics_geometry(
                     mob,
                     false,
@@ -7696,7 +7699,7 @@ impl Game<'_> {
             // CustomHeadLayer (a pumpkin, skull or head item) included.
             if layers {
                 // Held items join the GPU path's draws, their silhouette too.
-                let skin = (skinning && silhouette_on_gpu).then_some(&mut skinned);
+                let skin = (skinning && silhouette_on_gpu && opacity == 1.0).then_some(&mut skinned);
                 self.mob_block_geometry(mob, camera, alpha, packed, skin, out);
                 // `native_mob_layer`: a native mod's layer, over the vanilla ones.
                 self.mod_mob_layer_geometry(mob, who, alpha as f32, camera, packed, out);
@@ -7712,6 +7715,7 @@ impl Game<'_> {
                     continue;
                 }
             }
+            super::player_presentation::fade_vertices(&mut out[entity_start..], opacity);
             // Glowing outlines and a guardian's beam remain visible independently
             // of whether the body is hidden behind terrain.
             if outline.is_none() && culling.checks_vertices() && beam.is_none() {
