@@ -298,8 +298,11 @@ impl Game<'_> {
                                     .saturation
                                     .min(body.health.food.food as f32);
                                 if spell.kind == Kind::Effect {
-                                    self.add_player_effect(horizon_client::effects::EffectInstance::new(
-                                        &spell.effects[1], spell.duration_ticks as i32, 0));
+                                    if let Some(id) = super::potions::mob_effect_id(&spell.effects[1]) {
+                                        let mut effect = EffectInstance::new(id, spell.duration_ticks as i32, 0);
+                                        effect.visible = false;
+                                        self.add_player_effect(effect);
+                                    }
                                     started = true;
                                 } else {
                                 actor.active = Some(Cast {
@@ -397,6 +400,7 @@ impl Game<'_> {
             !catalog
                 .spells
                 .values()
+                .filter(|s| s.kind != Kind::Effect)
                 .any(|s| s.effects.iter().any(|id| id == effect.id))
         });
         self.apply_effect_status();
