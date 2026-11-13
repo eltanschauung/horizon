@@ -14656,6 +14656,10 @@ impl Game<'_> {
         for vertex in &mut out {
             vertex.layer &= !horizon_client::gfx::OIT_ENTITY;
         }
+        if let Some(model) = self.player_model.as_ref() {
+            let camera = glam::DVec3::new(model.position.x, model.position.y, model.position.z);
+            player_presentation::fade_vertices(&mut out, self.player_presentation_opacity(model, camera));
+        }
         (out, runs)
     }
     /// The renderer for the window, with the current block sprites, GUI
