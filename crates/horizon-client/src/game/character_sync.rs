@@ -333,3 +333,10 @@ impl Game<'_> {
         for uuid in self.character_sync.server.peers.keys().copied().collect::<Vec<_>>() {self.resolve_character_name(uuid);}
     }
 }
+
+impl Game<'_> {
+    /// Saved preferences are not proof of this connection's selected character.
+    pub(super) fn character_choice_confirmed(&self, player: u128) -> bool {
+        self.lan_acting.is_none() || self.character_sync.server.selection_confirmed(player)
+    }
+}

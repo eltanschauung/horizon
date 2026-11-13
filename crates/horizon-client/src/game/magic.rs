@@ -230,7 +230,7 @@ impl Game<'_> {
             return;
         }
         let player = self.native_acting_id();
-        if self.lan_acting.is_some() && !self.character_sync.server.selection_confirmed(player) { return; }
+        if !self.character_choice_confirmed(player) { return; }
         let mut actor = match self.magic.actors.remove(&player) {
             Some(actor) => actor,
             None => {
