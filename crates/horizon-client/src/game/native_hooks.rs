@@ -3276,13 +3276,8 @@ impl Game<'_> {
     /// their labels when it is yours. Asked again each time the page opens
     /// and after each click.
     pub(super) fn native_settings(&mut self, mod_id: &str, buttons: &mut Vec<String>) {
-        if mod_id == "biomesoplenty" {
-            match Self::native_config_dir() {
-                Ok(root) => buttons.extend(
-                    horizon_world::worldgen::placement_config_menu::buttons(&root),
-                ),
-                Err(e) => buttons.push("Cannot open configuration: ".to_owned() + &e.to_string()),
-            }
+        if let Some(labels) = super::mods::content_settings_buttons(mod_id) {
+            buttons.extend(labels);
         }
         mod_api::dispatch_settings(self, mod_api::mods(), mod_id, buttons);
     }
@@ -12204,8 +12199,8 @@ impl Game<'_> {
         let row = self.settings.mods.installed.get_mut(i);
         if let Some(page) = row.and_then(|m| m.native.as_mut()) {
             page.buttons = buttons;
-        } else if let Some(page) = self.settings.mods.pages.get_mut(&id) {
-            page.buttons = buttons;
+        } else if !buttons.is_empty() {
+            self.settings.mods.pages.insert(id, NativePage { keys: Vec::new(), buttons });
         }
     }
     /// A key event for `native_key`.
