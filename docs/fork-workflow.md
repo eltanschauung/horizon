@@ -41,8 +41,9 @@ ignoring cached mutable `main` lookups. Missing mods, wrong profiles and changed
 snapshots fail. Client builds select the instance through the existing launcher;
 server builds export an engine and build the matching supervisor with the same
 managed compiler/cache. Artifact hashes are recorded in `artifacts.json`. A repeated
-server export keeps the previous one as `server-export.previous`; inspect/remove that
-old export before replacing it again. GUI and server feature sets differ, but their
+server export keeps the previous one as `server-export.previous` during replacement.
+Successful verification removes it; a failed replacement preserves it for recovery
+and must be inspected before retrying. GUI and server feature sets differ, but their
 native-mod fingerprints must match for deployment.
 
 ## Deployment
@@ -89,15 +90,35 @@ This refreshes content JSON changes such as structure rates without requiring a
 manual package-copy step. It does not deploy to the dedicated server.
 
 Successful local builds (`build`, `install`, `build-plan`) and applied local
-deployments retain the three most recently used generated resource folders in
-`<HORIZON_HOME>/.horizon-cache`, counted across `mod-content` and `resourcepacks`.
+deployments retain the newest generated resource folder per pipeline in
+`<HORIZON_HOME>/.horizon-cache`, one each in `mod-content` and `resourcepacks`.
 Small cache files and bundled packs stay. Cleanup defers while a Horizon client
 or engine is running. Preflight never purges; deployment previews report candidates.
 
-Successful builds and applied deployments also retain the newest two snapshots per
+Successful builds and applied deployments also retain the newest snapshot per
 launcher family: `fork-native/server-builds`, `fork-native/source` (downloaded
 revision copies), `fork-native/patched`, and managed native `fork-versions`.
 Selected/instance-referenced/running builds and the cached build's source revision
-remain protected even beyond two. Compiler activity defers launcher cleanup.
+remain protected beyond the newest. Compiler activity defers launcher cleanup.
 Cargo targets, dependencies, SDKs, staging, user source checkouts and player data
 are excluded. Preview deployments report candidates without deleting them.
+
+
+Workflow cleanup also retires obsolete frozen `inputs/`, `native-input/`,
+`server-export/`, `server-export.previous/` and failed `upload/` copies under
+validated `.local/` plans in Horizon, Lunatic and horizon-mods. Complete old
+exports include duplicate prepared resources, not just executables; leaving
+those copies behind previously accumulated about 30 GiB. The newest successful
+plan for each target, the active plan and newest pending plan are protected.
+A verified replacement retires `server-export.previous`; a failed attempt keeps
+it for recovery. Logs, manifests, handoffs, package backups and test worlds stay.
+
+Successful builds and applied deployments run this policy automatically.
+`prune-builds --dry-run` previews all cleanup families; `--apply` applies them.
+Preflight and deployment previews never delete files. Cleanup shares the workflow
+lock and defers during native compilation. Source/Git worktrees, symlinks,
+running artifacts, player data, Cargo targets, dependencies and shared SDKs are
+excluded. Small builds use the same policy without recompiling any game code.
+
+Abandoned `.native-*.partial` client/server installations are also removed when
+no native compiler is active; running or data-bearing partials remain protected.
