@@ -990,24 +990,3 @@ mod tests {
         assert!(!ghoul.ai.nav.can_float, "a zombie has no FloatGoal");
     }
 }
-
-/// World-independent content settings shared by startup and in-world menus.
-pub(super) fn content_settings_buttons(id: &str) -> Option<Vec<String>> {
-    if std::env::var_os("HORIZON_TRACE_MOD_SETTINGS").is_some() { eprintln!("content settings requested: {id:?}"); }
-    if id != "biomesoplenty" { return None; }
-    Some(match Game::native_config_dir() {
-        Ok(root) => horizon_world::worldgen::placement_config_menu::buttons(&root),
-        Err(e) => vec![format!("Cannot open configuration: {e}")],
-    })
-}
-
-pub(super) fn refresh_content_settings(mods: &mut mod_list::ModList, i: usize) {
-    let Some(id) = mods.installed.get(i).map(|row| row.id.clone()) else { return; };
-    if let Some(buttons) = content_settings_buttons(&id) {
-        if let Some(page) = mods.installed.get_mut(i).and_then(|row| row.native.as_mut()) {
-            page.buttons = buttons;
-        } else {
-            mods.pages.insert(id, mod_list::NativePage { keys: Vec::new(), buttons });
-        }
-    }
-}

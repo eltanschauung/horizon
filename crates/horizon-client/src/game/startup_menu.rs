@@ -655,20 +655,9 @@ impl Loading {
                 Event::AccessibilityHelp => {
                     super::packs::open_uri(super::options::ACCESSIBILITY_HELP_LINK)
                 }
-                Event::NativeSettings(i) => {
-                    if std::env::var_os("HORIZON_TRACE_MOD_SETTINGS").is_some() { eprintln!("startup settings index: {i}"); }
-                    super::mods::refresh_content_settings(&mut self.settings.mods, i);
-                }
-                Event::NativeButton(i, button) => {
-                    if self.settings.mods.installed.get(i).is_some_and(|m| m.id == "biomesoplenty") {
-                        if let Ok(root) = Game::native_config_dir() {
-                            horizon_world::worldgen::placement_config_menu::click(&root, button);
-                        }
-                        super::mods::refresh_content_settings(&mut self.settings.mods, i);
-                    }
-                }
+                // Mods' settings pages open only in a running game.
                 // The HUD editor needs a world: its button is inactive here.
-                Event::HudEditor => {}
+                Event::NativeSettings(_) | Event::NativeButton(..) | Event::HudEditor => {}
                 // The startup menu runs before the game opens a control socket,
                 // and before its sound engine (no clicks, no volume previews,
                 // and no music tracks to list or play).
