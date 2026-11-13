@@ -2620,6 +2620,7 @@ impl OptionsUi {
             let change = button(0.0, 0.0, 150.0, message, Act::NativeKey(i, k));
             rows.push(Row::Buttons(inactive(caption), Some(change)));
         }
+        if std::env::var_os("HORIZON_TRACE_MOD_SETTINGS").is_some() { eprintln!("settings page {:?}: {} controls", m.id, page.buttons.len()); }
         for (b, label) in page.buttons.iter().enumerate() {
             let widget = button(
                 0.0,

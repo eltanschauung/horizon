@@ -656,6 +656,7 @@ impl Loading {
                     super::packs::open_uri(super::options::ACCESSIBILITY_HELP_LINK)
                 }
                 Event::NativeSettings(i) => {
+                    if std::env::var_os("HORIZON_TRACE_MOD_SETTINGS").is_some() { eprintln!("startup settings index: {i}"); }
                     super::mods::refresh_content_settings(&mut self.settings.mods, i);
                 }
                 Event::NativeButton(i, button) => {

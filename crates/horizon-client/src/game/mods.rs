@@ -993,6 +993,7 @@ mod tests {
 
 /// World-independent content settings shared by startup and in-world menus.
 pub(super) fn content_settings_buttons(id: &str) -> Option<Vec<String>> {
+    if std::env::var_os("HORIZON_TRACE_MOD_SETTINGS").is_some() { eprintln!("content settings requested: {id:?}"); }
     if id != "biomesoplenty" { return None; }
     Some(match Game::native_config_dir() {
         Ok(root) => horizon_world::worldgen::placement_config_menu::buttons(&root),
