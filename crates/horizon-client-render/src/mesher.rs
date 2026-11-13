@@ -1348,7 +1348,7 @@ const UNSET: u32 = u32::MAX;
 const NO_BIOME: u16 = u16::MAX;
 /// The `ColorResolver`s `ClientLevel` caches block tints for.
 #[derive(Clone, Copy)]
-enum Resolver {
+pub(crate) enum Resolver {
     Grass,
     Foliage,
     Dry,
@@ -1370,7 +1370,7 @@ struct Layer {
 /// block averages the colours of the biomes `BiomeManager.getBiome` picks (the
 /// eight-corner zoom) over a `(2r+1)^2` square at the block's own height.
 /// Layers and columns are only computed when a tinted block asks for them.
-struct Tints<'a> {
+pub(crate) struct Tints<'a> {
     region: &'a [[Option<&'a Chunk>; 3]; 3],
     biomes: &'a Biomes,
     zoom: BiomeZoom,
@@ -1383,7 +1383,7 @@ struct Tints<'a> {
     uniform: Option<Option<u16>>,
 }
 impl<'a> Tints<'a> {
-    fn new(
+    pub(crate) fn new(
         region: &'a [[Option<&'a Chunk>; 3]; 3],
         biomes: &'a Biomes,
         zoom: BiomeZoom,
@@ -1468,7 +1468,7 @@ impl<'a> Tints<'a> {
         uniform
     }
     /// The blended tint of block `(x, y, z)` (section-local x/z, y in 0..16).
-    fn get(&mut self, resolver: Resolver, x: i32, y: i32, z: i32) -> u32 {
+    pub(crate) fn get(&mut self, resolver: Resolver, x: i32, y: i32, z: i32) -> u32 {
         // One biome over every blend square: the mean of (2r+1)^2 equal
         // colours is that colour, unless it varies by position (swamp grass).
         if let Some(biome) = self.uniform_biome() {

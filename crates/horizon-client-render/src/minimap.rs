@@ -1,18 +1,26 @@
 //! The minimap extra (`docs/extras.md`): a 16x16 tile per loaded chunk with
 //! each column's vanilla map colour (`MapColor`, as `MapItem.update` picks
-//! it), height and water depth, and a 128x128 image composed from the tiles
+//! it), with biome-tinted grass/water when requested, height and water depth, and a 128x128 image composed from the tiles
 //! around the player with the map item's height and water shading.
 //!
 //! Tiles are filled nearest first within a time budget and rescanned after
 //! block changes; the image is recomposed only when the view moved or a tile
 //! changed.
 use crate::{
+    biome::Biomes,
+    mesher::{MeshTables, Resolver, TintSource, Tints},
+};
+use crate::{
     blocks::{BlockFacts, Fluid, MAP_COLORS},
     chunk::Chunk,
     fast_hash::FxHashMap,
     world::World,
 };
-use std::time::{Duration, Instant};
+use horizon_core::biome::BiomeZoom;
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 /// The image's side in texels.
 pub const SIZE: usize = 128;
@@ -88,6 +96,8 @@ impl Palette {
 struct Tile {
     /// Map colour id per column (`z * 16 + x`), `| WALL` for cut walls.
     color: [u8; 256],
+    /// Resolved biome colour, or the untinted map palette colour.
+    rgb: [u32; 256],
     height: [i16; 256],
     /// Water depth below the surface, for the map's water shading.
     depth: [u8; 256],
@@ -157,6 +167,7 @@ fn scan_tile(chunk: &Chunk, palette: &Palette, air: u32, layer: Layer, revision:
     let top = top_of(chunk, air, layer);
     let mut tile = Tile {
         color: [0; 256],
+        rgb: [0; 256],
         height: [chunk.min_y() as i16; 256],
         depth: [0; 256],
         revision,
@@ -168,11 +179,61 @@ fn scan_tile(chunk: &Chunk, palette: &Palette, air: u32, layer: Layer, revision:
             let (c, h, d) = scan_column(chunk, palette, x, z, top, layer);
             let i = (z * 16 + x) as usize;
             tile.color[i] = c;
+            tile.rgb[i] = MAP_COLORS.get(usize::from(c & !WALL)).copied().unwrap_or(0);
             tile.height[i] = h;
             tile.depth[i] = d;
         }
     }
     tile
+}
+
+/// Shares terrain meshing's biome zoom, blend and per-layer tint cache.
+#[derive(Clone)]
+struct BiomeTints {
+    biomes: Arc<Biomes>,
+    zoom: BiomeZoom,
+    blend: i32,
+}
+fn tint_tile(
+    tile: &mut Tile,
+    world: &World,
+    chunk: &Chunk,
+    mut grass: impl FnMut(u32) -> bool,
+    context: &BiomeTints,
+) {
+    let region = std::array::from_fn(|z| {
+        std::array::from_fn(|x| {
+            world
+                .chunks
+                .get(&(chunk.x + x as i32 - 1, chunk.z + z as i32 - 1))
+                .map(Arc::as_ref)
+        })
+    });
+    let mut sections = FxHashMap::default();
+    for z in 0..16 {
+        for x in 0..16 {
+            let i = (z * 16 + x) as usize;
+            let color = tile.color[i] & !WALL;
+            let y = i32::from(tile.height[i]);
+            let resolver = if color == WATER {
+                Resolver::Water
+            } else if color != 0 && grass(chunk.get(x, y, z)) {
+                Resolver::Grass
+            } else {
+                continue;
+            };
+            let section = sections.entry(y & !15).or_insert_with(|| {
+                Tints::new(
+                    &region,
+                    &context.biomes,
+                    context.zoom,
+                    context.blend,
+                    [chunk.x, chunk.z, y & !15],
+                )
+            });
+            tile.rgb[i] = section.get(resolver, x, y & 15, z);
+        }
+    }
 }
 
 /// Where the map looks from and how.
@@ -216,13 +277,16 @@ impl View {
 }
 
 /// `MapColor.getColorFromPackedId` as RGBA.
+#[cfg(test)]
 fn packed_rgba(id: u8, brightness: u8) -> [u8; 4] {
     let id = usize::from(id);
     if id == 0 || id >= MAP_COLORS.len() {
         return [0; 4];
     }
+    shaded_rgb(MAP_COLORS[id], brightness)
+}
+fn shaded_rgb(col: u32, brightness: u8) -> [u8; 4] {
     let modifier = [180u32, 220, 255, 135][usize::from(brightness & 3)];
-    let col = MAP_COLORS[id];
     let ch = |s: u32| ((col >> s & 255) * modifier / 255) as u8;
     [ch(16), ch(8), ch(0), 255]
 }
@@ -260,6 +324,8 @@ const BORDER: [u8; 4] = [10, 10, 10, 230];
 pub struct Minimap {
     tiles: FxHashMap<(i32, i32), Tile>,
     palette: Option<Palette>,
+    biome_tints: Option<BiomeTints>,
+    tint_tables: Option<Arc<MeshTables>>,
     composed: Option<View>,
     /// Tiles changed since the image was composed.
     changed: bool,
@@ -286,6 +352,65 @@ impl Minimap {
         layer: Layer,
         budget: Duration,
     ) -> usize {
+        if self.biome_tints.is_some() {
+            self.clear();
+        }
+        self.update_tiles(world, facts, center, radius, layer, budget, None)
+    }
+    /// Uses the same biome colours, blend radius and zoom as the terrain mesh.
+    /// Resolve colours only on tile scans, never for each composed pixel.
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_tinted(
+        &mut self,
+        world: &World,
+        facts: &BlockFacts,
+        center: (i32, i32),
+        radius: i32,
+        layer: Layer,
+        budget: Duration,
+        mesher: Arc<MeshTables>,
+        biomes: Arc<Biomes>,
+        zoom: BiomeZoom,
+        blend: i32,
+    ) -> usize {
+        if self
+            .tint_tables
+            .as_ref()
+            .is_none_or(|old| !Arc::ptr_eq(old, &mesher))
+        {
+            self.clear();
+            self.palette = None;
+        }
+        self.configure_tints(biomes, zoom, blend);
+        self.tint_tables = Some(mesher.clone());
+        self.update_tiles(world, facts, center, radius, layer, budget, Some(&mesher))
+    }
+    fn configure_tints(&mut self, biomes: Arc<Biomes>, zoom: BiomeZoom, blend: i32) {
+        let blend = blend.clamp(0, 7);
+        let changed = self.biome_tints.as_ref().is_none_or(|old| {
+            !Arc::ptr_eq(&old.biomes, &biomes) || old.zoom != zoom || old.blend != blend
+        });
+        if changed {
+            self.clear();
+            self.palette = None; // A resource reload may change state/model facts too.
+            self.biome_tints = Some(BiomeTints {
+                biomes,
+                zoom,
+                blend,
+            });
+        }
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn update_tiles(
+        &mut self,
+        world: &World,
+        facts: &BlockFacts,
+        center: (i32, i32),
+        radius: i32,
+        layer: Layer,
+        budget: Duration,
+        mesher: Option<&MeshTables>,
+    ) -> usize {
         let palette = self.palette.get_or_insert_with(|| Palette::new(facts));
         let started = Instant::now();
         let air = world.air.0;
@@ -310,9 +435,26 @@ impl Minimap {
                 if !stale {
                     continue;
                 }
-                let tile = scan_tile(chunk, palette, air, layer, world.revision);
+                let mut tile = scan_tile(chunk, palette, air, layer, world.revision);
+                if let (Some(mesher), Some(context)) = (mesher, &self.biome_tints) {
+                    tint_tile(
+                        &mut tile,
+                        world,
+                        chunk,
+                        |state| {
+                            matches!(
+                                mesher.tint_source(horizon_world::registry::BlockStateId(state), 0),
+                                Some(TintSource::Grass)
+                            )
+                        },
+                        context,
+                    );
+                }
                 if self.tiles.get(&key).is_none_or(|t| {
-                    t.color != tile.color || t.height != tile.height || t.depth != tile.depth
+                    t.color != tile.color
+                        || t.rgb != tile.rgb
+                        || t.height != tile.height
+                        || t.depth != tile.depth
                 }) {
                     self.changed = true;
                 }
@@ -340,7 +482,7 @@ impl Minimap {
         let bpp = f64::from(view.blocks_per_pixel);
         let half = SIZE as f64 / 2.0;
         let mut cached: Option<((i32, i32), &Tile)> = None;
-        let mut column = |x: i32, z: i32| -> Option<(u8, i16, u8)> {
+        let mut column = |x: i32, z: i32| -> Option<(u8, i16, u8, u32)> {
             let key = (x >> 4, z >> 4);
             let tile = match cached {
                 Some((k, t)) if k == key => t,
@@ -351,7 +493,7 @@ impl Minimap {
                 }
             };
             let i = ((z & 15) * 16 + (x & 15)) as usize;
-            Some((tile.color[i], tile.height[i], tile.depth[i]))
+            Some((tile.color[i], tile.height[i], tile.depth[i], tile.rgb[i]))
         };
         for j in 0..SIZE {
             for i in 0..SIZE {
@@ -375,10 +517,10 @@ impl Minimap {
                 let wz = view.z + bpp * (u * r[1] - v * f[1]);
                 let (x, z) = (wx.floor() as i32, wz.floor() as i32);
                 let rgba = match column(x, z) {
-                    Some((color, height, depth)) if color & !WALL != 0 => {
+                    Some((color, height, depth, rgb)) if color & !WALL != 0 => {
                         let north = column(x, z - 1).filter(|c| c.0 & !WALL != 0).map(|c| c.1);
                         let b = brightness(color, height, north, depth, x + z);
-                        packed_rgba(color & !WALL, b)
+                        shaded_rgb(rgb, b)
                     }
                     _ => UNKNOWN,
                 };
@@ -403,7 +545,6 @@ fn ring_offsets(ring: i32) -> impl Iterator<Item = (i32, i32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
 
     // States: 0 air, 1 grass (colour 1), 2 stone (11), 3 water, 4 glass (no
     // colour), 5 waterlogged slab (sturdy on top? no), 6 lava.
@@ -678,5 +819,93 @@ mod tests {
             }
         }
         assert_eq!(seen.len(), 49);
+    }
+
+    fn tint_biomes() -> Arc<Biomes> {
+        let root = std::env::var_os("HORIZON_MESH_TEST_RESOURCES")
+            .map(std::path::PathBuf::from)
+            .expect("prepared resources required");
+        Arc::new(Biomes::load(&root).unwrap())
+    }
+    #[test]
+    #[ignore = "requires HORIZON_MESH_TEST_RESOURCES"]
+    fn biome_tints_use_sampled_height_preserve_other_blocks_and_negative_chunks() {
+        let biomes = tint_biomes();
+        for name in [
+            "minecraft:plains",
+            "minecraft:swamp",
+            "minecraft:warm_ocean",
+        ] {
+            let id = biomes.id(name);
+            let mut chunks = Vec::new();
+            for z in -2..=0 {
+                for x in -2..=0 {
+                    let mut c = grass_chunk(x, z);
+                    for qy in 0..96 {
+                        for qz in 0..4 {
+                            for qx in 0..4 {
+                                c.set_biome_cell(qx, qy, qz, id);
+                            }
+                        }
+                    }
+                    c.set(8, 64, 0, 3); // water
+                    c.set(9, 64, 0, 5); // non-sturdy waterlogged slab
+                    c.set(10, 64, 0, 6); // lava retains its fixed map colour
+                    c.set(11, 64, 0, 2); // stone retains its fixed map colour
+                    chunks.push(c);
+                }
+            }
+            let world = world_with(chunks);
+            let chunk = &world.chunks[&(-1, -1)];
+            let context = BiomeTints {
+                biomes: biomes.clone(),
+                zoom: BiomeZoom::new(42),
+                blend: 2,
+            };
+            let mut tile = scan_tile(chunk, &palette(), 0, Layer::Surface, 0);
+            tint_tile(&mut tile, &world, chunk, |state| state == 1, &context);
+            assert_eq!(tile.rgb[0], biomes.grass(id, -16., -16.));
+            assert_eq!(tile.rgb[8], biomes.get(id).water);
+            assert_eq!(tile.rgb[9], biomes.get(id).water);
+            assert_eq!(tile.rgb[10], MAP_COLORS[LAVA as usize]);
+            assert_eq!(tile.rgb[11], MAP_COLORS[11]);
+            assert_eq!(tile.depth[8], 1);
+            let mut cave = scan_tile(chunk, &palette(), 0, Layer::Below(64), 0);
+            tint_tile(&mut cave, &world, chunk, |state| state == 1, &context);
+            assert_ne!(cave.color[0] & WALL, 0);
+            assert_eq!(cave.rgb[0], tile.rgb[0]);
+            assert_eq!(
+                shaded_rgb(cave.rgb[0], brightness(cave.color[0], 64, None, 0, 0))[3],
+                255
+            );
+        }
+    }
+    #[test]
+    #[ignore = "requires HORIZON_MESH_TEST_RESOURCES"]
+    fn tint_cache_invalidates_on_table_seed_or_blend_changes() {
+        let biomes = tint_biomes();
+        let mut map = Minimap::default();
+        map.configure_tints(biomes.clone(), BiomeZoom::new(1), 2);
+        map.tiles.insert(
+            (0, 0),
+            scan_tile(&grass_chunk(0, 0), &palette(), 0, Layer::Surface, 0),
+        );
+        map.configure_tints(biomes.clone(), BiomeZoom::new(1), 2);
+        assert_eq!(map.tile_count(), 1, "identical context reuses tiles");
+        map.configure_tints(biomes.clone(), BiomeZoom::new(1), 3);
+        assert_eq!(map.tile_count(), 0);
+        map.tiles.insert(
+            (0, 0),
+            scan_tile(&grass_chunk(0, 0), &palette(), 0, Layer::Surface, 0),
+        );
+        let changed = Arc::new(biomes.with_colors(|_, c| c.water = 0x123456).unwrap());
+        map.configure_tints(changed.clone(), BiomeZoom::new(1), 3);
+        assert_eq!(map.tile_count(), 0);
+        map.tiles.insert(
+            (0, 0),
+            scan_tile(&grass_chunk(0, 0), &palette(), 0, Layer::Surface, 0),
+        );
+        map.configure_tints(changed, BiomeZoom::new(2), 3);
+        assert_eq!(map.tile_count(), 0);
     }
 }

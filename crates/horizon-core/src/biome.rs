@@ -9,7 +9,7 @@ pub fn obfuscate_seed(world_seed: i64) -> i64 {
     seed_hash::hash(world_seed)
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BiomeZoom {
     seed: i64,
 }

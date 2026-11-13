@@ -29,6 +29,7 @@ Paths without a crate prefix above are under `crates/horizon-client/src/`;
 
 | Feature | Source / merge distinction |
 | --- | --- |
+| Minimap grass/water use the terrain mesher’s biome tint resolver, blend radius and seed lookup (including modded biomes). Resolved RGB is cached per tile; biome/model table, seed and blend changes invalidate tiles. Map-item slope/depth shading stays intact. | `minimap.rs`, `mesher::Tints`, `game/extras.rs` |
 | Minimap defaults: **small, square, Stone, coordinates on**. Coordinates are floored whole blocks, compact white shadowed text below the map. Black/Stone/Bamboo outlines and coordinate drawing now have upstream counterparts: retain current upstream implementation while preserving our defaults and HUD layout behavior. | `native/minimap/`, especially `mixins/minimap/runtime.rs` and its tests |
 | Configurable sleeping threshold; fork default **>=33%**, plus One Player, percentage presets and Vanilla. | `native/sleep-threshold/` |
 | Native LambDynamicLights port: configurable client-side item/entity/particle/beam lights, retaining other mods' colored lights. | `native/lambdynamiclights-horizon/` |

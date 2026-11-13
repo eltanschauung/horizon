@@ -186,13 +186,17 @@ impl Game<'_> {
         // The chunks the image can reach (its corners when it turns).
         let reach = minimap::SIZE as f32 / 2.0 * view.blocks_per_pixel * std::f32::consts::SQRT_2;
         let radius = ((reach / 16.0).ceil() as i32 + 1).min(self.settings.render_distance.max(2));
-        self.extras.minimap.update(
+        self.extras.minimap.update_tinted(
             &self.world,
             self.res.facts(),
             (bx >> 4, bz >> 4),
             radius,
             layer,
             MINIMAP_BUDGET,
+            self.pack.context.tables.clone(),
+            world_biomes!(self).clone(),
+            self.streaming.biome_zoom,
+            self.streaming.biome_blend,
         );
         if !self.extras.minimap.compose(view) {
             return;
