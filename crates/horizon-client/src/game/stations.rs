@@ -2643,12 +2643,17 @@ impl Game<'_> {
         if lines.is_empty() {
             return;
         }
-        let lines = Self::resolved(lines);
+        let lines = self.wrap_tooltip_lines(batch, Self::resolved(lines));
         let atlas = &self.gui.atlas;
         let (x, y, w, h) =
             Self::tooltip_geometry(atlas, &lines, (x, y), (batch.width, batch.height), [0.0; 2]);
         self.tooltip_box(batch, None, x, y, w, h);
         Self::tooltip_text(batch, atlas, &lines, x, y);
+    }
+    /// Bound text to half the GUI width, including the tooltip frame, preserving styles.
+    fn wrap_tooltip_lines(&self, batch: &HudBatch, lines: Vec<(horizon_client::text::Text, u32)>) -> Vec<(horizon_client::text::Text, u32)> {
+        let width = (batch.width * 0.5 - 8.0).max(1.0);
+        lines.into_iter().flat_map(|(text, color)| self.gui.atlas.font.split_formatted(&text, width).into_iter().map(move |line| (line, color))).collect()
     }
     /// A tooltip's lines with their legacy codes resolved and their colours.
     fn resolved<T: Clone + Into<horizon_client::text::Text>>(
@@ -2773,7 +2778,7 @@ impl Game<'_> {
             return;
         }
         lines.splice(1..1, after_name);
-        let lines = Self::resolved(&lines);
+        let lines = self.wrap_tooltip_lines(batch, Self::resolved(&lines));
         // The component's height does not depend on where it is drawn, so a
         // probe at the origin gives the box its extra height.
         let probe =

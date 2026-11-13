@@ -853,6 +853,7 @@ impl Game<'_> {
             }
             self.mark_outline(&out[start..], color);
         }
+        super::player_presentation::fade_vertices(&mut out[start..], self.player_presentation_opacity(m, camera));
     }
     /// `extractEntityInInventoryFollowsMouse`: the player in the box
     /// `[x0, x1) x [y0, y1)`, `size` pixels per block, turned toward the
@@ -957,6 +958,7 @@ impl Game<'_> {
             .as_ref()
             .filter(|p| p.fire_ticks > 0 && !p.spectator)
             .map(|p| (p.dimensions.width, p.dimensions.height));
+        super::player_presentation::fade_vertices(&mut verts, self.player_presentation_opacity(&m, camera));
         let quads = player_preview_quads_no_cull(verts, gui, fire, &atlas.sprites, wings);
         let start = batch.vertices.len();
         for (_, p, uv, color) in quads {

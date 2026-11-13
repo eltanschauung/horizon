@@ -8,5 +8,5 @@ impl Game<'_> {
 pub(super) fn fade_vertices(vertices: &mut [Vertex], opacity: f32) {
     let opacity = if opacity.is_finite() { opacity.clamp(0.0, 1.0) } else { 1.0 };
     if opacity == 1.0 { return; }
-    for v in vertices { let a = ((v.color >> 24) as f32 * opacity).round() as u32; v.color = (v.color & 0x00ff_ffff) | (a << 24); }
+    for v in vertices { let a = ((v.color >> 24) as f32 * opacity).round() as u32; v.color = (v.color & 0x00ff_ffff) | (a << 24); v.layer |= horizon_client::gfx::OIT_ENTITY; }
 }
