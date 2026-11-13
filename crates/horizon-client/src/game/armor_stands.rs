@@ -253,6 +253,12 @@ impl Game<'_> {
             .map(|(item, stack)| item.map(|i| (i, stack))),
         )
     }
+    /// Client presentation policy for worn equipment, independent of its gameplay state.
+    /// Native cosmetic mods can override this without changing stacks or equipment packets.
+    pub(super) fn equipment_render_opacity(&self, _slot: &str) -> f32 {
+        1.0
+    }
+
     /// The layers of the armour items `worn` (with their stacks when known,
     /// for trims and CIT armour rules), head to feet.
     fn armor_layers(
@@ -271,6 +277,10 @@ impl Game<'_> {
             .into_iter()
             .zip(["helmet", "chestplate", "leggings", "boots"])
         {
+            let opacity = self.equipment_render_opacity(layer).clamp(0.0, 1.0);
+            if opacity <= 0.0 {
+                continue;
+            }
             let Some((item, stack)) = item else {
                 continue;
             };
@@ -314,7 +324,7 @@ impl Game<'_> {
                 let Some(uv) = self.armor_layer_rect(cit, &asset, kind, texture) else {
                     continue;
                 };
-                let color = layer_color(*undyed, stack);
+                let color = equipment_alpha(layer_color(*undyed, stack), opacity);
                 out.push((part, uv, color, if i == 0 { overlay } else { 0 }, false));
                 // The layer's OptiFine emissive overlay, full bright without the glint.
                 if let Some(g) = emissive
@@ -328,7 +338,13 @@ impl Game<'_> {
                 .and_then(|s| assets.trim_texture(&asset, kind, s))
                 .and_then(|t| self.gui.atlas.sprites.get(&t.sprite()))
             {
-                out.push((part, [r.u0, r.v0, r.u1, r.v1], 0xFFFF_FFFF, overlay, false));
+                out.push((
+                    part,
+                    [r.u0, r.v0, r.u1, r.v1],
+                    equipment_alpha(0xFFFF_FFFF, opacity),
+                    overlay,
+                    false,
+                ));
             }
         }
         out
@@ -1960,4 +1976,9 @@ mod layer_color_tests {
         // A layer that isn't dyeable stays white even on a dyed stack.
         assert_eq!(layer_color(None, Some(&dyed)), 0xFFFF_FFFF);
     }
+}
+
+/// Preserve the RGB dye/trim tint and multiply its existing alpha.
+fn equipment_alpha(color: u32, opacity: f32) -> u32 {
+    (color & 0x00ff_ffff) | ((((color >> 24) as f32 * opacity).round() as u32) << 24)
 }

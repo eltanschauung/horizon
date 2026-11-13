@@ -25,6 +25,10 @@ features move upstream or their implementation moves between modules.
 Paths without a crate prefix above are under `crates/horizon-client/src/`;
 “render” means `crates/horizon-client-render/src/`.
 
+Player equipment has a render-only opacity policy (`equipment_render_opacity`), shared by
+player armor layers, trims/emissive overlays and elytra; fractional alpha uses entity OIT.
+Native cosmetic mods can override it without modifying equipment or networking.
+
 ## Horizon-mods
 
 | Feature | Source / merge distinction |

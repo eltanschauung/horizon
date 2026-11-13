@@ -1039,6 +1039,10 @@ impl Game<'_> {
         overlay: u32,
         out: &mut Vec<horizon_client::mesher::Vertex>,
     ) {
+        let opacity = self.equipment_render_opacity("chestplate").clamp(0.0, 1.0);
+        if opacity <= 0.0 {
+            return;
+        }
         let Some(asset) = chest
             .and_then(|item| self.items().get(item))
             .and_then(|i| i.equip_asset.as_ref())
@@ -1077,6 +1081,7 @@ impl Game<'_> {
             }
             p
         };
+        let start = out.len();
         horizon_client::mobs::render_model(
             model,
             base,
@@ -1113,6 +1118,12 @@ impl Game<'_> {
                 0,
                 out,
             );
+        }
+        if opacity < 1.0 {
+            super::player_presentation::fade_vertices(&mut out[start..], opacity);
+            for vertex in &mut out[start..] {
+                vertex.layer |= horizon_client::gfx::OIT_ENTITY;
+            }
         }
     }
     /// `CapeLayer` for a player wearing `chest`: no cape under an elytra's

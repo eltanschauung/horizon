@@ -2136,7 +2136,11 @@ fn render_visible(
     // The worn armour's layers (and their emissive overlays, full bright).
     for (part, uv, color, layer_overlay, glows) in extra {
         let light = if *glows { FULL_BRIGHT } else { light };
+        let start = out.len();
         draw(part, base, &poses, *uv, *color, light, *layer_overlay, out);
+        if color >> 24 < 255 {
+            mark_oit(&mut out[start..]);
+        }
     }
     // One Poses refilled for every layer (armour draws up to seven): it keeps
     // its maps' capacity.
