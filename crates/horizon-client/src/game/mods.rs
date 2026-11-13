@@ -1003,6 +1003,10 @@ pub(super) fn content_settings_buttons(id: &str) -> Option<Vec<String>> {
 pub(super) fn refresh_content_settings(mods: &mut mod_list::ModList, i: usize) {
     let Some(id) = mods.installed.get(i).map(|row| row.id.clone()) else { return; };
     if let Some(buttons) = content_settings_buttons(&id) {
-        mods.pages.insert(id, mod_list::NativePage { keys: Vec::new(), buttons });
+        if let Some(page) = mods.installed.get_mut(i).and_then(|row| row.native.as_mut()) {
+            page.buttons = buttons;
+        } else {
+            mods.pages.insert(id, mod_list::NativePage { keys: Vec::new(), buttons });
+        }
     }
 }
