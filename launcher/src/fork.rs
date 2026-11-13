@@ -60,6 +60,21 @@ pub fn install_bundled_mods(version: &Path, home: &Path) -> Result<(), String> {
             changed = true;
         }
     }
+    // Curated releases add missing defaults, preserving every explicit player choice.
+    let defaults = version.join("fork-mods/default-selections.txt");
+    if defaults.is_file() {
+        let path = home.join("horizon-mods.txt");
+        let mut text = fs::read_to_string(&path).unwrap_or_default();
+        for line in fs::read_to_string(defaults).map_err(|e| e.to_string())?.lines() {
+            let Some((key, value)) = line.split_once(':') else { continue; };
+            if !key.starts_with("mod.") || !matches!(value, "true" | "false") { continue; }
+            if !text.lines().any(|old| old.split_once(':').is_some_and(|(name, _)| name == key)) {
+                if !text.is_empty() && !text.ends_with('\n') { text.push('\n'); }
+                text.push_str(line); text.push('\n');
+            }
+        }
+        fs::write(path, text).map_err(|e| e.to_string())?;
+    }
     if changed {
         let temp = record.with_extension("json.tmp");
         fs::write(

@@ -7,7 +7,7 @@ import stat
 import zipfile
 
 
-def package(build, resources, content, output, platform):
+def package(build, resources, content, output, platform, native=None, defaults=None):
     suffix = '.exe' if platform == 'windows' else ''
     binary = build / ('horizon-client' + suffix)
     if not binary.is_file():
@@ -34,6 +34,10 @@ def package(build, resources, content, output, platform):
         if path.is_file():
             files.append(('resources/' + relative.as_posix(), path))
     files.extend(('data/horizon-mods/' + p.name, p) for p in mods)
+    if native:
+        files.extend(('data/horizon-native-mods/' + p.name, p) for p in sorted(native.glob('*.hnmod')))
+    if defaults:
+        files.append(('data/horizon-mods.txt', defaults))
     output.parent.mkdir(parents=True, exist_ok=True)
     # Exclusive creation: never overwrite a previous archive or accidentally package its user data.
     try:
@@ -67,7 +71,7 @@ def package(build, resources, content, output, platform):
             if archive.testzip() is not None:
                 raise ValueError('Archive integrity check failed')
             entries = archive.namelist()
-            allowed = {'horizon_portable/data/horizon-mods/' + p.name for p in mods}
+            allowed = {'horizon_portable/' + name for name, _ in files if name.startswith('data/')}
             assert all(not n.startswith('horizon_portable/data/') or n in allowed for n in entries)
     except Exception:
         # Preserve an existing ZIP on an exclusive-open failure; delete only this attempt's new file.
@@ -82,8 +86,10 @@ def main():
     for name in ['build', 'resources', 'content', 'output']:
         parser.add_argument('--' + name, type=Path, required=True)
     parser.add_argument('--platform', choices=['linux', 'windows'], required=True)
+    parser.add_argument('--native', type=Path)
+    parser.add_argument('--defaults', type=Path)
     args = parser.parse_args()
-    package(args.build, args.resources, args.content, args.output, args.platform)
+    package(args.build, args.resources, args.content, args.output, args.platform, args.native, args.defaults)
 
 
 if __name__ == '__main__':
