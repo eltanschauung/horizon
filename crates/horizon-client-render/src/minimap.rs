@@ -18,7 +18,7 @@ use crate::{
 };
 use horizon_core::biome::BiomeZoom;
 use std::{
-    sync::Arc,
+    sync::{Arc, Weak},
     time::{Duration, Instant},
 };
 
@@ -98,6 +98,8 @@ struct Tile {
     color: [u8; 256],
     /// Resolved biome colour, or the untinted map palette colour.
     rgb: [u32; 256],
+    /// Weak identities detect biome-only edits/replacements without retaining chunks.
+    sources: Option<[Option<Weak<Chunk>>; 9]>,
     height: [i16; 256],
     /// Water depth below the surface, for the map's water shading.
     depth: [u8; 256],
@@ -168,6 +170,7 @@ fn scan_tile(chunk: &Chunk, palette: &Palette, air: u32, layer: Layer, revision:
     let mut tile = Tile {
         color: [0; 256],
         rgb: [0; 256],
+        sources: None,
         height: [chunk.min_y() as i16; 256],
         depth: [0; 256],
         revision,
@@ -194,6 +197,31 @@ struct BiomeTints {
     zoom: BiomeZoom,
     blend: i32,
 }
+fn tint_sources(world: &World, key: (i32, i32)) -> [Option<Weak<Chunk>>; 9] {
+    std::array::from_fn(|i| {
+        world
+            .chunks
+            .get(&(key.0 + (i % 3) as i32 - 1, key.1 + (i / 3) as i32 - 1))
+            .map(Arc::downgrade)
+    })
+}
+fn tint_sources_changed(
+    world: &World,
+    key: (i32, i32),
+    sources: &[Option<Weak<Chunk>>; 9],
+) -> bool {
+    sources.iter().enumerate().any(|(i, old)| {
+        let current = world
+            .chunks
+            .get(&(key.0 + (i % 3) as i32 - 1, key.1 + (i / 3) as i32 - 1));
+        match (old, current) {
+            (Some(old), Some(current)) => old.as_ptr() != Arc::as_ptr(current),
+            (None, None) => false,
+            _ => true,
+        }
+    })
+}
+
 fn tint_tile(
     tile: &mut Tile,
     world: &World,
@@ -209,6 +237,7 @@ fn tint_tile(
                 .map(Arc::as_ref)
         })
     });
+    tile.sources = Some(tint_sources(world, (chunk.x, chunk.z)));
     let mut sections = FxHashMap::default();
     for z in 0..16 {
         for x in 0..16 {
@@ -430,7 +459,13 @@ impl Minimap {
                 let stale = match self.tiles.get(&key) {
                     None => true,
                     Some(t) if t.layer != layer => true,
-                    Some(t) => t.revision != world.revision && t.scanned.elapsed() >= RESCAN,
+                    Some(t) => {
+                        t.scanned.elapsed() >= RESCAN
+                            && (t.revision != world.revision
+                                || t.sources.as_ref().is_some_and(|sources| {
+                                    tint_sources_changed(world, key, sources)
+                                }))
+                    }
                 };
                 if !stale {
                     continue;
@@ -907,5 +942,29 @@ mod tests {
         );
         map.configure_tints(changed, BiomeZoom::new(2), 3);
         assert_eq!(map.tile_count(), 0);
+    }
+    #[test]
+    fn biome_only_updates_and_neighbor_arrivals_invalidate_tint_sources() {
+        let mut world = world_with(vec![grass_chunk(0, 0)]);
+        let sources = tint_sources(&world, (0, 0));
+        let revision = world.revision;
+        assert!(!tint_sources_changed(&world, (0, 0), &sources));
+        Arc::make_mut(world.chunks.get_mut(&(0, 0)).unwrap()).set_biome_cell(0, 32, 0, 1);
+        assert_eq!(
+            revision, world.revision,
+            "biome updates need not touch the block revision"
+        );
+        assert!(tint_sources_changed(&world, (0, 0), &sources));
+        let sources = tint_sources(&world, (0, 0));
+        world.chunks.insert((1, 0), Arc::new(grass_chunk(1, 0)));
+        assert!(
+            tint_sources_changed(&world, (0, 0), &sources),
+            "new neighbor changes blended edges"
+        );
+        assert!(!tint_sources_changed(
+            &world,
+            (0, 0),
+            &tint_sources(&world, (0, 0))
+        ));
     }
 }
