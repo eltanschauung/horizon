@@ -21,6 +21,7 @@ impl std::fmt::Display for Value {
         }
     }
 }
+#[derive(Clone, Copy)]
 pub struct Rule {
     pub name: &'static str,
     pub category: &'static str,
@@ -129,8 +130,19 @@ pub const RULES: &[Rule] = &[
 pub const MAX_MINECART_SPEED: Rule = i("max_minecart_speed", "misc", 8, 1, 1000);
 pub const MINECART_IMPROVEMENTS: &str = "minecraft:minecart_improvements";
 
+/// Native mods append their rules once, before the first world/rule lookup.
+pub fn mod_rules(_rules: &mut Vec<Rule>) {}
+pub fn registered_rules() -> &'static [Rule] {
+    static RULES_WITH_MODS: std::sync::OnceLock<Vec<Rule>> = std::sync::OnceLock::new();
+    RULES_WITH_MODS.get_or_init(|| {
+        let mut rules = RULES.to_vec();
+        mod_rules(&mut rules);
+        rules
+    })
+}
+
 pub fn available_rules(minecart_improvements: bool) -> impl Iterator<Item = &'static Rule> {
-    RULES
+    registered_rules()
         .iter()
         .chain(minecart_improvements.then_some(&MAX_MINECART_SPEED))
 }

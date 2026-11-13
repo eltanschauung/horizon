@@ -41,6 +41,12 @@ pub struct Spell {
     pub ending_ticks: u32,
     /// Transition, active, and returning markers, in that order.
     pub effects: [String; 3],
+    #[serde(default)]
+    pub start_sound: Option<String>,
+    #[serde(default)]
+    pub end_sound: Option<String>,
+    #[serde(default)]
+    pub particle_color: Option<[f32; 3]>,
 }
 impl Spell {
     pub fn total_ticks(&self) -> u32 {
@@ -162,12 +168,16 @@ impl Catalog {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Ledger {
+    /// Spell inventories are Soulbound to this character, not the account.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub character: Option<String>,
     pub revision: u64,
     pub slots: Vec<Option<String>>,
 }
 impl Default for Ledger {
     fn default() -> Self {
         Self {
+            character: None,
             revision: 0,
             slots: vec![None; SLOT_COUNT],
         }
@@ -176,15 +186,16 @@ impl Default for Ledger {
 impl Ledger {
     pub fn valid(&self) -> bool {
         let mut seen = BTreeSet::new();
-        self.slots.len() == SLOT_COUNT
+        self.character.as_ref().is_none_or(|id| identifier(id))
+            && self.slots.len() == SLOT_COUNT
             && self
                 .slots
                 .iter()
                 .flatten()
                 .all(|id| identifier(id) && seen.insert(id))
     }
-    /// Grant only catalog-approved starting spells. Existing positions and unknown
-    /// (temporarily disabled) spells survive character changes and mod updates.
+    /// Grant catalog-approved spells to the current Soulbound ledger. Existing
+    /// positions survive reconnects; bind_character handles character switches.
     pub fn grant(&mut self, ids: &[String], catalog: &Catalog) -> bool {
         let mut changed = false;
         for id in ids {
@@ -200,6 +211,19 @@ impl Ledger {
             self.revision = self.revision.wrapping_add(1);
         }
         changed
+    }
+    /// Reconcile ownership before accepting any queued inventory/cast request.
+    /// A legacy unowned ledger keeps current starters in place, removing stale
+    /// spells of other characters without resetting the player's arrangement.
+    pub fn bind_character(&mut self, character: Option<&str>, starters: &[String], catalog: &Catalog) -> bool {
+        if self.character.as_deref() == character && self.character.is_some() { return false; }
+        let switched = self.character.is_some();
+        for slot in &mut self.slots {
+            if switched || slot.as_ref().is_some_and(|id| catalog.spells.contains_key(id) && !starters.contains(id)) { *slot = None; }
+        }
+        self.character = character.map(str::to_owned);
+        self.revision = self.revision.wrapping_add(1);
+        true
     }
     pub fn contains(&self, id: &str) -> bool {
         self.slots.iter().flatten().any(|s| s == id)

@@ -32,6 +32,7 @@ struct Actor {
     writable: bool,
     character: Option<String>,
     active: Option<Cast>,
+    effect_spells: std::collections::BTreeMap<String, Spell>,
 }
 struct Cast {
     spell: Spell,
@@ -74,6 +75,7 @@ impl Actor {
             writable,
             character: None,
             active: None,
+            effect_spells: Default::default(),
         }
     }
 }
@@ -228,11 +230,16 @@ impl Game<'_> {
             return;
         }
         let player = self.native_acting_id();
+        if self.lan_acting.is_some() && !self.character_sync.server.selection_confirmed(player) { return; }
         let mut actor = match self.magic.actors.remove(&player) {
             Some(actor) => actor,
             None => {
                 self.magic_reset_body();
-                Actor::load(self.level.player_extra.as_ref())
+                let mut actor = Actor::load(self.level.player_extra.as_ref());
+                for spell in self.pack.magic_catalog.spells.values().filter(|s| s.kind == Kind::Effect) {
+                    if self.potions.effects.get(&spell.effects[1]).is_some() { actor.effect_spells.insert(spell.id.clone(), spell.clone()); }
+                }
+                actor
             }
         };
         let character = self.character_for(player).or_else(|| {
@@ -243,16 +250,30 @@ impl Game<'_> {
         });
         let id = character.map(|c| c.id.clone());
         if actor.character != id {
-            let spells = character
-                .map(|c| c.starting_spells.clone())
-                .unwrap_or_default();
-            if actor.active.take().is_some() {
+            let spells = character.map(|c| c.starting_spells.clone()).unwrap_or_default();
+            let switched = actor.ledger.character.as_ref().is_some_and(|previous| Some(previous) != id.as_ref())
+                || actor.character.as_ref().is_some_and(|previous| Some(previous) != id.as_ref());
+            if switched {
+                actor.active = None;
                 self.magic_reset_body();
+                self.magic_clear_spell_effects();
+                self.magic.requests.remove(&player);
+                self.magic.impacts.retain(|impact| impact.owner != player);
             }
-            actor.character = id;
-            if actor.writable && actor.ledger.grant(&spells, &self.pack.magic_catalog) {
-                self.magic_save(&actor.ledger);
+            actor.character = id.clone();
+            if actor.writable {
+                let bound = actor.ledger.bind_character(id.as_deref(), &spells, &self.pack.magic_catalog);
+                let granted = actor.ledger.grant(&spells, &self.pack.magic_catalog);
+                if bound || granted {
+                    self.magic_prune_unowned_effects(&actor.ledger);
+                    self.magic_save(&actor.ledger);
+                    self.magic_update(player, &actor, false, None, None);
+                }
             }
+        }
+        let ended = actor.effect_spells.iter().filter(|(_, spell)| self.potions.effects.get(&spell.effects[1]).is_none()).map(|(id, _)| id.clone()).collect::<Vec<_>>();
+        for id in ended {
+            if let Some(spell) = actor.effect_spells.remove(&id) { self.magic_effect_cue(&spell, false); }
         }
         let requests = self.magic.requests.remove(&player).unwrap_or_default();
         for request in requests {
@@ -303,6 +324,8 @@ impl Game<'_> {
                                         effect.visible = false;
                                         self.add_player_effect(effect);
                                     }
+                                    self.magic_effect_cue(&spell, true);
+                                    actor.effect_spells.insert(spell.id.clone(), spell.clone());
                                     started = true;
                                 } else {
                                 actor.active = Some(Cast {
@@ -394,6 +417,35 @@ impl Game<'_> {
             self.add_player_effect(effect);
         }
     }
+    fn magic_prune_unowned_effects(&mut self, ledger: &Ledger) {
+        let all = self.pack.magic_catalog.spells.values().flat_map(|s| s.effects.iter().cloned()).collect::<std::collections::BTreeSet<_>>();
+        let owned = self.pack.magic_catalog.spells.values().filter(|s| ledger.contains(&s.id)).flat_map(|s| s.effects.iter().cloned()).collect::<std::collections::BTreeSet<_>>();
+        let before = self.potions.effects.list.len();
+        self.potions.effects.list.retain(|effect| !all.contains(effect.id) || owned.contains(effect.id));
+        if self.potions.effects.list.len() != before { self.apply_effect_status(); }
+    }
+
+    fn magic_clear_spell_effects(&mut self) {
+        let ids = self.pack.magic_catalog.spells.values().flat_map(|s| s.effects.iter().cloned()).collect::<std::collections::BTreeSet<_>>();
+        self.potions.effects.list.retain(|effect| !ids.contains(effect.id));
+        self.apply_effect_status();
+    }
+
+    fn magic_effect_cue(&mut self, spell: &Spell, starting: bool) {
+        if let Some(sound) = if starting { &spell.start_sound } else { &spell.end_sound } {
+            self.magic_sound(sound, 0.65, if starting { 1.15 } else { 0.9 });
+        }
+        let Some(color) = spell.particle_color else { return; };
+        let Some(body) = self.player.as_ref() else { return; };
+        let at = [body.position.x, body.position.y + f64::from(body.dimensions.eye_height) * 0.7, body.position.z];
+        let options = ParticleOptions::dust(color, 0.8);
+        // One bounded burst at each boundary, using the normal world/packet pipeline.
+        self.lan_send_particles(super::lan_particles::QueuedParticle {
+            dimension: self.dim.id(), options, state: None, at,
+            spread: [0.35, 0.45, 0.35], speed: [0.02; 3], count: 18, randomization: 0,
+        });
+    }
+
     fn magic_clear_markers(&mut self) {
         let catalog = &self.pack.magic_catalog;
         self.potions.effects.list.retain(|effect| {
