@@ -11402,6 +11402,7 @@ impl horizon_client::interaction_input::InteractionWorld for RemoteInputWorld<'_
 }
 
 impl Remote {
+    pub(super) fn requires_chat_signing(&self) -> bool { self.enforces_secure_chat }
     /// `Minecraft.level != null`: from `handleLogin` until the next
     /// `handleConfigurationStart` (`clearClientLevel`). Minecraft.tick sends
     /// CLIENT_TICK_END only then, so a client waiting for the server's Login

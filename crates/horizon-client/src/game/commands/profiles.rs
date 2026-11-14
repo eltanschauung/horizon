@@ -87,7 +87,7 @@ impl Game<'_> {
         match t {
             Target::Player => Some(NameAndId {
                 id: self.lan_acting_uuid?,
-                name: self.command_player_alias(self.native_acting_id(),self.acting_player_name()),
+                name: self.command_player_alias(self.command_actor_uuid(),self.acting_player_name()),
             }),
             Target::Guest(conn) => self.command_guest(conn).map(|g| NameAndId {
                 id: g.uuid,
@@ -129,7 +129,7 @@ impl Game<'_> {
         if self.console_broadcast.is_some() {
             "Server".to_owned()
         } else {
-            self.command_player_alias(self.native_acting_id(),self.acting_player_name())
+            self.command_player_alias(self.command_actor_uuid(),self.acting_player_name())
         }
     }
 

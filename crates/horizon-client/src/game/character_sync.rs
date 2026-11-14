@@ -342,11 +342,15 @@ impl Game<'_> {
 }
 
 impl Game<'_> {
+    pub(super) fn command_actor_uuid(&self)->u128 {
+        self.lan_acting_uuid.or_else(||self.remote.as_ref().map(|r|r.profile()))
+            .or_else(||self.level.player_uuid.map(horizon_client::lan::playerdata::ints_uuid)).unwrap_or(0)
+    }
     /// Presentation identity for commands; UUIDs remain the authoritative keys
     /// for permissions, inventories, saves and authenticated connections.
     pub(super) fn command_player_alias(&self, uuid:u128, fallback:&str)->String {
         if self.pack.character_catalog.get(0).is_none() { return fallback.into(); }
-        let character=self.character_for(uuid).or_else(|| {
+        let character=self.character_for(uuid).or_else(||(uuid==self.command_actor_uuid()).then_some(self.character.as_ref()).flatten()).or_else(|| {
             let id=self.character_sync.saved.as_ref()?.entries.get(&format!("{uuid:032x}"))?;
             self.pack.character_catalog.get(self.pack.character_catalog.index(id)?)
         });

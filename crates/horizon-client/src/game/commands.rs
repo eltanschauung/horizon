@@ -827,7 +827,7 @@ impl Game<'_> {
                 }
                 for (name, neg) in &s.names {
                     let n = match t {
-                        Target::Player => self.command_player_alias(self.native_acting_id(), self.acting_player_name()),
+                        Target::Player => self.command_player_alias(self.command_actor_uuid(), self.acting_player_name()),
                         Target::Guest(conn) => self.command_guest(conn).map(|g| self.command_player_alias(g.uuid,&g.name)).unwrap_or_default(),
                         _ => self.target_name(t).plain(),
                     };

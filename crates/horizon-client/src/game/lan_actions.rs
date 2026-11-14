@@ -3790,7 +3790,7 @@ impl Game<'_> {
         let mut players = if self.options.dedicated.is_some() {
             Vec::new()
         } else {
-            vec![self.command_player_alias(self.native_acting_id(), self.acting_player_name())]
+            vec![self.command_player_alias(self.command_actor_uuid(), self.acting_player_name())]
         };
         players.extend(host.hub.guests.iter().map(|g| self.command_player_alias(g.uuid, &g.name)));
         let (ops, banned_players, banned_ips, whitelisted) = match &self.server_lists {
