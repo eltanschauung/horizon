@@ -262,6 +262,8 @@ def main():
             subprocess.run(["git", "push", "origin", "main"], cwd=ROOT, check=True)
             build_worldedit()
             build_gensouworks()
+            from fork_curated import install_defaults
+            install_defaults(ROOT)
             subprocess.run([fork_launcher(), "native-build", "--instance", "horizon", "--trust-native-code", "--allow-version-mismatch", "--profile", "release" if args.release else "performance"], cwd=ROOT, check=True)
         except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
             parser.exit(1, f"fork: {error}\n")

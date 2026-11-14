@@ -4149,3 +4149,9 @@ mod random_texture_tests {
         }
     }
 }
+
+// Equipment policy shared by skin extensions, including worker render threads. The game/mod frame
+// supplies effective visual opacity; simulation equipment is never changed.
+static EQUIPMENT_SKIN_OCCLUSION: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+pub fn set_chestplate_hides_skin(opaque: bool) { EQUIPMENT_SKIN_OCCLUSION.store(opaque, std::sync::atomic::Ordering::Relaxed); }
+pub fn chestplate_hides_skin() -> bool { EQUIPMENT_SKIN_OCCLUSION.load(std::sync::atomic::Ordering::Relaxed) }

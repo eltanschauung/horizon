@@ -430,6 +430,20 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             self.set_block(pos, b.table.cycle(state, b.props.stage), flags::UPDATE_NONE);
             return;
         }
+        // Content packs may bind a sapling's own ID to a configured feature
+        // under saplings/. Consult the actual state name, not its vanilla
+        // behavior template, so a fir sapling never inherits oak geometry.
+        let block_name = b.table.name(state);
+        if let Some((namespace, path)) = block_name.split_once(':') {
+            let feature = format!("{namespace}:saplings/{path}");
+            if self.feature_exists(&feature) {
+                self.remove_sapling(pos);
+                if !self.place_configured_feature(&feature, pos) {
+                    self.set_block(pos, state, flags::UPDATE_NONE);
+                }
+                return;
+            }
+        }
         let Some(name) = b.data(state).feature.clone() else {
             return;
         };

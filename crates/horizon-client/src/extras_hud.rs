@@ -80,7 +80,7 @@ pub fn draw_minimap(
     let (x, y) = corners.place(corner, size, size);
     batch.rect_uv(x, y, size, size, image, u32::MAX);
     let (cx, cy) = (x + size / 2.0, y + size / 2.0);
-    if let Some(r) = atlas.sprites.get("map/decorations/player").copied() {
+    if minimap_player_arrow_visible() && let Some(r) = atlas.sprites.get("map/decorations/player").copied() {
         // MapRenderer's decorations draw the sprite flipped: its arrow
         // points down the texture, so up on screen is half a turn.
         let (s, c) = (arrow + 180.0).to_radians().sin_cos();
@@ -171,3 +171,7 @@ mod tests {
         assert_eq!(c.place(Corner::BottomLeft, 10.0, 10.0), (2.0, 288.0));
     }
 }
+
+/// A minimap extension may replace the local arrow with another marker.
+#[inline(never)]
+pub fn minimap_player_arrow_visible() -> bool { true }

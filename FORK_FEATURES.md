@@ -85,3 +85,12 @@ Bamboo features accept an optional `patch` selector (`block`, `size` 4–256 blo
 Item cooldowns support independent `/action/` groups with latest-action display priority and fallback; `/action_update/` retimes without stealing display priority. Characters support numeric/string `hunger` (default 20), derived food capacity, extra HUD rows and persisted nonstandard capacity.
 
 Character presentation supports numeric/string `chest` (default 1, clamped 1–2; wide models resolve to 1), carried to local/remote avatar models and an optional selection-preview model hook. Lunatic supplies the skin-only geometry and motion.
+
+
+## Curated multiplayer and client compatibility
+
+Frozen manifests replace LambDynamicLights with the licensed Better Dynamic Lights source bundle and include Horizon Multiplayer Sleep (33% of eligible sleepers, rounded up). BOP saplings bind to explicit BOP configured features under `worldgen/feature/saplings/`, rather than inheriting oak growth from their block template. These overlays are applied to frozen inputs; preparing a manifest never changes installed packages. `build modded` applies those same defaults when explicitly invoked.
+
+Hosted chat is unsigned and non-reportable: profile keys, signature chains and acknowledgement checks are not collected/enforced for chat. Microsoft/portable login authentication, packet bounds and normal chat visibility remain separate. Commands resolve and suggest character aliases, including variants, while permissions and storage remain UUID-based. Duplicate character names get a UUID suffix.
+
+Windows release and portable packaging require the pinned, checksum-verified x64 Opus DLL and its license (`tools/windows_runtime.py`), including runtime-loaded dependencies that PE import scans cannot discover. Minimap waypoints are cached per world/server and dimension, with U opening the editor and an optional local head marker. Skin extensions use effective chestplate opacity, including renderer workers; transparent/hidden equipment does not hide the corresponding skin layer.

@@ -90,9 +90,14 @@ def snapshot(args):
     entries = []
     seen = set()
     wanted = set(args.mods.split(',')) if args.mods else None
+    from fork_curated import native_packages, patch_content, REMOVED
+    curated = native_packages(ROOT)
+    curated_ids = {package(p, True)["id"] for p in curated}
     for folder, suffix, native in [('horizon-native-mods','hnmod',True),('horizon-mods','hmod',False)]:
-        for src in sorted((game/folder).glob('*.'+suffix)):
+        sources = list((game/folder).glob('*.'+suffix)) + (curated if native else [])
+        for src in sorted(sources):
             info = package(src, native)
+            if native and (info['id'] in REMOVED or (info['id'] in curated_ids and src not in curated)): continue
             if native and wanted is not None and info['id'] not in wanted:
                 continue
             key = (native, info['id'])
@@ -101,6 +106,7 @@ def snapshot(args):
             dest = out.parent/'inputs'/folder/(info['id']+'.'+suffix)
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dest)
+            if not native: patch_content(ROOT, src, dest, info['id'])
             frozen = package(dest, native)
             if frozen['id'] != info['id']:raise ValueError('Package identity changed during snapshot; retry')
             entries.append(dict(frozen, kind='native' if native else 'content', path=str(dest.relative_to(out.parent))))
