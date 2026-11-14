@@ -99,6 +99,8 @@ pub struct Clicks {
     /// `isQuickCrafting` with `quickCraftingButton`.
     quick_crafting: Option<Button>,
     skip_next_release: bool,
+    /// Only a slot pickup may turn its otherwise-skipped release into a drop.
+    picked_up_on_press: bool,
 }
 
 /// What a release does.
@@ -122,6 +124,7 @@ impl Clicks {
     pub fn skip_release(&mut self) {
         self.quick_crafting = None;
         self.skip_next_release = true;
+        self.picked_up_on_press = false;
     }
 
     /// The screen that takes the pointer over starts with its own state:
@@ -134,6 +137,7 @@ impl Clicks {
     pub fn cancel_drag(&mut self) {
         self.quick_crafting = None;
         self.skip_next_release = false;
+        self.picked_up_on_press = false;
     }
 
     /// `mouseClicked` (no double click): the `slotClicked` input it sends on
@@ -148,6 +152,7 @@ impl Clicks {
         cloning: bool,
     ) -> Option<Input> {
         self.skip_next_release = false;
+        self.picked_up_on_press = false;
         if button == Button::Middle && !cloning {
             return None;
         }
@@ -159,6 +164,7 @@ impl Clicks {
             return None;
         }
         self.skip_next_release = true;
+        self.picked_up_on_press = matches!(target, Target::Slot(_)) && !shift && !cloning;
         Some(if cloning {
             Input::Clone
         } else if shift && !matches!(target, Target::Outside) {
@@ -191,7 +197,8 @@ impl Clicks {
             self.skip_next_release = false;
             // A pickup press already moved the stack to the cursor. Releasing
             // that same drag outside must throw it, rather than losing the release.
-            return if matches!(target, Target::Outside) && !carried_empty && !pick_item {
+            let pickup = std::mem::take(&mut self.picked_up_on_press);
+            return if pickup && matches!(target, Target::Outside) && !carried_empty && !pick_item {
                 Release::Click(Input::Pickup)
             } else { Release::Nothing };
         }
