@@ -2,7 +2,7 @@
 from pathlib import Path
 import importlib.util,json,subprocess,zipfile
 REMOVED={'lambdynamiclights_horizon','lambdynamiclights','sleep_threshold'}
-ADDED=('betterdynamiclights','horizon_multiplayer_sleep')
+ADDED=('betterdynamiclights','horizon_multiplayer_sleep','horizonmatica')
 def native_packages(root):
     native=root.parent/'horizon-mods/native'
     paths=[]

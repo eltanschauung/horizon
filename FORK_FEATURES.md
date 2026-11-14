@@ -105,3 +105,5 @@ Windows release and portable packaging require the pinned, checksum-verified x64
   See [server-synced launcher](docs/server-synced-launcher.md).
 
 - Ely.by accounts: Settings sign-in with optional 2FA, provider-separated keychain sessions, automatic refresh, account switching and sign-out; native Ely authentication/skins with Microsoft-only ownership downloads. Online servers opt in through `server.allow_portable`. See [Ely accounts](docs/ely-account.md).
+
+- Horizonmatica 0.3.2 is bundled and enabled in frozen release defaults; vendored MIT source and upstream credits live in horizon-mods/native/horizonmatica.
