@@ -8,11 +8,22 @@ impl Launcher {
     /// The chip's two lines: the name that plays, and how.
     pub(super) fn who_plays(&self) -> (String, &'static str) {
         match self.accounts.player() {
-            Player::Microsoft(_) => (
+            Player::Account(_) => (
                 self.accounts
                     .selected()
                     .map_or_else(String::new, |a| a.name.clone()),
-                tr("Microsoft account"),
+                tr(
+                    if self
+                        .accounts
+                        .selected
+                        .as_deref()
+                        .is_some_and(|k| k.starts_with("ely:"))
+                    {
+                        "Ely.by account"
+                    } else {
+                        "Microsoft account"
+                    },
+                ),
             ),
             Player::Offline(name) => (name, tr("Offline")),
             Player::GameName => (
@@ -42,12 +53,19 @@ impl Launcher {
             .iter()
             .map(|a| {
                 (
-                    Player::Microsoft(a.uuid.clone()),
+                    Player::Account(a.uuid.clone()),
                     a.name.clone(),
                     tr("Microsoft"),
                 )
             })
             .collect();
+        out.extend(self.accounts.ely.iter().map(|a| {
+            (
+                Player::Account(account::ely::key(&a.uuid)),
+                a.name.clone(),
+                tr("Ely.by"),
+            )
+        }));
         out.extend(
             self.accounts
                 .offline
@@ -103,7 +121,7 @@ impl Launcher {
                     .hover(move |s| s.bg(t.plate_soft))
                     .child(self.profile_heads.draw(
                         match &who {
-                            Player::Microsoft(uuid) => Some(uuid),
+                            Player::Account(uuid) => Some(uuid),
                             _ => None,
                         },
                         24.,

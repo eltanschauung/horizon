@@ -824,7 +824,19 @@ fn authenticate(
         }
     };
     let ip = online.prevent_proxy.then(|| address.ip());
-    match crate::auth::has_joined(name, &digest, ip) {
+    let microsoft = crate::auth::has_joined(name, &digest, ip);
+    // Preserve Microsoft precedence. Alternative-provider accounts require the existing
+    // explicit non-Microsoft opt-in, and a successful Ely proof for THIS encrypted login.
+    let verified = if shared.config.allow_portable && !matches!(&microsoft, Ok(Some(_))) {
+        match crate::auth::has_joined_ely(name, &digest, ip) {
+            Ok(Some(profile)) => Ok(Some(profile)),
+            Err(error) if matches!(&microsoft, Ok(None)) => Err(error),
+            _ => microsoft,
+        }
+    } else {
+        microsoft
+    };
+    match verified {
         Ok(Some(profile)) => {
             log(
                 "INFO",

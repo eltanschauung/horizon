@@ -25,9 +25,17 @@ pub struct Textures {
 }
 
 /// The `getTexture` endpoint's valid URIs from Minecraft services discovery.
-pub const TEXTURE_URIS: [&str; 2] = [
+pub const TEXTURE_URIS: [&str; 10] = [
     "https://textures.minecraft.net/texture/{textureId}",
     "http://textures.minecraft.net/texture/{textureId}",
+    "https://ely.by/storage/skins/{textureId}",
+    "http://ely.by/storage/skins/{textureId}",
+    "https://ely.by/storage/capes/{textureId}",
+    "http://ely.by/storage/capes/{textureId}",
+    "https://skinsystem.ely.by/skins/{textureId}",
+    "http://skinsystem.ely.by/skins/{textureId}",
+    "https://skinsystem.ely.by/cloaks/{textureId}",
+    "http://skinsystem.ely.by/cloaks/{textureId}",
 ];
 
 /// `java.util.Base64.getDecoder().decode`.

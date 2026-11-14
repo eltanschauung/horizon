@@ -58,7 +58,7 @@ pub fn face(skin_png: &[u8]) -> Option<Vec<[u8; 4]>> {
 /// The default skin a player with `uuid` wears, as a file of the prepared game files in
 /// `resources`, and whether its arms are slim.
 pub fn default_skin_file(resources: &Path, uuid: &str) -> Option<(std::path::PathBuf, bool)> {
-    let skin = default_skin(parse_uuid(uuid)?);
+    let skin = default_skin(parse_uuid(uuid.strip_prefix("ely:").unwrap_or(uuid))?);
     let path = resources
         .join("assets/minecraft/textures/entity/player")
         .join(format!("{skin}.png"));
@@ -132,10 +132,12 @@ fn session_skin(
     fetch: &dyn Fn(&str) -> Option<Vec<u8>>,
 ) -> Option<String> {
     use base64::Engine;
-    if uuid.len() != 32 || !uuid.bytes().all(|b| b.is_ascii_hexdigit()) {
+    let ely = uuid.starts_with("ely:");
+    let raw = uuid.strip_prefix("ely:").unwrap_or(uuid);
+    if raw.len() != 32 || !raw.bytes().all(|b| b.is_ascii_hexdigit()) {
         return None;
     }
-    let file = cache.join(format!("{uuid}.skin-url"));
+    let file = cache.join(format!("{}{raw}.skin-url", if ely { "ely-" } else { "" }));
     let fresh = std::fs::metadata(&file)
         .and_then(|m| m.modified())
         .ok()
@@ -146,9 +148,11 @@ fn session_skin(
             return (!url.is_empty()).then_some(url);
         }
     }
-    let body = fetch(&format!(
-        "https://sessionserver.mojang.com/session/minecraft/profile/{uuid}"
-    ))?;
+    let body = fetch(&if ely {
+        format!("https://authserver.ely.by/session/profile/{raw}")
+    } else {
+        format!("https://sessionserver.mojang.com/session/minecraft/profile/{raw}")
+    })?;
     let profile: serde_json::Value = serde_json::from_slice(&body).ok()?;
     let textures = profile["properties"]
         .as_array()?
@@ -191,6 +195,7 @@ fn profile_face_with(
             .or_else(|| url.strip_prefix("http://textures.minecraft.net/texture/"));
         if texture
             .is_some_and(|hash| !hash.is_empty() && hash.bytes().all(|b| b.is_ascii_hexdigit()))
+            || account.uuid.starts_with("ely:") && crate::account::ely::allowed_skin_url(url)
         {
             let file = cache.join(format!("{:x}.png", Sha1::digest(url.as_bytes())));
             if let Some(face) = std::fs::read(&file)
@@ -242,6 +247,45 @@ mod tests {
         assert_eq!(face.len(), 64);
         assert_eq!(face[0], [1, 2, 3, 255]);
         assert_eq!(face[1], [7, 8, 9, 255]);
+    }
+
+    #[test]
+    fn ely_heads_use_public_ely_profile_and_skin_cache() {
+        use base64::Engine;
+        let dir = std::env::temp_dir().join(format!("hz-ely-head-{}", std::process::id()));
+        let mut image = image::RgbaImage::new(64, 64);
+        image.put_pixel(8, 8, image::Rgba([12, 34, 56, 255]));
+        let mut png = Vec::new();
+        image
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        let account = crate::account::Account {
+            name: "Ely_Player".into(),
+            uuid: "ely:11111111222253338444555555555555".into(),
+            skin: None,
+            cape: None,
+        };
+        let profile=serde_json::json!({"properties":[{"name":"textures","value":base64::engine::general_purpose::STANDARD.encode(serde_json::json!({"textures":{"SKIN":{"url":"https://ely.by/storage/skins/abc.png"}}}).to_string())}]}).to_string();
+        let asked = std::cell::RefCell::new(Vec::new());
+        let fetch = |url: &str| {
+            asked.borrow_mut().push(url.to_owned());
+            if url.ends_with("abc.png") {
+                Some(png.clone())
+            } else {
+                Some(profile.as_bytes().to_vec())
+            }
+        };
+        let head = profile_face_with(&account, &dir, &dir, &fetch).unwrap();
+        assert_eq!(head[0], [12, 34, 56, 255]);
+        assert_eq!(asked.borrow().len(), 2);
+        assert!(asked.borrow()[0].starts_with("https://authserver.ely.by/session/profile/"));
+        assert_eq!(
+            profile_face_with(&account, &dir, &dir, &|_| panic!(
+                "cached Ely face should not make a request"
+            )),
+            Some(head)
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

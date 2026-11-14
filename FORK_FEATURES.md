@@ -103,3 +103,5 @@ Windows release and portable packaging require the pinned, checksum-verified x64
   Package transactions recover/roll back without touching worlds or accounts.
   Frozen server deployment publishes the matching channel only after health checks.
   See [server-synced launcher](docs/server-synced-launcher.md).
+
+- Ely.by accounts: Settings sign-in with optional 2FA, provider-separated keychain sessions, automatic refresh, account switching and sign-out; native Ely authentication/skins with Microsoft-only ownership downloads. Online servers opt in through `server.allow_portable`. See [Ely accounts](docs/ely-account.md).

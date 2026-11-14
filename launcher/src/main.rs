@@ -14,6 +14,7 @@ mod console_page;
 mod cull;
 mod datapacks_page;
 mod dev_options;
+mod ely_ui;
 mod export_page;
 mod frame;
 mod game_tools;
@@ -368,6 +369,8 @@ struct Launcher {
     root_focus: FocusHandle,
     /// Microsoft accounts (accounts.json), the sign-in under way and what it last showed.
     accounts: Accounts,
+    ely_busy: bool,
+    ely_error: Option<String>,
     auth_status: HashMap<String, account::session::Status>,
     auth_progress: HashMap<String, account::session::Phase>,
     profile_heads: profile_heads::Heads,
@@ -689,6 +692,8 @@ impl Launcher {
             palette: None,
             toast_seen: None,
             accounts: Accounts::load(),
+            ely_busy: false,
+            ely_error: None,
             auth_status: HashMap::new(),
             auth_progress: HashMap::new(),
             profile_heads: profile_heads::Heads::default(),
@@ -904,6 +909,12 @@ impl Launcher {
         self.load_profile_heads();
         self.wardrobe_reload |= matches!(page, Page::Wardrobe | Page::Shop);
         if page != self.page {
+            self.servers
+                .text(servers_page::Field::ElyPassword)
+                .set(String::new());
+            self.servers
+                .text(servers_page::Field::ElyCode)
+                .set(String::new());
             self.page = page;
             self.switches += 1;
             self.content_scroll = Scrollbar::default();
@@ -1186,6 +1197,23 @@ impl Launcher {
                 Msg::Reused(_) => self.installed = backend::installed(),
                 Msg::Keychain(said) => self.keychain = said,
                 Msg::Owner(owns) => self.owner = Some(owns),
+                Msg::ElyAccount(result) => {
+                    self.ely_busy = false;
+                    self.ely_error = result.err();
+                    if self.ely_error.as_deref() == Some(account::ely::TWO_FACTOR) {
+                        self.servers.focus_soon = Some(servers_page::Field::ElyCode);
+                    }
+                    if self.ely_error.is_none() {
+                        self.servers
+                            .text(servers_page::Field::ElyPassword)
+                            .set(String::new());
+                        self.servers
+                            .text(servers_page::Field::ElyCode)
+                            .set(String::new());
+                    }
+                    self.accounts = Accounts::load();
+                    self.load_profile_heads();
+                }
                 Msg::AccountHead(uuid, url, face, failed) => {
                     self.profile_heads.loaded(&uuid, &url, face, failed)
                 }
@@ -2000,11 +2028,16 @@ impl Launcher {
         let offline: Vec<String> = self
             .players()
             .into_iter()
-            .filter(|(who, _, _)| !matches!(who, account::Player::Microsoft(_)))
+            .filter(|(who, _, _)| !matches!(who, account::Player::Account(_)))
             .map(|(_, name, _)| name)
             .collect();
+        let mut accounts = self.accounts.accounts.clone();
+        accounts.extend(self.accounts.ely.iter().cloned().map(|mut a| {
+            a.uuid = account::ely::key(&a.uuid);
+            a
+        }));
         self.profile_heads
-            .request(&self.accounts.accounts, &offline, resources, &self.tx);
+            .request(&accounts, &offline, resources, &self.tx);
     }
 
     fn begin_auth_job(&mut self, uuid: &str) -> Option<u64> {
@@ -2909,7 +2942,7 @@ impl Launcher {
         // one the game made up. A signed-in one shows its face (its skin, else its UUID's default).
         let (name, how) = self.who_plays();
         let face = match self.accounts.player() {
-            account::Player::Microsoft(_) => self.accounts.selected().map(|a| a.uuid.clone()),
+            account::Player::Account(_) => self.accounts.selected().map(|a| a.uuid.clone()),
             _ => None,
         };
         let picture = match face {
@@ -4490,7 +4523,7 @@ impl Launcher {
             action,
             &t,
         ));
-        (rows, n)
+        (rows.child(self.ely_panel(cx)), n + 1)
     }
 
     /// The Microsoft accounts signed in here: each one's head, name and state, Play as,
@@ -4522,7 +4555,7 @@ impl Launcher {
                 actions = actions.child(
                     button(format!("select-{i}"), "Play as", Kind::Secondary, &t).on_click(
                         cx.listener(move |this, _: &ClickEvent, _, cx| {
-                            this.play_as(account::Player::Microsoft(uuid.clone()));
+                            this.play_as(account::Player::Account(uuid.clone()));
                             cx.notify();
                         }),
                     ),

@@ -14,6 +14,8 @@
 //! build time, or at run time to override it. Without one, sign-in says it is not configured.
 pub mod session;
 
+pub mod ely;
+
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -1692,6 +1694,8 @@ pub fn in_secrets_file() -> bool {
 /// accounts.json: the signed-in accounts and the one that plays. Never a token.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Accounts {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ely: Vec<Account>,
     pub accounts: Vec<Account>,
     /// The UUID of the account the game starts with; none plays offline.
     pub selected: Option<String>,
@@ -1710,8 +1714,8 @@ pub struct Accounts {
 /// Who plays, as the quick switch lists them.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Player {
-    /// A Microsoft account, by UUID.
-    Microsoft(String),
+    /// A signed-in account: raw Microsoft UUID or `ely:<uuid>`.
+    Account(String),
     /// An offline name.
     Offline(String),
     /// Offline as the name the game made up.
@@ -1761,10 +1765,16 @@ impl Accounts {
     }
     pub fn selected(&self) -> Option<&Account> {
         let uuid = self.selected.as_ref()?;
+        if let Some(id) = uuid.strip_prefix("ely:") {
+            return self.ely.iter().find(|a| a.uuid == id);
+        }
         self.accounts.iter().find(|a| &a.uuid == uuid)
     }
     /// Find an account by name (any case) or UUID (with or without dashes).
     pub fn find(&self, who: &str) -> Option<&Account> {
+        if let Some(id) = who.strip_prefix("ely:") {
+            return self.ely.iter().find(|a| a.uuid == id);
+        }
         let undashed = who.replace('-', "").to_lowercase();
         self.accounts
             .iter()
@@ -1804,6 +1814,12 @@ impl Accounts {
         // The selected account first: it owning the game ends the search after one account's
         // item — every account's item read can ask for the keychain (macOS, #4912).
         self.selected()
+            .filter(|_| {
+                !self
+                    .selected
+                    .as_deref()
+                    .is_some_and(|k| k.starts_with("ely:"))
+            })
             .into_iter()
             .chain(self.accounts.iter().filter(|a| Some(*a) != self.selected()))
             .any(|a| secrets_in(store, &a.uuid).is_some_and(|s| s.owns))
@@ -1812,7 +1828,7 @@ impl Accounts {
     /// Who plays now.
     pub fn player(&self) -> Player {
         match (self.selected(), &self.offline_selected) {
-            (Some(a), _) => Player::Microsoft(a.uuid.clone()),
+            (Some(_), _) => Player::Account(self.selected.clone().unwrap()),
             (None, Some(name)) => Player::Offline(name.clone()),
             (None, None) => Player::GameName,
         }
@@ -1834,8 +1850,8 @@ impl Accounts {
         offline_without_owner: bool,
     ) -> Result<(), String> {
         match who {
-            Player::Microsoft(uuid) => {
-                if !self.accounts.iter().any(|a| a.uuid == uuid) {
+            Player::Account(uuid) => {
+                if self.find(&uuid).is_none() {
                     return Err("That account isn't signed in.".into());
                 }
                 self.selected = Some(uuid);
@@ -1926,8 +1942,15 @@ impl Accounts {
     /// play only once an account that owns the game is back.
     pub fn remove(&mut self, store: &dyn SecretStore, uuid: &str) -> Result<(), String> {
         let _operation = session::lock(store)?;
+        self.remove_locked(store, uuid)
+    }
+    fn remove_locked(&mut self, store: &dyn SecretStore, uuid: &str) -> Result<(), String> {
         store.delete(uuid)?;
-        self.accounts.retain(|a| a.uuid != uuid);
+        if let Some(id) = uuid.strip_prefix("ely:") {
+            self.ely.retain(|a| a.uuid != id);
+        } else {
+            self.accounts.retain(|a| a.uuid != uuid);
+        }
         if self.selected.as_deref() == Some(uuid) {
             self.selected = None;
         }
@@ -2111,6 +2134,10 @@ pub fn write_session_file(
     account: &Account,
     secrets: &Secrets,
 ) -> Result<PathBuf, String> {
+    let body = json!({"name":account.name,"uuid":account.uuid,"access_token":secrets.minecraft_token,"user_type":"msa","xuid":secrets.xuid});
+    write_session_body(dir, &body)
+}
+fn write_session_body(dir: &Path, body: &Value) -> Result<PathBuf, String> {
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     // The folder too is this user's only (the files already are).
     #[cfg(unix)]
@@ -2141,13 +2168,6 @@ pub fn write_session_file(
     #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
     let mut file = options.open(&path).map_err(|e| e.to_string())?;
-    let body = json!({
-        "name": account.name,
-        "uuid": account.uuid,
-        "access_token": secrets.minecraft_token,
-        "user_type": "msa",
-        "xuid": secrets.xuid,
-    });
     std::io::Write::write_all(&mut file, body.to_string().as_bytes()).map_err(|e| e.to_string())?;
     Ok(path)
 }
@@ -2168,7 +2188,9 @@ fn write_launch_session_file(
     account: &Account,
     secrets: &Secrets,
 ) -> Result<PathBuf, String> {
-    let path = write_session_file(dir, account, secrets)?;
+    track_session_file(write_session_file(dir, account, secrets)?)
+}
+fn track_session_file(path: PathBuf) -> Result<PathBuf, String> {
     let Ok(mut unread) = UNREAD.lock() else {
         return Ok(path);
     };
@@ -2344,6 +2366,10 @@ pub fn session_for_game(
     offline_without_owner: bool,
 ) -> Result<GameSession, NoOwner> {
     let mut accounts = Accounts::load();
+    if let Some(key) = accounts.selected.clone().filter(|s| s.starts_with("ely:")) {
+        return ely::game_session(game_home, &mut accounts, &key)
+            .map_err(|e| NoOwner { keyring: Some(e) });
+    }
     let pass = launch_for_game(
         &Endpoints::live(),
         client_id().as_deref(),
@@ -2368,6 +2394,11 @@ pub fn session_for_game(
 /// `account select` picked is not touched.
 pub fn session_for_game_as(game_home: &Path, who: &Player) -> Result<GameSession, String> {
     let mut accounts = Accounts::load();
+    if let Player::Account(key) = who {
+        if key.starts_with("ely:") {
+            return ely::game_session(game_home, &mut accounts, key);
+        }
+    }
     let pass = launch_as(
         &Endpoints::live(),
         client_id().as_deref(),

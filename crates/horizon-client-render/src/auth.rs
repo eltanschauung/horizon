@@ -1,4 +1,4 @@
-//! The Microsoft account the launcher signed in, handed over in a session
+//! The Microsoft or Ely.by account the launcher signed in, handed over in a session
 //! file (docs/microsoft-account.md), and the Minecraft services call
 //! online-mode servers need: authlib's MinecraftServicesSessionService.joinServer
 //! through the services discovery document. The access token stays in this
@@ -20,6 +20,7 @@ pub struct AuthSession {
     pub uuid: u128,
     pub xuid: Option<String>,
     access_token: String,
+    ely: bool,
 }
 impl std::fmt::Debug for AuthSession {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -47,12 +48,18 @@ impl AuthSession {
             uuid,
             xuid: None,
             access_token: access_token.to_owned(),
+            ely: false,
         }
     }
 
+    /// Microsoft-only credentials for Realms. Ely tokens must never leave Ely.by.
     pub fn access_token(&self) -> &str {
-        &self.access_token
+        if self.ely { "" } else { &self.access_token }
     }
+    pub fn is_ely(&self) -> bool {
+        self.ely
+    }
+
     /// The session file's JSON: {"name", "uuid", "access_token", "user_type": "msa", "xuid"}.
     pub fn parse(text: &str) -> Result<Self, String> {
         let v: serde_json::Value =
@@ -68,14 +75,20 @@ impl AuthSession {
         let access_token = field("access_token")
             .filter(|t| !t.is_empty())
             .ok_or("the session has no access token")?;
-        if field("user_type").is_some_and(|t| t != "msa") {
-            return Err("the session is not a Microsoft account session".into());
+        let ely = match field("user_type") {
+            None | Some("msa") => false,
+            Some("ely") => true,
+            _ => return Err("the session has an unsupported account provider".into()),
+        };
+        if ely && !is_ely_uuid(uuid) {
+            return Err("the Ely.by account UUID is invalid".into());
         }
         Ok(Self {
             name: name.to_owned(),
             uuid,
             xuid: field("xuid").map(str::to_owned),
             access_token: access_token.to_owned(),
+            ely,
         })
     }
     /// Read the session file the launcher wrote and delete it at once. It
@@ -194,6 +207,7 @@ pub fn discovery_url() -> String {
 fn agent() -> ureq::Agent {
     ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(15))
+        .redirects(0)
         .user_agent(&format!("Horizon/{}", horizon_core::release::VERSION))
         .build()
 }
@@ -231,6 +245,9 @@ pub fn endpoint(doc: &serde_json::Value, service: &str, name: &str) -> Option<St
 /// to no actions, as vanilla does. Blocks: call it off the main thread.
 pub fn fetch_account_status(session: &AuthSession) -> crate::ban_notice::AccountStatus {
     use crate::ban_notice::{AccountStatus, parse_profile_actions, parse_properties};
+    if session.ely {
+        return AccountStatus::default();
+    }
     let Ok(doc) = discovery() else {
         return AccountStatus::default();
     };
@@ -300,9 +317,16 @@ pub fn join_server(session: &AuthSession, server_hash: &str) -> Result<(), JoinE
     )
 }
 
-fn join_server_once(session: &AuthSession, server_hash: &str) -> Result<(), JoinError> {
+fn join_url(session: &AuthSession) -> Result<String, JoinError> {
+    if session.ely {
+        return Ok(format!("{ELY_AUTH}/session/join"));
+    }
     let doc = discovery()?;
-    let url = endpoint(&doc, "session", "join").ok_or(JoinError::Unavailable)?;
+    endpoint(&doc, "session", "join").ok_or(JoinError::Unavailable)
+}
+
+fn join_server_once(session: &AuthSession, server_hash: &str) -> Result<(), JoinError> {
+    let url = join_url(session)?;
     match agent()
         .post(&url)
         .set("Content-Type", "application/json; charset=utf-8")
@@ -423,6 +447,9 @@ pub fn parse_certificates(body: &str) -> Option<ChatKeyPair> {
 /// UserApiService.getKeyPair: the certificates endpoint, POSTed with the
 /// access token.
 pub fn fetch_chat_keys(session: &AuthSession) -> Result<ChatKeyPair, JoinError> {
+    if session.ely {
+        return Err(JoinError::InvalidSession);
+    }
     let doc = discovery()?;
     let url = endpoint(&doc, "player", "getCertificates").ok_or(JoinError::Unavailable)?;
     let body = match agent()
@@ -471,6 +498,9 @@ pub fn prepare_chat_keys(now: bool) {
 
 /// Prepare keys for this player, independently of the other local accounts.
 pub fn prepare_chat_keys_for(session: Arc<AuthSession>, now: bool) {
+    if session.ely {
+        return;
+    }
     let uuid = session.uuid;
     let mut accounts = CHAT_KEYS.lock().unwrap();
     let keys = accounts.entry(uuid).or_default();
@@ -527,6 +557,25 @@ const MINECRAFT_PROFILE: &str = "https://api.minecraftservices.com/minecraft/pro
 /// Single-player and integrated servers often send no `textures` property, or
 /// one without the equipped cape; the client asks the profile endpoint once.
 pub fn own_textures(session: &AuthSession) -> Option<crate::skins::Textures> {
+    if session.ely {
+        let body = agent()
+            .get(&format!("{ELY_AUTH}/session/profile/{:032x}", session.uuid))
+            .call()
+            .ok()?
+            .into_string()
+            .ok()?;
+        let profile: serde_json::Value = serde_json::from_str(&body).ok()?;
+        let property = profile
+            .get("properties")?
+            .as_array()?
+            .iter()
+            .find(|p| p.get("name").and_then(|v| v.as_str()) == Some("textures"))?;
+        return Some(crate::skins::unpack(
+            property.get("value")?.as_str()?,
+            crate::skins::Signature::Unsigned,
+            &crate::skins::TEXTURE_URIS,
+        ));
+    }
     let response = agent()
         .get(MINECRAFT_PROFILE)
         .set("Authorization", &format!("Bearer {}", session.access_token))
@@ -567,6 +616,25 @@ fn url_encode(text: &str) -> String {
 /// whether `name` joined with `server_hash` (and from `ip`, when the server
 /// prevents proxy connections). `Ok(None)`: it didn't, or the service said
 /// no; `Err(Unavailable)`: no answer.
+pub const ELY_AUTH: &str = "https://authserver.ely.by";
+
+/// Ely's UUIDv5 identities cannot claim a Microsoft UUIDv4 or portable UUIDv8.
+pub fn is_ely_uuid(uuid: u128) -> bool {
+    (uuid >> 76) & 15 == 5 && (uuid >> 62) & 3 == 2
+}
+
+/// Only servers explicitly allowing non-Microsoft accounts call this verifier.
+pub fn has_joined_ely(
+    name: &str,
+    hash: &str,
+    ip: Option<std::net::IpAddr>,
+) -> Result<Option<JoinedProfile>, JoinError> {
+    Ok(
+        has_joined_at(&format!("{ELY_AUTH}/session/hasJoined"), name, hash, ip)?
+            .filter(|profile| is_ely_uuid(profile.uuid)),
+    )
+}
+
 pub fn has_joined(
     name: &str,
     server_hash: &str,
@@ -574,6 +642,14 @@ pub fn has_joined(
 ) -> Result<Option<JoinedProfile>, JoinError> {
     let doc = discovery()?;
     let url = endpoint(&doc, "session", "verify").ok_or(JoinError::Unavailable)?;
+    has_joined_at(&url, name, server_hash, ip)
+}
+fn has_joined_at(
+    url: &str,
+    name: &str,
+    server_hash: &str,
+    ip: Option<std::net::IpAddr>,
+) -> Result<Option<JoinedProfile>, JoinError> {
     let mut query = format!(
         "username={}&serverId={}",
         url_encode(name),
@@ -595,6 +671,14 @@ pub fn has_joined(
         }
         Err(ureq::Error::Transport(_)) => return Err(JoinError::Unavailable),
     };
+    let profile: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
+    if !profile
+        .get("name")
+        .and_then(|v| v.as_str())
+        .is_some_and(|n| n.eq_ignore_ascii_case(name))
+    {
+        return Ok(None);
+    }
     Ok(parse_joined(&body))
 }
 
@@ -624,6 +708,75 @@ pub fn parse_joined(body: &str) -> Option<JoinedProfile> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ely_verification_binds_name_and_server_hash() {
+        use std::{
+            io::{BufRead, BufReader, Write},
+            net::TcpListener,
+        };
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/verify", listener.local_addr().unwrap());
+        let worker = std::thread::spawn(move || {
+            let mut requests = Vec::new();
+            for name in ["Ely_Player", "Different"] {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                requests.push(line);
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    if line == "\r\n" {
+                        break;
+                    }
+                }
+                let body=serde_json::json!({"id":"11111111222253338444555555555555","name":name,"properties":[]}).to_string();
+                write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
+            }
+            requests
+        });
+        let p = has_joined_at(&url, "Ely_Player", "-abc hash", None)
+            .unwrap()
+            .unwrap();
+        assert!(is_ely_uuid(p.uuid));
+        assert!(
+            has_joined_at(&url, "Ely_Player", "-abc hash", None)
+                .unwrap()
+                .is_none()
+        );
+        let requests = worker.join().unwrap();
+        assert!(
+            requests
+                .iter()
+                .all(|r| r.contains("username=Ely_Player&serverId=-abc+hash"))
+        );
+    }
+
+    #[test]
+    fn ely_sessions_do_not_expose_tokens_to_microsoft_services() {
+        let session=AuthSession::parse(r#"{"name":"Ely_Player","uuid":"11111111222253338444555555555555","access_token":"ely-dummy","user_type":"ely"}"#).unwrap();
+        assert!(session.is_ely());
+        assert_eq!(
+            join_url(&session).unwrap(),
+            "https://authserver.ely.by/session/join"
+        );
+        assert_eq!(session.access_token(), "");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&join_request(&session, "bound-hash"))
+                .unwrap()["accessToken"],
+            "ely-dummy"
+        );
+        assert_eq!(
+            fetch_chat_keys(&session).unwrap_err(),
+            JoinError::InvalidSession
+        );
+        assert!(!is_ely_uuid(0x069a79f444e94726a5befca90e38aaf5));
+        assert!(!is_ely_uuid(0x11111111222283338444555555555555));
+        let invalid = r#"{"name":"Ely_Player","uuid":"069a79f444e94726a5befca90e38aaf5","access_token":"ely-dummy","user_type":"ely"}"#;
+        assert!(AuthSession::parse(invalid).is_err());
+    }
 
     const UUID: u128 = 0x069a79f444e94726a5befca90e38aaf5;
 

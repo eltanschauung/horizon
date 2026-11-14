@@ -61,6 +61,9 @@ pub(super) enum Field {
     MemoryLimit,
     /// Settings' new offline name (`switch_page.rs`).
     OfflineName,
+    ElyLogin,
+    ElyPassword,
+    ElyCode,
     DeleteServer,
     /// Settings' accent as hex (`themes_page.rs`).
     AccentHex,
@@ -69,7 +72,7 @@ pub(super) enum Field {
 }
 
 impl Field {
-    const ALL: [Field; 25] = [
+    const ALL: [Field; 28] = [
         Field::Name,
         Field::Seed,
         Field::Players,
@@ -92,6 +95,9 @@ impl Field {
         Field::PostExit,
         Field::MemoryLimit,
         Field::OfflineName,
+        Field::ElyLogin,
+        Field::ElyPassword,
+        Field::ElyCode,
         Field::DeleteServer,
         Field::AccentHex,
         Field::ShopGift,
@@ -1197,7 +1203,7 @@ impl Launcher {
                 &t,
                 focused,
                 selected,
-                f == Field::Token,
+                matches!(f, Field::Token | Field::ElyPassword),
                 placeholder,
             ))
             .on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
@@ -1214,6 +1220,11 @@ impl Launcher {
                 if ev.keystroke.key != "enter" && this.servers.invalid.is_some_and(|(g, _)| g == f)
                 {
                     this.servers.invalid = None;
+                }
+                if this.ely_busy
+                    && matches!(f, Field::ElyLogin | Field::ElyPassword | Field::ElyCode)
+                {
+                    return;
                 }
                 // A suggestion is selected: what's typed or pasted replaces it.
                 let selected = this.servers.selected.take() == Some(f);
@@ -1294,6 +1305,7 @@ impl Launcher {
             }
             Field::MemoryLimit => self.memory_enter(),
             Field::OfflineName => self.offline_name_enter(),
+            Field::ElyLogin | Field::ElyPassword | Field::ElyCode => self.ely_sign_in(),
             Field::ShopGift => self.shop.find_soon = true,
             Field::ServerName | Field::ServerAddress => self.add_server(),
         }

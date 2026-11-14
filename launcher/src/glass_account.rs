@@ -18,7 +18,7 @@ impl Launcher {
         let wide = self.window_width >= crate::glass_home::WIDE;
         let left = self.glass_who_plays(cx);
         let right = self.glass_microsoft_card(cx);
-        if wide {
+        let standard = if wide {
             div()
                 .flex()
                 .flex_row()
@@ -32,7 +32,13 @@ impl Launcher {
                 .gap(px(16.))
                 .child(left.w_full().min_w_0().p(px(20.)))
                 .child(right.w_full())
-        }
+        };
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(16.))
+            .child(standard)
+            .child(self.ely_panel(cx))
     }
 
     /// The player now, the offline names and the field to add one.
@@ -40,15 +46,20 @@ impl Launcher {
         let t = self.theme;
         let now = self.accounts.player();
         let (uuid, name, status) = match &now {
-            Player::Microsoft(uuid) => (
+            Player::Account(uuid) => (
                 Some(uuid.clone()),
                 self.accounts
-                    .accounts
-                    .iter()
-                    .find(|a| &a.uuid == uuid)
+                    .find(uuid)
                     .map(|a| a.name.clone())
                     .unwrap_or_default(),
-                (Tone::Live, tr("Microsoft account · online servers too")),
+                (
+                    Tone::Live,
+                    tr(if uuid.starts_with("ely:") {
+                        "Ely.by account · Ely-compatible servers"
+                    } else {
+                        "Microsoft account · online servers too"
+                    }),
+                ),
             ),
             Player::Offline(name) => (
                 None,

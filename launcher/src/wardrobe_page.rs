@@ -528,7 +528,9 @@ impl Launcher {
     /// The account the page is for: the selected one, if it signed in with Microsoft.
     fn wardrobe_account(&self) -> Option<account::Account> {
         match self.accounts.player() {
-            account::Player::Microsoft(_) => self.accounts.selected().cloned(),
+            account::Player::Account(key) if !key.starts_with("ely:") => {
+                self.accounts.selected().cloned()
+            }
             _ => None,
         }
     }

@@ -1172,7 +1172,7 @@ fn offline_names_switch_with_accounts() {
         selected: Some("abc".into()),
         ..Accounts::default()
     };
-    assert_eq!(a.player(), Player::Microsoft("abc".into()));
+    assert_eq!(a.player(), Player::Account("abc".into()));
     assert_eq!(a.name_arg(), None);
     a.play_as(&store, Player::Offline("Builder_1".into()))
         .unwrap();
@@ -1186,9 +1186,9 @@ fn offline_names_switch_with_accounts() {
     assert!(a.add_offline("no spaces").is_err());
     assert!(a.add_offline("ab").is_err());
     assert!(a.add_offline("seventeen_letters").is_err());
-    a.play_as(&store, Player::Microsoft("abc".into())).unwrap();
+    a.play_as(&store, Player::Account("abc".into())).unwrap();
     assert_eq!(a.name_arg(), None, "an account plays with its own name");
-    assert!(a.play_as(&store, Player::Microsoft("zzz".into())).is_err());
+    assert!(a.play_as(&store, Player::Account("zzz".into())).is_err());
     a.play_as(&store, Player::Offline("Builder_1".into()))
         .unwrap();
     // Forgetting drops the look and the name's skin and cape files too.
@@ -2429,7 +2429,7 @@ fn a_launch_as_another_account_leaves_the_selected_one() {
         Some("test-client"),
         &store,
         &mut accounts,
-        &Player::Microsoft(alex.into()),
+        &Player::Account(alex.into()),
     )
     .unwrap();
     assert!(pass.session.is_none());
@@ -2437,17 +2437,17 @@ fn a_launch_as_another_account_leaves_the_selected_one() {
         .offline
         .unwrap()
         .starts_with("Alex is no longer signed in"));
-    assert_eq!(accounts.player(), Player::Microsoft(UUID.into()));
+    assert_eq!(accounts.player(), Player::Account(UUID.into()));
     // An account that isn't in the launcher is refused, and changes nothing either.
     let gone = launch_as(
         &offline(),
         Some("test-client"),
         &store,
         &mut accounts,
-        &Player::Microsoft("not-signed-in".into()),
+        &Player::Account("not-signed-in".into()),
     );
     assert_eq!(gone.unwrap_err(), "That account isn't signed in.");
-    assert_eq!(accounts.player(), Player::Microsoft(UUID.into()));
+    assert_eq!(accounts.player(), Player::Account(UUID.into()));
 }
 
 #[test]

@@ -1595,15 +1595,16 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
             // `--name` and look.
             let mut accounts = Accounts::load();
             let who = match account {
-                Some(who) => Some(account::Player::Microsoft(
-                    accounts
-                        .find(&who)
-                        .ok_or_else(|| {
-                            format!("No signed-in account {who}. See `horizon-launcher account`.")
-                        })?
-                        .uuid
-                        .clone(),
-                )),
+                Some(who) => {
+                    let profile = accounts.find(&who).ok_or_else(|| {
+                        format!("No signed-in account {who}. See `horizon-launcher account`.")
+                    })?;
+                    Some(account::Player::Account(if who.starts_with("ely:") {
+                        account::ely::key(&profile.uuid)
+                    } else {
+                        profile.uuid.clone()
+                    }))
+                }
                 None => None,
             };
             if let Some(who) = &who {
@@ -2008,6 +2009,7 @@ fn account_command(action: AccountCmd, as_json: bool) -> Result<(), String> {
                         "selected": accounts.selected.as_ref() == Some(&a.uuid),
                         "authentication": account::session::status(account::store(), &a.uuid),
                     })).collect::<Vec<_>>(),
+                    "ely": accounts.ely.iter().map(|a|serde_json::json!({"name":a.name,"uuid":a.uuid,"key":account::ely::key(&a.uuid),"selected":accounts.selected.as_deref()==Some(&account::ely::key(&a.uuid))})).collect::<Vec<_>>(),
                     "offline": accounts.offline.iter().map(|n| serde_json::json!({
                         "name": n,
                         "selected": accounts.player() == account::Player::Offline(n.clone()),
@@ -2015,7 +2017,10 @@ fn account_command(action: AccountCmd, as_json: bool) -> Result<(), String> {
                     "sign_in_configured": account::client_id().is_some(),
                     "owner": accounts.has_owner(account::store()),
                 }));
-            } else if accounts.accounts.is_empty() && accounts.offline.is_empty() {
+            } else if accounts.accounts.is_empty()
+                && accounts.ely.is_empty()
+                && accounts.offline.is_empty()
+            {
                 println!(
                     "No Microsoft account signed in. Play needs one that owns Minecraft: Java \
                      Edition: horizon-launcher account sign-in"
@@ -2035,6 +2040,18 @@ fn account_command(action: AccountCmd, as_json: bool) -> Result<(), String> {
                     };
                     println!("{mark} {}  {}  {}{why}", a.name, a.uuid, status.label());
                 }
+                for a in &accounts.ely {
+                    let key = account::ely::key(&a.uuid);
+                    println!(
+                        "{} {}  {key}  Ely.by",
+                        if accounts.selected.as_deref() == Some(&key) {
+                            "*"
+                        } else {
+                            " "
+                        },
+                        a.name
+                    );
+                }
                 for n in &accounts.offline {
                     let on = accounts.player() == account::Player::Offline(n.clone());
                     println!("{} {n}  offline", if on { "*" } else { " " });
@@ -2044,7 +2061,12 @@ fn account_command(action: AccountCmd, as_json: bool) -> Result<(), String> {
                         "Playing offline as the game's own name (`account select NAME` to switch)."
                     );
                 }
-                if !accounts.has_owner(account::store()) {
+                if !accounts.has_owner(account::store())
+                    && !accounts
+                        .selected
+                        .as_deref()
+                        .is_some_and(|k| k.starts_with("ely:"))
+                {
                     println!(
                         "{} {}",
                         account::NoOwner::default(),
@@ -2054,6 +2076,9 @@ fn account_command(action: AccountCmd, as_json: bool) -> Result<(), String> {
             }
         }
         AccountCmd::Refresh { who } => {
+            if who.starts_with("ely:") {
+                return Err("Ely.by sessions refresh automatically on Play. Reauthenticate in Settings → Account if needed.".into());
+            }
             let status = account::session::refresh(&who)?;
             if as_json {
                 json(serde_json::to_value(&status).map_err(|e| e.to_string())?);
@@ -2064,6 +2089,19 @@ fn account_command(action: AccountCmd, as_json: bool) -> Result<(), String> {
             }
         }
         AccountCmd::Session { who } => {
+            if who.starts_with("ely:") {
+                let session = account::session_for_game_as(
+                    &backend::game_home(),
+                    &account::Player::Account(who),
+                )?;
+                let file = session.file.ok_or("Ely.by returned no session")?;
+                if as_json {
+                    json(serde_json::json!({"session_file":file}));
+                } else {
+                    println!("{}", file.display());
+                }
+                return Ok(());
+            }
             let dir = backend::game_home().join("sessions");
             match (account::session::renew_for_game(&dir, &who), as_json) {
                 (Ok(file), true) => json(serde_json::json!({ "session_file": file })),
@@ -2073,6 +2111,9 @@ fn account_command(action: AccountCmd, as_json: bool) -> Result<(), String> {
             }
         }
         AccountCmd::SignIn { target: Some(who) } => {
+            if who.starts_with("ely:") {
+                return Err("Sign in to Ely.by in launcher Settings → Account.".into());
+            }
             let a = find(&accounts, &who)?;
             let sign_in = account::SignIn::start_for(a.clone());
             let mut shown = false;
@@ -2122,7 +2163,12 @@ fn account_command(action: AccountCmd, as_json: bool) -> Result<(), String> {
         }
         AccountCmd::SignOut { who } => {
             let a = find(&accounts, &who)?;
-            accounts.remove(account::store(), &a.uuid)?;
+            if who.starts_with("ely:") {
+                account::ely::sign_out(&account::ely::key(&a.uuid))?;
+                accounts = Accounts::load();
+            } else {
+                accounts.remove(account::store(), &a.uuid)?;
+            }
             accounts.save()?;
             println!("Signed out {}.", a.name);
         }
@@ -2133,7 +2179,14 @@ fn account_command(action: AccountCmd, as_json: bool) -> Result<(), String> {
                 .find(|n| n.eq_ignore_ascii_case(&who))
                 .cloned();
             let (player, name) = match (accounts.find(&who).cloned(), offline) {
-                (Some(a), _) => (account::Player::Microsoft(a.uuid), a.name),
+                (Some(a), _) => (
+                    account::Player::Account(if who.starts_with("ely:") {
+                        account::ely::key(&a.uuid)
+                    } else {
+                        a.uuid
+                    }),
+                    a.name,
+                ),
                 (None, Some(n)) => (
                     account::Player::Offline(n.clone()),
                     format!("{n} (offline)"),
