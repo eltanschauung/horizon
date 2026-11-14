@@ -1,5 +1,5 @@
 //! Source-only native mixin bundles. Reading a bundle never executes its code.
-use super::{Facts, valid_id};
+use super::{valid_id, Facts};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, io::Read, path::Path};
 
@@ -203,6 +203,13 @@ impl Bundle {
         }
         let prefix = format!("mixins/{}/", manifest.id);
         for name in files.keys().filter(|n| n.as_str() != MANIFEST) {
+            // Preserve bundled legal notices without treating them as executable
+            // source or accepting arbitrary payloads outside the mixin folder.
+            if name.strip_prefix("licenses/").is_some_and(|rest| {
+                !rest.contains('/') && (rest.ends_with(".txt") || rest.ends_with(".md"))
+            }) {
+                continue;
+            }
             let Some(rest) = name.strip_prefix(&prefix) else {
                 return Err(format!("unexpected native source: {name}"));
             };
@@ -216,6 +223,15 @@ impl Bundle {
         let source: toml::Value =
             toml::from_str(std::str::from_utf8(source).map_err(|e| e.to_string())?)
                 .map_err(|e| e.to_string())?;
+        // Hook-version bundles follow a compatible game and need not pin its
+        // source revision. An explicit pin remains an exact contract.
+        let source_pin = source
+            .get("compatibility")
+            .and_then(|v| v.get("horizon_revision"));
+        let revision_matches = match source_pin {
+            Some(pin) => pin.as_str() == Some(manifest.horizon.as_str()),
+            None => manifest.hooks.is_some(),
+        };
         if source
             .get("mod")
             .and_then(|v| v.get("id"))
@@ -226,11 +242,7 @@ impl Bundle {
                 .and_then(|v| v.get("version"))
                 .and_then(|v| v.as_str())
                 != Some(&manifest.version)
-            || source
-                .get("compatibility")
-                .and_then(|v| v.get("horizon_revision"))
-                .and_then(|v| v.as_str())
-                != Some(&manifest.horizon)
+            || !revision_matches
         {
             return Err("native manifest and mixin identity/revision differ".into());
         }
@@ -255,13 +267,20 @@ mod tests {
         }
     }
     fn read(name: &str, extras: &[(&str, &[u8])], mixin: &str) -> Result<Bundle, String> {
+        read_with_manifest(name, extras, mixin, &manifest())
+    }
+    fn read_with_manifest(
+        name: &str,
+        extras: &[(&str, &[u8])],
+        mixin: &str,
+        header: &Manifest,
+    ) -> Result<Bundle, String> {
         let path =
             std::env::temp_dir().join(format!("native-bundle-{name}-{}.hnmod", std::process::id()));
         let mut zip = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
         let options = zip::write::SimpleFileOptions::default();
         zip.start_file(MANIFEST, options).unwrap();
-        zip.write_all(&serde_json::to_vec(&manifest()).unwrap())
-            .unwrap();
+        zip.write_all(&serde_json::to_vec(header).unwrap()).unwrap();
         zip.start_file("mixins/veinminer/horizon-mixin.toml", options)
             .unwrap();
         zip.write_all(mixin.as_bytes()).unwrap();
@@ -385,23 +404,66 @@ capabilities = ["registries"]
     #[test]
     fn rejects_missing_or_mismatched_mixin_identity_without_panicking() {
         assert!(read("missing-mod", &[], "[unrelated]\nvalue = 1").is_err());
-        assert!(
-            read(
-                "wrong-revision",
-                &[],
-                &mixin().replace(&"a".repeat(40), &"c".repeat(40))
-            )
-            .is_err()
-        );
+        assert!(read(
+            "wrong-revision",
+            &[],
+            &mixin().replace(&"a".repeat(40), &"c".repeat(40))
+        )
+        .is_err());
         assert!(read("wrong-version", &[], &mixin().replace("0.3.0", "0.2.0")).is_err());
-        assert!(
-            Manifest {
-                horizon: "nightly".into(),
-                ..manifest()
-            }
-            .check()
-            .is_err()
-        );
+        assert!(Manifest {
+            horizon: "nightly".into(),
+            ..manifest()
+        }
+        .check()
+        .is_err());
+    }
+    #[test]
+    fn hook_based_bundles_can_follow_the_game_without_weakening_explicit_pins() {
+        let hooked = Manifest {
+            hooks: Some(359),
+            ..manifest()
+        };
+        let unpinned = "[mod]\nid=\"veinminer\"\nversion=\"0.3.0\"\n";
+        assert!(read_with_manifest("hook-unpinned", &[], unpinned, &hooked).is_ok());
+        assert!(read_with_manifest("pinned-missing-pin", &[], unpinned, &manifest()).is_err());
+        assert!(read_with_manifest(
+            "hook-wrong-pin",
+            &[],
+            &mixin().replace(&"a".repeat(40), &"c".repeat(40)),
+            &hooked
+        )
+        .is_err());
+        assert!(read_with_manifest(
+            "hook-wrong-id",
+            &[],
+            &unpinned.replace("veinminer", "other_mod"),
+            &hooked
+        )
+        .is_err());
+        assert!(read_with_manifest(
+            "hook-invalid-pin",
+            &[],
+            &(unpinned.to_owned() + "[compatibility]\nhorizon_revision=12\n"),
+            &hooked
+        )
+        .is_err());
+    }
+    #[test]
+    fn keeps_root_license_notices_and_rejects_executable_license_payloads() {
+        let bundle = read(
+            "license-notice",
+            &[("licenses/Upstream-NOTICE.txt", b"Upstream license notice")],
+            &mixin(),
+        )
+        .unwrap();
+        assert!(bundle.files.contains_key("licenses/Upstream-NOTICE.txt"));
+        assert!(read(
+            "license-executable",
+            &[("licenses/payload.exe", b"MZ")],
+            &mixin()
+        )
+        .is_err());
     }
     #[test]
     fn hooks_is_optional_and_kept() {
