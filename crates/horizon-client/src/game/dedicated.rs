@@ -942,18 +942,7 @@ impl Game<'_> {
         // DedicatedServer.initServer: names nobody has resolve offline only without authentication.
         cache.resolve_offline_users = !props.online_mode;
         *USER_CACHE.lock().unwrap() = Some(cache);
-        // Services.create: the services' public keys, fetched in the
-        // background (they check players' chat keys).
-        let secure_chat = Arc::new(horizon_client::lan::SecureChat::new(
-            props.enforce_secure_profile && props.online_mode,
-            || {
-                let discovery = profiles::discovery_url();
-                profiles::fetch_profile_key_keys(&discovery).unwrap_or_else(|e| {
-                    ::log::error!("{e}");
-                    Vec::new()
-                })
-            },
-        ));
+        // Hosted chat uses no Microsoft profile-key service or signing chain.
         log(
             "INFO",
             &format!(
@@ -1107,7 +1096,7 @@ impl Game<'_> {
             enable_status: props.enable_status,
             hide_online_players: props.hide_online_players,
             favicon,
-            secure_chat: Some(secure_chat),
+            secure_chat: None,
             accepts_transfers: props.accepts_transfers,
             announce: false,
             listen: true,
