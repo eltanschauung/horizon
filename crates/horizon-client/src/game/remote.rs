@@ -238,6 +238,9 @@ struct QueuedChat {
 /// changed from.
 pub(super) enum ChatTrust {
     Secure,
+    /// Explicitly unsigned chat accepted by a non-enforcing server. It keeps
+    /// its sender identity without pretending to carry a verified signature.
+    Unsigned,
     Modified(String),
     NotSecure,
     /// `GuiMessageTag.chatError`: the line `ChatListener.handleChatMessageError` adds.
@@ -247,7 +250,7 @@ impl ChatTrust {
     /// `ChatTrustLevel.createTag`.
     fn tag(&self) -> Option<horizon_client::chat::Tag> {
         match self {
-            Self::Secure => None,
+            Self::Secure | Self::Unsigned => None,
             Self::Modified(original) => Some(horizon_client::chat::Tag::modified(original)),
             Self::NotSecure => Some(horizon_client::chat::Tag::not_secure()),
             Self::Error => Some(horizon_client::chat::Tag::chat_error()),
@@ -1859,6 +1862,9 @@ impl Game<'_> {
         decorated: &horizon_client::text::Text,
     ) -> ChatTrust {
         use horizon_client::scoreboard::{comp_text, tag_to_json};
+        if !signed && self.remote.as_ref().is_some_and(|r| !r.requires_chat_signing()) {
+            return ChatTrust::Unsigned;
+        }
         if self.integrated.is_some() && self.remote.as_ref().is_some_and(|r| r.profile == sender) {
             return ChatTrust::Secure;
         }
@@ -5171,11 +5177,12 @@ impl Game<'_> {
                 let Some(r) = self.remote.as_mut() else {
                     return Ok(());
                 };
-                // handlePlayerChat: the global index counts every chat packet; one out of
-                // order disconnects.
+                // Hosted unsigned chat has no signature chain or reporting state.
+                // Keep sender UUIDs for character styles, heads and social blocking.
+                let plain_unsigned = !r.requires_chat_signing() && p.signature.is_none();
                 let expected = r.next_chat_index;
-                r.next_chat_index = r.next_chat_index.wrapping_add(1);
-                if p.global_index != expected {
+                r.next_chat_index = p.global_index.wrapping_add(1);
+                if !plain_unsigned && p.global_index != expected {
                     log::error!(
                         "Missing or out-of-order chat message from server, expected index {expected} but got {}",
                         p.global_index
@@ -5186,8 +5193,11 @@ impl Game<'_> {
                     );
                     return self.leave_server(Some(reason.plain()));
                 }
-                let last_seen: Option<Vec<Signature>> =
-                    p.last_seen.iter().map(|s| r.signatures.unpack(s)).collect();
+                let last_seen: Option<Vec<Signature>> = if plain_unsigned {
+                    Some(Vec::new())
+                } else {
+                    p.last_seen.iter().map(|s| r.signatures.unpack(s)).collect()
+                };
                 let Some(last_seen) = last_seen else {
                     log::error!(
                         "Message from player with ID {:032x} referenced unrecognized signature id",
@@ -5203,11 +5213,13 @@ impl Game<'_> {
                     .signature
                     .as_deref()
                     .and_then(horizon_protocol::secure_chat::signature);
-                r.signatures.push(&last_seen, signature.as_ref());
+                if !plain_unsigned {
+                    r.signatures.push(&last_seen, signature.as_ref());
+                }
                 // The sender's PlayerInfo: none is an error line; else their
                 // `SignedMessageValidator` decides (`updateAndValidate`), and a message it
                 // takes without a signature of its own shows as unsigned.
-                if !r.tab_players.contains_key(&p.sender) {
+                if !plain_unsigned && !r.tab_players.contains_key(&p.sender) {
                     log::error!(
                         "Received player chat packet for unknown player with ID: {:032x}",
                         p.sender
@@ -5231,7 +5243,12 @@ impl Game<'_> {
                     unsigned_content: p.unsigned_content.as_ref(),
                     filter: &p.filter,
                 };
-                let Some(validated) = r.validate_chat(&incoming, now) else {
+                let validated = if plain_unsigned {
+                    Some(secure_chat::Validated::Unsigned)
+                } else {
+                    r.validate_chat(&incoming, now)
+                };
+                let Some(validated) = validated else {
                     self.handle_chat_message_error(&p.chat_type, signature.as_ref());
                     return Ok(());
                 };
@@ -5244,7 +5261,7 @@ impl Game<'_> {
                     .unsigned_content
                     .as_ref()
                     .map_or_else(|| serde_json::Value::from(p.content.as_str()), tag_to_json);
-                let content = if self.settings.file.bool("onlyShowSecureChat") {
+                let content = if !plain_unsigned && self.settings.file.bool("onlyShowSecureChat") {
                     serde_json::Value::from(p.content.as_str())
                 } else {
                     decorated.clone()

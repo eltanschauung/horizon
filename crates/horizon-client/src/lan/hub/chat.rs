@@ -1,7 +1,6 @@
-//! Chat on the server side, as ServerGamePacketListenerImpl and PlayerList
-//! handle it: chat sessions validated against the services' keys, signed
-//! messages checked link by link, the acknowledged window, and messages
-//! relayed with each connection's numbering and signature cache.
+//! Hosted chat retains player identities and ordinary chat decoration while
+//! relaying messages unsigned, without profile keys, signature chains or
+//! acknowledgement requirements.
 use super::{HostEvent, Hub};
 use horizon_client_core::text::Text;
 use horizon_protocol::{
@@ -252,21 +251,28 @@ impl Hub {
         }
     }
 
-    /// ServerPlayer.sendChatMessage (players who show chat) and
-    /// sendPlayerChatMessage: numbered for the connection, the last seen
-    /// packed against its cache; a signed message joins the cache and the
-    /// messages the player must acknowledge.
+    /// Relay unsigned player chat with its sender UUID and connection ordering.
+    /// Keeping PlayerChat preserves character formatting, social blocking and
+    /// chat heads without collecting signatures or acknowledgements.
     pub fn send_chat(&mut self, k: usize, message: &ChatMessage, bound: &play::ChatTypeBound) {
         let g = &mut self.guests[k];
         if g.info.chat_visibility != 0 {
             return;
         }
-        // DisguisedChat carries the existing chat type/name decoration but no
-        // signature cache, report chain or acknowledgement requirement.
-        g.send(&C::DisguisedChat(play::DisguisedChat {
-            message: message.unsigned_content.clone().unwrap_or_else(|| literal(&message.content)),
+        g.send(&C::PlayerChat(play::PlayerChat {
+            global_index: g.chat_index,
+            sender: message.sender,
+            index: 0,
+            signature: None,
+            content: message.content.clone(),
+            timestamp: message.timestamp,
+            salt: 0,
+            last_seen: Vec::new(),
+            unsigned_content: message.unsigned_content.clone(),
+            filter: (0, Vec::new()),
             chat_type: bound.clone(),
         }));
+        g.chat_index = g.chat_index.wrapping_add(1);
     }
 
     /// sendChatMessage of a system message: a disguised chat, to players
