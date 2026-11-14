@@ -4618,11 +4618,12 @@ impl Game<'_> {
         canceled: &mut bool,
         replies: &mut Vec<Text>,
     ) {
+        let alias = self.command_player_alias(player, name);
         mod_api::dispatch_player_command(
             self,
             mod_api::mods(),
             player,
-            name,
+            &alias,
             command,
             replies,
             canceled,
