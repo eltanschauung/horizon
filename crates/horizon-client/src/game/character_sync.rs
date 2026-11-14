@@ -365,6 +365,11 @@ impl Game<'_> {
         let mut ids=std::collections::BTreeSet::new();
         ids.extend(self.character_sync.server.peers.keys().copied());
         if let Some(saved)=&self.character_sync.saved {ids.extend(saved.entries.keys().filter_map(|s|u128::from_str_radix(s,16).ok()));}
-        ids.into_iter().find(|uuid|self.command_player_alias(*uuid,"").eq_ignore_ascii_case(name)).map(|id|horizon_client::server::user_lists::NameAndId{id,name:self.command_player_alias(id,"")})
+        let mut matching=ids.into_iter().filter(|uuid|self.command_player_alias(*uuid,"").eq_ignore_ascii_case(name));
+        let id=matching.next()?;
+        // An offline character name can belong to more than one saved UUID.
+        // Never grant permissions or ban whichever entry happens to sort first.
+        if matching.next().is_some() { return None; }
+        Some(horizon_client::server::user_lists::NameAndId{id,name:self.command_player_alias(id,"")})
     }
 }
