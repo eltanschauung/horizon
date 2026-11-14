@@ -67,11 +67,11 @@ impl Game<'_> {
     /// by it, without its `~` or with it (quoted), so `/msg` and `/tell`
     /// reach a player by the name chat shows. No nickname, no change.
     pub(super) fn player_named(&self, name: &str) -> Option<Target> {
-        if self.player.is_some() && name.eq_ignore_ascii_case(self.acting_player_name()) {
+        if self.player.is_some() && name.eq_ignore_ascii_case(&self.command_player_alias(self.native_acting_id(),self.acting_player_name())) {
             return Some(Target::Player);
         }
         self.command_players()
-            .find(|g| g.name.eq_ignore_ascii_case(name))
+            .find(|g| self.command_player_alias(g.uuid,&g.name).eq_ignore_ascii_case(name))
             .map(|g| Target::Guest(g.conn))
             .or_else(|| self.player_nicknamed(name))
     }
@@ -147,11 +147,12 @@ impl Game<'_> {
     /// `Player.getDisplayName`: the name as its team shows it, suggesting a
     /// `/tell`, showing the player on hover, inserting the name.
     pub(in crate::game) fn player_text(&self, name: &str, uuid: u128) -> Text {
-        let member = self.character_for(uuid).or_else(||self.character_for_name(name)).map_or_else(||Text::literal(name),|c|c.display_name());
+        let member = self.character_for(uuid).or_else(||self.character_for_name(name)).map_or_else(||Text::literal(self.command_player_alias(uuid,name)),|c|c.display_name());
         let shown = match self.score.board.players_team(name) {
             Some(team) => team.formatted_name(member.clone()),
             None => member,
         };
+        let name = self.command_player_alias(uuid, name);
         let hover_name = shown.component();
         shown.with_component_fields(vec![
             (

@@ -826,7 +826,11 @@ impl Game<'_> {
                     return None;
                 }
                 for (name, neg) in &s.names {
-                    let n = self.target_name(t).plain();
+                    let n = match t {
+                        Target::Player => self.command_player_alias(self.native_acting_id(), self.acting_player_name()),
+                        Target::Guest(conn) => self.command_guest(conn).map(|g| self.command_player_alias(g.uuid,&g.name)).unwrap_or_default(),
+                        _ => self.target_name(t).plain(),
+                    };
                     if (n == *name) == *neg {
                         return None;
                     }
@@ -4034,7 +4038,7 @@ impl Game<'_> {
             .iter()
             .flat_map(|h| h.hub.guests.iter())
             .filter(|g| g.placed)
-            .map(|g| (g.uuid, g.name.clone()))
+            .map(|g| (g.uuid, self.command_player_alias(g.uuid,&g.name)))
             .collect();
         let max = self
             .lan

@@ -266,14 +266,17 @@ impl<'r, 'a> SelectorParser<'r, 'a> {
             self.sugg = Sugg::Name;
         }
         let start = self.reader.cursor;
-        let name = self.reader.read_string()?;
+        let name = if matches!(self.reader.peek(), '\'' | '"') { self.reader.read_string()? } else {
+            while self.reader.can_read() && {let c=self.reader.peek();c.is_alphanumeric()||matches!(c,'_'|'-'|'.'|'+'|'('|')')} {self.reader.skip();}
+            self.reader.string[start..self.reader.cursor].to_owned()
+        };
         // A UUID selects by entityUUID alone: findEntities looks a
         // playerName up first, among the players only.
         if let Some(uuid) = java_uuid(&name) {
             self.s.uuid = Some(uuid);
             self.s.include_entities = true;
         } else {
-            if name.is_empty() || name.encode_utf16().count() > 16 {
+            if name.is_empty() || name.encode_utf16().count() > 128 {
                 self.reader.cursor = start;
                 return Err(CommandError::tr_at(
                     "argument.entity.invalid",
@@ -813,4 +816,18 @@ pub fn suggest(
     let mut parser = SelectorParser::new(&mut reader, reg, reg.permission >= 2);
     let _ = parser.parse();
     parser.fill_suggestions(builder, names);
+}
+
+#[cfg(test)]
+mod character_alias_tests {
+    use super::*;
+    #[test]
+    fn character_names_include_variants_and_long_names() {
+        let reg = Registries::default();
+        for name in ["Kaku_Seiga_(B)", "Reisen_Udongein_Inaba", "Fujiwara_no_Mokou"] {
+            let mut reader = Reader::new(name);
+            assert_eq!(parse(&mut reader, &reg, true).unwrap().player_name.as_deref(), Some(name));
+            assert!(!reader.can_read());
+        }
+    }
 }

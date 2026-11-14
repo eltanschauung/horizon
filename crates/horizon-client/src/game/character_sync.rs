@@ -340,3 +340,27 @@ impl Game<'_> {
         self.lan_acting.is_none() || self.character_sync.server.selection_confirmed(player)
     }
 }
+
+impl Game<'_> {
+    /// Presentation identity for commands; UUIDs remain the authoritative keys
+    /// for permissions, inventories, saves and authenticated connections.
+    pub(super) fn command_player_alias(&self, uuid:u128, fallback:&str)->String {
+        if self.pack.character_catalog.get(0).is_none() { return fallback.into(); }
+        let character=self.character_for(uuid).or_else(|| {
+            let id=self.character_sync.saved.as_ref()?.entries.get(&format!("{uuid:032x}"))?;
+            self.pack.character_catalog.get(self.pack.character_catalog.index(id)?)
+        });
+        let Some(character)=character else {return format!("Player_{:08x}",(uuid>>96) as u32);};
+        let mut name:String=character.name.chars().map(|c|if c.is_alphanumeric() || matches!(c,'_'|'-'|'.'|'('|')') {c}else{'_'}).collect();
+        let peers=if self.remote.is_some(){&self.character_sync.client.peers}else{&self.character_sync.server.peers};
+        let duplicate=peers.keys().any(|other|*other!=uuid&&self.character_for(*other).is_some_and(|c|c.name==character.name));
+        if duplicate {name.push_str(&format!("_{:08x}",(uuid>>96) as u32));}
+        name
+    }
+    pub(super) fn command_alias_profile(&self,name:&str)->Option<horizon_client::server::user_lists::NameAndId> {
+        let mut ids=std::collections::BTreeSet::new();
+        ids.extend(self.character_sync.server.peers.keys().copied());
+        if let Some(saved)=&self.character_sync.saved {ids.extend(saved.entries.keys().filter_map(|s|u128::from_str_radix(s,16).ok()));}
+        ids.into_iter().find(|uuid|self.command_player_alias(*uuid,"").eq_ignore_ascii_case(name)).map(|id|horizon_client::server::user_lists::NameAndId{id,name:self.command_player_alias(id,"")})
+    }
+}

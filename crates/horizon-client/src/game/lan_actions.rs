@@ -3790,9 +3790,9 @@ impl Game<'_> {
         let mut players = if self.options.dedicated.is_some() {
             Vec::new()
         } else {
-            self.ui.registries.players.clone()
+            vec![self.command_player_alias(self.native_acting_id(), self.acting_player_name())]
         };
-        players.extend(host.hub.guests.iter().map(|g| g.name.clone()));
+        players.extend(host.hub.guests.iter().map(|g| self.command_player_alias(g.uuid, &g.name)));
         let (ops, banned_players, banned_ips, whitelisted) = match &self.server_lists {
             Some(lists) => {
                 let l = lists.lock().unwrap();
@@ -3800,18 +3800,18 @@ impl Game<'_> {
                     l.ops
                         .entries()
                         .iter()
-                        .map(|e| e.user.name.clone())
+                        .map(|e| self.command_player_alias(e.user.id, &e.user.name))
                         .collect(),
                     l.bans
                         .entries()
                         .iter()
-                        .map(|e| e.user.name.clone())
+                        .map(|e| self.command_player_alias(e.user.id, &e.user.name))
                         .collect(),
                     l.ip_bans.entries().iter().map(|e| e.user.clone()).collect(),
                     l.white
                         .entries()
                         .iter()
-                        .map(|e| e.user.name.clone())
+                        .map(|e| self.command_player_alias(e.user.id, &e.user.name))
                         .collect(),
                 )
             }

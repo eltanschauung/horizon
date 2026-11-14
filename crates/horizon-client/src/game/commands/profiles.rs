@@ -87,11 +87,11 @@ impl Game<'_> {
         match t {
             Target::Player => Some(NameAndId {
                 id: self.lan_acting_uuid?,
-                name: self.acting_player_name().to_owned(),
+                name: self.command_player_alias(self.native_acting_id(),self.acting_player_name()),
             }),
             Target::Guest(conn) => self.command_guest(conn).map(|g| NameAndId {
                 id: g.uuid,
-                name: g.name.clone(),
+                name: self.command_player_alias(g.uuid,&g.name),
             }),
             _ => None,
         }
@@ -129,7 +129,7 @@ impl Game<'_> {
         if self.console_broadcast.is_some() {
             "Server".to_owned()
         } else {
-            self.acting_player_name().to_owned()
+            self.command_player_alias(self.native_acting_id(),self.acting_player_name())
         }
     }
 
@@ -276,7 +276,7 @@ impl Game<'_> {
             let hub = &self.lan.as_ref()?.hub;
             hub.guests
                 .iter()
-                .find(|g| g.name.eq_ignore_ascii_case(name))
+                .find(|g| self.command_player_alias(g.uuid,&g.name).eq_ignore_ascii_case(name))
                 .map(|g| g.address.ip().to_string())
         };
         let ip = if is_ip {
@@ -298,7 +298,7 @@ impl Game<'_> {
                     .guests
                     .iter()
                     .filter(|g| g.address.ip().to_string() == ip)
-                    .map(|g| (g.uuid, g.name.clone()))
+                    .map(|g| (g.uuid, self.command_player_alias(g.uuid,&g.name)))
                     .collect()
             })
             .unwrap_or_default();
@@ -417,7 +417,7 @@ impl Game<'_> {
                 .bans
                 .entries()
                 .into_iter()
-                .map(|b| (b.user.name.clone(), b.source.clone(), b.reason.clone()));
+                .map(|b| (self.command_player_alias(b.user.id,&b.user.name), b.source.clone(), b.reason.clone()));
             let ips = l
                 .ip_bans
                 .entries()
@@ -494,7 +494,7 @@ impl Game<'_> {
                     .white
                     .entries()
                     .iter()
-                    .map(|e| e.user.name.clone())
+                    .map(|e| self.command_player_alias(e.user.id,&e.user.name))
                     .collect();
                 if names.is_empty() {
                     self.feedback_unbroadcast(Text::translate("commands.whitelist.none", &[]));

@@ -1535,10 +1535,10 @@ impl Game<'_> {
         let g = hub
             .guests
             .iter()
-            .find(|g| g.name.eq_ignore_ascii_case(name))?;
+            .find(|g| self.command_player_alias(g.uuid, &g.name).eq_ignore_ascii_case(name))?;
         Some(NameAndId {
             id: g.uuid,
-            name: g.name.clone(),
+            name: self.command_player_alias(g.uuid, &g.name),
         })
     }
 
@@ -1557,6 +1557,7 @@ impl Game<'_> {
     /// `Services.nameToIdCache().get(name)`: the user cache, else the profile
     /// service, else (offline) the offline player.
     pub(super) fn resolve_name(&self, name: &str) -> Option<NameAndId> {
+        if self.pack.character_catalog.get(0).is_some() { return self.command_alias_profile(name); }
         USER_CACHE.lock().unwrap().as_mut().and_then(|cache| {
             cache.get_by_name(name, |lower| {
                 let found = profiles::find_by_name(&profiles::discovery_url(), lower);
@@ -1750,7 +1751,7 @@ impl Game<'_> {
                         h.hub
                             .guests
                             .iter()
-                            .map(|g| (g.name.clone(), g.uuid))
+                            .map(|g| (self.command_player_alias(g.uuid, &g.name), g.uuid))
                             .collect()
                     })
                     .unwrap_or_default();
@@ -1879,7 +1880,7 @@ impl Game<'_> {
                         h.hub
                             .guests
                             .iter()
-                            .find(|g| g.name.eq_ignore_ascii_case(target))
+                            .find(|g| self.command_player_alias(g.uuid, &g.name).eq_ignore_ascii_case(target))
                             .map(|g| g.address.ip().to_string())
                     })
                 };
@@ -1916,7 +1917,7 @@ impl Game<'_> {
                             .guests
                             .iter()
                             .filter(|g| g.address.ip().to_string() == ip)
-                            .map(|g| (g.uuid, g.name.clone()))
+                            .map(|g| (g.uuid, self.command_player_alias(g.uuid, &g.name)))
                             .collect()
                     })
                     .unwrap_or_default();
@@ -1960,7 +1961,7 @@ impl Game<'_> {
                 let which = rest.first().copied().unwrap_or("");
                 if which != "ips" {
                     for b in l.bans.entries() {
-                        lines.push((b.user.name.clone(), b.source.clone(), b.reason.clone()));
+                        lines.push((self.command_player_alias(b.user.id, &b.user.name), b.source.clone(), b.reason.clone()));
                     }
                 }
                 if which != "players" {
@@ -2087,7 +2088,7 @@ impl Game<'_> {
                     .white
                     .entries()
                     .iter()
-                    .map(|e| e.user.name.clone())
+                    .map(|e| self.command_player_alias(e.user.id, &e.user.name))
                     .collect();
                 if names.is_empty() {
                     self.console_reply(Text::translate("commands.whitelist.none", &[]));

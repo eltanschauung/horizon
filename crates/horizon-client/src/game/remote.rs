@@ -2095,7 +2095,7 @@ impl Game<'_> {
     /// The names in the server's player list, sorted.
     pub(super) fn remote_online_names(&self) -> Option<Vec<String>> {
         let r = self.remote.as_ref()?;
-        let mut names: Vec<String> = r.players.values().cloned().collect();
+        let mut names: Vec<String> = r.players.iter().map(|(uuid,name)|self.command_player_alias(*uuid,name)).collect();
         names.sort();
         Some(names)
     }
