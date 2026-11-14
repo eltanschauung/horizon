@@ -3549,6 +3549,7 @@ impl Game<'_> {
         let mut canceled = false;
         let mut replies = Vec::new();
         if let Some((uuid, name)) = host.hub.guest(conn).map(|g| (g.uuid, g.name.clone())) {
+            let name = self.command_player_alias(uuid, &name);
             self.native_player_command(
                 uuid,
                 &name,
