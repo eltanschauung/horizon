@@ -19,6 +19,11 @@ def package(build, resources, content, output, platform, native=None, defaults=N
     if not mods:
         raise ValueError('No content packages supplied')
     files = [('horizon-client' + suffix, binary), ('native-mods.json', metadata)]
+    if platform == 'windows':
+        for name in ['libopus-0.dll', 'OPUS-LICENSE.txt']:
+            path = build / name
+            if not path.is_file(): raise ValueError('Missing Windows voice runtime: ' + name)
+            files.append((name, path))
     source = Path(__file__).resolve().parent.parent
     for name in ['LICENSE', 'THIRD_PARTY_NOTICES.md']:
         files.append((name, source / name))

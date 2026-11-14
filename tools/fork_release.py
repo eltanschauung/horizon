@@ -50,6 +50,10 @@ def main():
     # Explicit allowlist: never copy prepared assets, accounts, caches or worlds.
     for name in ("horizon-client", "horizon-ctl", "horizon-prepare", "horizon-server"):
         copy(a.binaries / (name + suffix), game / (name + suffix))
+    if windows:
+        # Runtime-loaded DLLs do not appear in the executable import table.
+        for name in ("libopus-0.dll", "OPUS-LICENSE.txt"):
+            copy(a.binaries / name, game / name)
     for name in ("LICENSE", "THIRD_PARTY_NOTICES.md", "research-lock.json",
                  "crates/horizon-prepare", "mods/horizon/src/test/java", "tools"):
         copy(a.source / name, game / name)

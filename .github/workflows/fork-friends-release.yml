@@ -62,10 +62,17 @@ jobs:
           sudo apt-get install -y libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libvulkan-dev libasound2-dev libudev-dev
       - name: Build the selected native game and tools
         working-directory: source
-        run: cargo build --locked --profile fast -j 2 -p horizon-client -p horizon-client-lib -p horizon-prepare -p horizon-server --bin horizon-client --bin horizon-ctl --bin horizon-prepare --bin horizon-server
+        env:
+          HORIZON_MOD_API_INJECTIONS: ${{ github.workspace }}/source/.horizon-mod-api-injections.json
+        run: cargo build --locked --profile fast -j 2 -p horizon-native-game -p horizon-client-lib -p horizon-prepare -p horizon-server --bin horizon-client --bin horizon-ctl --bin horizon-prepare --bin horizon-server
       - name: Build Microsoft-enabled launcher
         working-directory: launcher
         run: cargo build --locked --profile fast -j 2 --bin horizon-launcher
+      - name: Prepare Windows voice codec runtime
+        if: runner.os == 'Windows'
+        run: |
+          python -m pip install "zstandard>=0.23,<1"
+          python tools/windows_runtime.py --output source/target/fast
       - name: Package and upload platform assets
         run: |
           python tools/fork_release.py --source source --binaries source/target/fast --payload source/fork-release-payload --launcher launcher/target/fast/horizon-launcher${{ matrix.exe }} --out dist --platform ${{ matrix.platform }} --tag "$RELEASE_TAG"
