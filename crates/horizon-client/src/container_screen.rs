@@ -189,7 +189,11 @@ impl Clicks {
         }
         if self.skip_next_release {
             self.skip_next_release = false;
-            return Release::Nothing;
+            // A pickup press already moved the stack to the cursor. Releasing
+            // that same drag outside must throw it, rather than losing the release.
+            return if matches!(target, Target::Outside) && !carried_empty && !pick_item {
+                Release::Click(Input::Pickup)
+            } else { Release::Nothing };
         }
         let quick_crafting = self.quick_crafting.take().is_some();
         if quick_crafting && dragged {
@@ -247,6 +251,14 @@ mod tests {
             ..book
         };
         assert!(clicked_outside(10.0, 100.0, INV, Some(closed)));
+    }
+
+    #[test]
+    fn picking_up_then_releasing_outside_throws_the_stack() {
+        let mut clicks = Clicks::default();
+        assert_eq!(clicks.press(&Target::Slot(0), Button::Left, true, false, false), Some(Input::Pickup));
+        assert_eq!(clicks.release(&Target::<usize>::Outside, Button::Left, false, false, false, false), Release::Click(Input::Pickup));
+        assert_eq!(clicks.release(&Target::<usize>::Outside, Button::Left, true, false, false, false), Release::Nothing);
     }
 
     #[test]

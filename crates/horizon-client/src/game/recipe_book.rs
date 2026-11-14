@@ -994,6 +994,9 @@ impl Game<'_> {
     /// The open screen's book for `hasClickedOutside`: (visible, selected tab
     /// hovered); None when the screen has no book.
     pub(super) fn recipe_book_area(&self, batch: &HudBatch) -> Option<(bool, bool)> {
+        // Magic replaces the book button; a saved vanilla book-open flag
+        // must not reserve invisible space or swallow outside drops.
+        if self.magic_available() { return None; }
         let book = self.active_book()?;
         if !self.book_open(book) {
             return Some((false, false));
