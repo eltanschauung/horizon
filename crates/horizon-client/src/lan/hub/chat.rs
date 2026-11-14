@@ -6,7 +6,7 @@ use super::{HostEvent, Hub};
 use horizon_client_core::text::Text;
 use horizon_protocol::{
     packets::play::{self, Clientbound as C},
-    secure_chat::{self, Body, Chain, ChatSession, DecodeError, ProfileKey, Signature, Unpacked},
+    secure_chat::{self, Body, DecodeError, Signature, Unpacked},
     text::{literal, translatable},
 };
 use horizon_world::nbt::{JavaString, Tag};
@@ -145,42 +145,13 @@ impl Hub {
         update: &play::LastSeenUpdate,
         events: &mut Vec<HostEvent>,
     ) -> Option<Vec<Signature>> {
-        let g = &mut self.guests[i];
-        match g
-            .last_seen
-            .apply_update(update.offset, update.acknowledged, update.checksum)
-        {
-            Ok(seen) => Some(seen),
-            // Vanilla logs the ValidationException's stack trace after the line.
-            Err(_) => {
-                events.push(HostEvent::Error(format!(
-                    "Failed to validate message acknowledgements from {}",
-                    g.name
-                )));
-                let conn = g.conn;
-                self.kick(
-                    conn,
-                    translatable("multiplayer.disconnect.chat_validation_failed", &[]),
-                );
-                None
-            }
-        }
+        let _ = (i, update, events);
+        Some(Vec::new())
     }
 
     /// handleChatAck.
     pub(super) fn chat_ack(&mut self, i: usize, offset: i32, events: &mut Vec<HostEvent>) {
-        let g = &mut self.guests[i];
-        if g.last_seen.apply_offset(offset).is_err() {
-            events.push(HostEvent::Error(format!(
-                "Failed to validate message acknowledgement offset from {}",
-                g.name
-            )));
-            let conn = g.conn;
-            self.kick(
-                conn,
-                translatable("multiplayer.disconnect.chat_validation_failed", &[]),
-            );
-        }
+        let _ = (i, offset, events);
     }
 
     /// handleMessageDecodeFailure: logged, and the reason in red for the player.
@@ -206,32 +177,16 @@ impl Hub {
         if !self.try_handle_chat(i, &c.message, false) {
             return;
         }
-        let (enforce, now) = (
-            self.enforces_secure_chat() && !crate::portable::is_portable(self.guests[i].uuid),
-            now_millis(),
-        );
+        let now = now_millis();
         let body = Body {
             content: &c.message,
             timestamp: c.timestamp,
             salt: c.salt,
             last_seen: &last_seen,
         };
-        let signature = c.signature.as_deref().and_then(secure_chat::signature);
         let g = &mut self.guests[i];
         let (uuid, name) = (g.uuid, g.name.clone());
-        let message = match g
-            .chain
-            .unpack(uuid, signature.as_ref(), &body, enforce, now)
-        {
-            Ok(unpacked) => ChatMessage::new(uuid, unpacked, &body, now),
-            Err(e) => return self.decode_failure(i, e, events),
-        };
-        if message.signature.is_some() && message.expired(now) {
-            events.push(HostEvent::Warn(format!(
-                "Received expired chat: '{}'. Is the client/server system time unsynchronized?",
-                message.content
-            )));
-        }
+        let message = ChatMessage::new(uuid, Unpacked::Unsigned, &body, now);
         // The chat filter (docs/chat-filter.md): after the chain took the message, before anyone sees it.
         if !self.chat_allowed(
             i,
@@ -276,54 +231,7 @@ impl Hub {
         p: play::ChatSessionUpdate,
         events: &mut Vec<HostEvent>,
     ) {
-        let key = ProfileKey {
-            expires_at: p.expires_at,
-            key: p.key,
-            signature: p.key_signature,
-        };
-        let g = &self.guests[i];
-        let (conn, uuid) = (g.conn, g.uuid);
-        let old = g.chain.session().map(|s| s.profile_key.expires_at);
-        if g.chain.session().is_some_and(|s| s.profile_key == key) {
-            return;
-        }
-        if old.is_some_and(|old| key.expires_at < old) {
-            self.kick(
-                conn,
-                translatable("multiplayer.disconnect.expired_public_key", &[]),
-            );
-            return;
-        }
-        let secure = self.lan.shared.config.secure_chat.clone();
-        let keys = secure.as_deref().map_or(&[][..], |s| s.keys());
-        if keys.is_empty() {
-            events.push(HostEvent::Warn(format!(
-                "Ignoring chat session from {} due to missing Services public key",
-                g.name
-            )));
-            return;
-        }
-        match ChatSession::validate(p.session, key, keys, uuid) {
-            Ok(session) => {
-                let data = session.data();
-                self.guests[i].chain = Chain::keyed(session);
-                // resetPlayerChatState: INITIALIZE_CHAT to every player.
-                self.broadcast(&C::PlayerInfoUpdate(play::PlayerInfoUpdate {
-                    actions: 2,
-                    entries: vec![play::PlayerInfo {
-                        uuid,
-                        chat_session: Some(data),
-                        ..Default::default()
-                    }],
-                }));
-            }
-            Err(reason) => {
-                events.push(HostEvent::Error(
-                    "Failed to validate profile key".to_owned(),
-                ));
-                self.kick(conn, translatable(reason, &[]));
-            }
-        }
+        let _ = (i, p, events); // No profile-key collection or signature-chain validation.
     }
 
     /// PlayerList.broadcastChatMessage: logged (`[Not Secure]` unless signed
@@ -353,36 +261,12 @@ impl Hub {
         if g.info.chat_visibility != 0 {
             return;
         }
-        let last_seen = message
-            .last_seen
-            .iter()
-            .map(|s| g.signatures.pack(s))
-            .collect();
-        g.send(&C::PlayerChat(play::PlayerChat {
-            global_index: g.chat_index,
-            sender: message.sender,
-            index: message.index,
-            signature: message.signature.map(|s| s.to_vec()),
-            content: message.content.clone(),
-            timestamp: message.timestamp,
-            salt: message.salt,
-            last_seen,
-            unsigned_content: message.unsigned_content.clone(),
-            filter: (0, Vec::new()),
+        // DisguisedChat carries the existing chat type/name decoration but no
+        // signature cache, report chain or acknowledgement requirement.
+        g.send(&C::DisguisedChat(play::DisguisedChat {
+            message: message.unsigned_content.clone().unwrap_or_else(|| literal(&message.content)),
             chat_type: bound.clone(),
         }));
-        g.chat_index += 1;
-        if let Some(signature) = &message.signature {
-            g.signatures.push(&message.last_seen, Some(signature));
-            g.last_seen.add_pending(signature);
-            if g.last_seen.tracked_count() > 4096 {
-                let conn = g.conn;
-                self.kick(
-                    conn,
-                    translatable("multiplayer.disconnect.too_many_pending_chats", &[]),
-                );
-            }
-        }
     }
 
     /// sendChatMessage of a system message: a disguised chat, to players
@@ -408,60 +292,13 @@ impl Hub {
         last_seen: &[Signature],
         events: &mut Vec<HostEvent>,
     ) -> Result<Vec<(String, ChatMessage)>, DecodeError> {
-        let (enforce, now) = (
-            self.enforces_secure_chat() && !crate::portable::is_portable(self.guests[i].uuid),
-            now_millis(),
-        );
-        let g = &mut self.guests[i];
-        let uuid = g.uuid;
-        let mut out = Vec::new();
-        if p.arguments.is_empty() {
-            for (name, value) in parsed {
-                // SignedMessageBody.unsigned.
-                let body = Body {
-                    content: value,
-                    timestamp: now,
-                    salt: 0,
-                    last_seen: &[],
-                };
-                let unpacked = g.chain.unpack(uuid, None, &body, enforce, now)?;
-                out.push((name.clone(), ChatMessage::new(uuid, unpacked, &body, now)));
-            }
-            return Ok(out);
-        }
-        let mismatch = |events: &mut Vec<HostEvent>| {
-            let names = |l: &mut dyn Iterator<Item = &String>| {
-                l.map(String::as_str).collect::<Vec<_>>().join(", ")
-            };
-            events.push(HostEvent::Error(format!(
-                "Signed command mismatch between server and client ('{}'): got [{}] from client, but expected [{}]",
-                p.command,
-                names(&mut p.arguments.iter().map(|a| &a.0)),
-                names(&mut parsed.iter().map(|a| &a.0)),
-            )));
-            DecodeError::InvalidCommandSignature
-        };
-        for (name, signature) in &p.arguments {
-            let Some((_, value)) = parsed.iter().find(|(n, _)| n == name) else {
-                g.chain.set_broken();
-                return Err(mismatch(events));
-            };
-            let body = Body {
-                content: value,
-                timestamp: p.timestamp,
-                salt: p.salt,
-                last_seen,
-            };
-            let signature = secure_chat::signature(signature);
-            let unpacked = g
-                .chain
-                .unpack(uuid, signature.as_ref(), &body, enforce, now)?;
-            out.push((name.clone(), ChatMessage::new(uuid, unpacked, &body, now)));
-        }
-        if parsed.iter().any(|(n, _)| !out.iter().any(|(o, _)| o == n)) {
-            return Err(mismatch(events));
-        }
-        Ok(out)
+        let _ = (p, last_seen, events);
+        let uuid = self.guests[i].uuid;
+        let now = now_millis();
+        Ok(parsed.iter().map(|(name, content)| {
+            let body = Body { content, timestamp: now, salt: 0, last_seen: &[] };
+            (name.clone(), ChatMessage::new(uuid, Unpacked::Unsigned, &body, now))
+        }).collect())
     }
 
     /// `PlayerList.broadcastChatMessage` for a non-player command source:

@@ -153,7 +153,7 @@ impl Game<'_> {
             r.signatures = Default::default();
         }
         // Only when the server says it is in online mode (handleLogin).
-        if self.remote.as_ref().is_some_and(|r| r.online_mode) {
+        if self.remote.as_ref().is_some_and(|r| r.online_mode && r.enforces_secure_chat) {
             if let Some(account) = self.auth() {
                 auth::prepare_chat_keys_for(account, true);
             }
@@ -169,7 +169,7 @@ impl Game<'_> {
         if self
             .remote
             .as_ref()
-            .is_some_and(|r| r.logged_in && r.online_mode)
+            .is_some_and(|r| r.logged_in && r.online_mode && r.enforces_secure_chat)
         {
             if self.remote.as_ref().is_some_and(|r| r.secure_chat.signed())
                 && let Some(account) = self.auth()

@@ -303,7 +303,7 @@ impl NetConfig {
     }
     /// MinecraftServer.enforceSecureProfile.
     pub fn enforces_secure_chat(&self) -> bool {
-        self.secure_chat.as_ref().is_some_and(|s| s.enforced())
+        false // This fork uses unsigned chat; Microsoft/portable login authentication is separate.
     }
     /// IntegratedServer.publishServer.
     pub fn lan(port: u16, motd: String, max_players: usize) -> Self {
