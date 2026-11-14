@@ -121,6 +121,9 @@ pub fn is_enabled(home: &Path, id: &str) -> bool {
 
 /// Turns mod `id` on (or off) in `horizon-mods.txt`, keeping the other lines.
 pub fn set_enabled(home: &Path, id: &str, on: bool) -> Result<(), String> {
+    if !on && crate::server_sync::required(home, id) {
+        return Err("Required by the dedicated server".into());
+    }
     let _lock = super::lock_home(home);
     let path = home.join(MODS_LIST);
     let text = horizon_mods::selections::load(home);

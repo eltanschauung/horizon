@@ -659,7 +659,10 @@ impl Launcher {
             body = body.children(self.switch_notice(i));
         }
         if kind == NewKind::Horizon {
-            body = body.child(self.horizon_versions(cx));
+            body = body.child(
+                ui::text(13., FontWeight::NORMAL, ink::FAINT)
+                    .child("Game and mod versions follow the dedicated server automatically."),
+            );
             if editing.is_none() {
                 body = body.child(self.start_from(copy, cx));
             }

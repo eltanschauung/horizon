@@ -461,6 +461,17 @@ impl Launcher {
         cx: &Context<Self>,
     ) -> Div {
         let t = self.theme;
+        if horizon_launcher::server_sync::required(&self.mods.home(), &row.id) {
+            return div()
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .child("Required")
+                .child(
+                    switch(format!("required-native-{}", row.id), true, &t)
+                        .opacity(theme::DISABLED),
+                );
+        }
         let busy = busy || self.github.busy();
         let mut right = row.origin.as_ref().map_or_else(
             || div().flex().items_center().gap(px(8.)),

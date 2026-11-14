@@ -318,6 +318,9 @@ pub fn remove(home: &Path, name: &str) -> Result<Entry, String> {
         .lookup(name)
         .cloned()
         .ok_or_else(|| format!("{name} wasn't installed by the browser."))?;
+    if super::horizon::mod_id(&entry).is_some_and(|id| crate::server_sync::required(home, id)) {
+        return Err("Required by the dedicated server".into());
+    }
     if entry.kind == Kind::Mod && entry.source != SourceId::Horizon {
         super::java::remove(home, &entry)?;
     } else {

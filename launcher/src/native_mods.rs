@@ -2227,6 +2227,7 @@ fn pipeline(
     progress: &impl Fn(Step),
     skip: &[LeftOut],
     isolate: bool,
+    server_revision: Option<&str>,
 ) -> Result<Built, Failed> {
     let started = std::time::Instant::now();
     backend::need_prepared(base)?;
@@ -2316,15 +2317,29 @@ fn pipeline(
         None => revision_of(base),
     };
     let date = |r: &str| committed(backend::REPO, r);
-    let (pinned, mut pinned_by) = pinned_revision(&pins, on_base, base_revision, date)?;
-    // Known without asking GitHub again unless a pin chose the commit.
-    let base_horizon = match pinned_by.is_empty() {
-        true => Some(pinned.clone()),
-        false => base_revision().ok(),
+    let (pinned, mut pinned_by) = match server_revision {
+        // The base supplies prepared assets, not source authority. A local base
+        // may have no public tag or build record; never resolve it on this path.
+        Some(revision) => (revision.to_owned(), Vec::new()),
+        None => pinned_revision(&pins, on_base, base_revision, date)?,
+    };
+    let base_horizon = if server_revision.is_some() {
+        built_on.as_ref().and_then(|a| a.base_horizon.clone())
+    } else {
+        match pinned_by.is_empty() {
+            true => Some(pinned.clone()),
+            false => base_revision().ok(),
+        }
     };
     let revision = with_hooks(
         &mods,
-        crate::fork::build_revision()?,
+        match server_revision {
+            Some(revision) => {
+                crate::fork::verify_revision(revision)?;
+                revision.to_owned()
+            }
+            None => crate::fork::build_revision()?,
+        },
         false,
         || None,
         hooks_at,
@@ -2662,6 +2677,7 @@ pub fn build(
                 &progress,
                 &[],
                 false,
+                None,
             )
             .map_err(|error| (String::from(error), Vec::new()))
         };
@@ -2713,6 +2729,52 @@ pub fn build(
                 plan: built.plan,
             });
         }
+        Ok(built.version)
+    })
+}
+
+/// Build the channel's exact server commit without following main, dropping a
+/// mod, selecting an executable or mutating any process-wide environment.
+pub fn build_pinned(
+    base: &str,
+    home: &Path,
+    revision: &str,
+    profile: Profile,
+    progress: impl Fn(Step),
+) -> Result<String, String> {
+    if revision.len() != 40 || !revision.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("Invalid server source revision".into());
+    }
+    if let Some(error) = backend::native_mod_architecture_error() {
+        return Err(error);
+    }
+    logged(|| {
+        let folder = installed_mods(home)?;
+        let built = pipeline(
+            base,
+            &folder,
+            true,
+            true,
+            profile,
+            Target::Client,
+            &progress,
+            &[],
+            false,
+            Some(revision),
+        )
+        .map_err(String::from)?;
+        if crate::fork::preflight() {
+            return Ok(base.to_owned());
+        }
+        let about = about(&built.version).ok_or("Missing synchronized build record")?;
+        if about.horizon != revision || !about.left_out.is_empty() {
+            return Err("Synchronized build omitted or changed required inputs".into());
+        }
+        progress(Step::Done {
+            secs: built.secs,
+            profile: built.profile,
+            plan: built.plan,
+        });
         Ok(built.version)
     })
 }
@@ -2783,6 +2845,7 @@ pub fn build_server(
             &progress,
             &[],
             false,
+            None,
         )
         .map_err(String::from)?;
         if crate::fork::preflight() {

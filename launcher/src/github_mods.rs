@@ -635,6 +635,9 @@ pub fn origins(home: &Path) -> Vec<Origin> {
 /// it came from. A mod from the registry or the player's own is never replaced; one from GitHub
 /// is (that is how it updates).
 pub fn install(home: &Path, found: &Resolved, packed: &Packed) -> Result<Origin, String> {
+    if crate::server_sync::managed(home, &packed.id) {
+        return Err("This mod version is managed by the dedicated server".into());
+    }
     let target = home.join(INSTALLED).join(format!("{}.hnmod", packed.id));
     if target.exists() && origin(home, &packed.id).is_none() {
         return Err(format!(
@@ -664,6 +667,9 @@ pub fn install(home: &Path, found: &Resolved, packed: &Packed) -> Result<Origin,
 
 /// Removes mod `id` installed from GitHub; false when it wasn't.
 pub fn remove(home: &Path, id: &str) -> Result<bool, String> {
+    if crate::server_sync::required(home, id) {
+        return Err("Required by the dedicated server".into());
+    }
     if origin(home, id).is_none() {
         return Ok(false);
     }

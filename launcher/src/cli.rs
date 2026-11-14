@@ -788,6 +788,14 @@ enum Cmd {
     },
     /// Show the native compilation cache's size and limit as JSON. Installed games and saves
     /// are never removed; builds must be idle
+    /// Match this instance to the dedicated server's pinned client inputs
+    ServerSync {
+        #[arg(long)]
+        instance: Option<String>,
+        /// Inspect the channel without installing or building
+        #[arg(long)]
+        check: bool,
+    },
     NativeCache {
         /// Clear only fast/release compiler outputs. The next changed build recompiles
         #[arg(long)]
@@ -1319,6 +1327,35 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
                 println!(
                     "Installed {tag}. Prepare it next: horizon-launcher prepare --version {tag}"
                 );
+            }
+        }
+        Cmd::ServerSync { instance, check } => {
+            let i = match instance {
+                Some(id) => instances::find(&id)?,
+                None => instances::selected(),
+            };
+            let current = i
+                .version
+                .clone()
+                .or_else(|| backend::Settings::load().selected);
+            if check {
+                json(horizon_launcher::server_sync::check(
+                    &i,
+                    current.as_deref(),
+                )?);
+            } else {
+                let result =
+                    horizon_launcher::server_sync::sync(&i, current.as_deref(), |phase, line| {
+                        eprintln!("{} {line}", phase.label())
+                    })?;
+                json(match result {
+                    horizon_launcher::server_sync::Outcome::Ready(version) => {
+                        serde_json::json!({"ready":true,"version":version})
+                    }
+                    horizon_launcher::server_sync::Outcome::Prepare(base) => {
+                        serde_json::json!({"ready":false,"prepare":base})
+                    }
+                });
             }
         }
         Cmd::NativeCache { clear } => {
@@ -2420,7 +2457,7 @@ fn github_native(
 }
 
 fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
-    use horizon_launcher::browser::{Kind, Query, SourceId, horizon, installed, java_instance};
+    use horizon_launcher::browser::{horizon, installed, java_instance, Kind, Query, SourceId};
     use horizon_launcher::modpacks;
     // What the browser installs goes into an instance's game folder; Java mods' checks are kept
     // in the default one, shared by all.
@@ -4044,17 +4081,15 @@ mod tests {
             _ => panic!("expected native-build"),
         }
         // A version refuses --update, as in the game mode.
-        assert!(
-            parse(&[
-                "mods",
-                "--server-output",
-                "engine-out",
-                "--version",
-                "v2026.10.13",
-                "--update"
-            ])
-            .is_err()
-        );
+        assert!(parse(&[
+            "mods",
+            "--server-output",
+            "engine-out",
+            "--version",
+            "v2026.10.13",
+            "--update"
+        ])
+        .is_err());
         // The game mode is unchanged: an instance build without --server-output.
         assert!(matches!(
             parse(&["--instance", "A"]).unwrap().command,

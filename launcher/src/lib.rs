@@ -46,6 +46,7 @@ pub mod relocation;
 pub mod rust_toolchain;
 pub mod screenshots;
 pub mod server_list;
+pub mod server_sync;
 pub mod servers;
 pub mod setup_args;
 pub mod shop;

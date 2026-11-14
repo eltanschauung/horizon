@@ -298,6 +298,12 @@ def deploy(args):
         for e in m['packages']:
             src=p.parent/e['path'];dest=('horizon-native-mods/'if e['kind']=='native'else'horizon-mods/')+src.name
             (staging/Path(dest).parent).mkdir(parents=True,exist_ok=True);shutil.copy2(src,staging/dest);payload['files'][dest]=e['sha256']
+        update_channel=None
+        if args.apply:
+            # Download inputs must be public and complete BEFORE changing a server.
+            # Publication failure leaves the running server and client pointer alone.
+            from fork_sync import stage_plan
+            update_channel=stage_plan(p,m)
         remote=args.server_dir+'/.workflow-stage/'+digest(p)[:20]
         ssh=['ssh','--',args.host]
         if args.apply:
@@ -314,6 +320,12 @@ def deploy(args):
         cmd='python3 - '+shlex.quote(json.dumps(payload))
         text=subprocess.check_output(ssh+[cmd],input=runner.read_bytes(),timeout=240)
         result['server']=json.loads(text)
+        # Promote only inputs whose exact binaries and packages are now healthy.
+        # A skipped deployment with different inputs must never advance clients.
+        report=result['server']
+        if args.apply and report.get('artifacts_match') and report.get('packages_match') and report.get('phase')=='running':
+            from fork_sync import promote
+            result['client_update_channel']=promote(*update_channel)
         shutil.rmtree(staging)
     if 'local' in targets:
         from fork_cache import purge_resource_cache

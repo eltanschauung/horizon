@@ -94,3 +94,12 @@ Frozen manifests replace LambDynamicLights with the licensed Better Dynamic Ligh
 Hosted chat is unsigned and non-reportable: profile keys, signature chains and acknowledgement checks are not collected/enforced for chat. Microsoft/portable login authentication, packet bounds and normal chat visibility remain separate. Commands resolve and suggest character aliases, including variants, while permissions and storage remain UUID-based. Duplicate character names get a UUID suffix.
 
 Windows release and portable packaging require the pinned, checksum-verified x64 Opus DLL and its license (`tools/windows_runtime.py`), including runtime-loaded dependencies that PE import scans cannot discover. Minimap waypoints are cached per world/server and dimension, with U opening the editor and an optional local head marker. Skin extensions use effective chestplate opacity, including renderer workers; transparent/hidden equipment does not hide the corresponding skin layer.
+
+- Server-managed launcher: Rust instances automatically download checksum-pinned
+  client inputs matching the healthy dedicated-server deployment, then build its
+  exact source commit through the reusable native cache. Play shows disabled
+  download/build phases with separate clocks; normal version selection is hidden.
+  Server-required mods cannot be disabled/removed; optional client choices persist.
+  Package transactions recover/roll back without touching worlds or accounts.
+  Frozen server deployment publishes the matching channel only after health checks.
+  See [server-synced launcher](docs/server-synced-launcher.md).

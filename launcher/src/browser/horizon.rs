@@ -1095,6 +1095,9 @@ pub fn try_older(instance: &crate::instances::Instance, left: &[String]) -> Vec<
     let picked = chosen(home);
     let mut lines = Vec::new();
     for entry in installed::Installed::load(home).entries {
+        if mod_id(&entry).is_some_and(|id| crate::server_sync::managed(home, id)) {
+            continue;
+        }
         if entry.source != SourceId::Horizon
             || picked.contains_key(&entry.project)
             || !left.contains(&entry.project)
@@ -1161,6 +1164,9 @@ pub fn fit_versions(instance: &crate::instances::Instance) -> Vec<String> {
     let mut lines = Vec::new();
     let picked = chosen(home);
     for entry in installed::Installed::load(home).entries {
+        if mod_id(&entry).is_some_and(|id| crate::server_sync::managed(home, id)) {
+            continue;
+        }
         if picked.contains_key(&entry.project) {
             continue;
         }
@@ -1270,6 +1276,9 @@ fn install_version_guarded(
     guard: &dyn Fn(&Path) -> Result<(), String>,
     progress: &dyn Fn(&str, f32),
 ) -> Result<installed::Entry, String> {
+    if crate::server_sync::managed(home, &p.id) {
+        return Err("This mod version is managed by the dedicated server".into());
+    }
     let _lock = crate::browser::lock_home(home);
     let project = project_of(p).ok_or_else(|| format!("{} can't be installed here.", p.name))?;
     if let Some(r) = index.revoked(&p.id, &v.file.sha256) {

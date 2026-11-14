@@ -111,6 +111,12 @@ impl Launcher {
 
     /// Keeps the selected instance on `tag`, or lets it follow the launcher's version.
     pub(super) fn pin_version(&mut self, tag: Option<String>) {
+        if self
+            .selected_instance()
+            .is_some_and(horizon_launcher::server_sync::manages_instance)
+        {
+            return;
+        }
         let Some(id) = self.selected_instance().map(|i| i.id.clone()) else {
             return;
         };

@@ -344,6 +344,14 @@ impl Launcher {
     pub(super) fn switch_mod(&mut self, row: &ModRow) {
         let home = self.instance_mods.home.clone().unwrap_or_default();
         let java_instance = self.selected_instance().is_some_and(|i| i.java.is_some());
+        if !java_instance
+            && row
+                .native
+                .as_ref()
+                .is_some_and(|n| horizon_launcher::server_sync::required(&home, &n.id))
+        {
+            return;
+        }
         match &row.entry {
             Some(e) if !java_instance => self.mods_switch(e),
             _ => {
@@ -487,7 +495,29 @@ impl Launcher {
         let t = self.theme;
         let n = t.night;
         let icon = self.mod_icon(row.entry.as_ref(), row.icon.clone(), 40.);
-        let controls = if let Some(native) = &row.native {
+        let mod_id = row
+            .native
+            .as_ref()
+            .map(|n| n.id.as_str())
+            .or_else(|| row.entry.as_ref().and_then(horizon::mod_id))
+            .map(str::to_owned)
+            .or_else(|| {
+                std::path::Path::new(&row.file)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .map(str::to_owned)
+            });
+        let required = mod_id
+            .as_deref()
+            .is_some_and(|id| horizon_launcher::server_sync::required(&self.mods.home(), id));
+        let controls = if required {
+            div()
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .child(shell::text(night::CAPTION, c(n.muted)).child("Required"))
+                .child(switch(format!("required-{}", row.file), true, &t).opacity(theme::DISABLED))
+        } else if let Some(native) = &row.native {
             self.native_mod_actions(native, busy, cx)
         } else {
             let switch_row = row.clone();

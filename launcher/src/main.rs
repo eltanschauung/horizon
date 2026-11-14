@@ -64,6 +64,7 @@ mod profile_heads;
 mod scene;
 mod screenshots_page;
 mod scrollbar;
+mod server_sync_ui;
 mod servers_page;
 #[cfg(windows)]
 mod setup_page;
@@ -159,7 +160,7 @@ impl Page {
     /// `wardrobe` (`Launcher::wardrobe_shown`).
     fn in_top_bar(wardrobe: bool) -> impl Iterator<Item = (Page, &'static str, &'static str)> {
         Self::ALL.into_iter().filter(move |(page, ..)| match page {
-            Page::Settings => false,
+            Page::Settings | Page::Versions => false,
             Page::Wardrobe | Page::Shop => wardrobe,
             _ => true,
         })
@@ -266,6 +267,7 @@ struct Launcher {
     import_error: Option<String>,
     /// Native mods (`native_mods`, on the Mods page): the build's step while it runs, why it
     /// failed, and the warning before a build while it is open, with the mods it names.
+    server_sync: server_sync_ui::SyncUi,
     native_step: Option<String>,
     /// When the running native build started, and the whole seconds last drawn (the status shows
     /// the time it has taken).
@@ -623,6 +625,7 @@ impl Launcher {
             install_error: None,
             importing_build: false,
             import_error: None,
+            server_sync: Default::default(),
             native_step: None,
             native_started: None,
             native_done: None,
@@ -880,6 +883,11 @@ impl Launcher {
     }
 
     fn go(&mut self, page: Page) {
+        let page = if page == Page::Versions {
+            Page::Play
+        } else {
+            page
+        };
         // The game may have made up a name since, and the CLI or another window may have
         // changed the accounts: read them again (small files, once a switch).
         self.offline_name = offline_name();
@@ -1020,6 +1028,13 @@ impl Launcher {
     /// warning was Update's: then it moves to that newer Horizon.
     /// `anyway`: the player agreed to build mods made for other Horizon versions together.
     fn build_native(&mut self, anyway: bool) {
+        if self
+            .selected_instance()
+            .is_some_and(horizon_launcher::server_sync::manages_instance)
+        {
+            self.begin_server_sync(false);
+            return;
+        }
         if self.native_step.is_some() {
             return;
         }
@@ -1420,7 +1435,11 @@ impl Launcher {
                 Msg::Updates(Ok(updates)) => {
                     self.update_error = None;
                     self.updates = *updates;
-                    if self.settings.auto_install() {
+                    if self.settings.auto_install()
+                        && !self
+                            .selected_instance()
+                            .is_some_and(horizon_launcher::server_sync::manages_instance)
+                    {
                         self.install_update();
                     }
                     if let Some(release) = self.updates.launcher.clone() {
@@ -1428,6 +1447,10 @@ impl Launcher {
                     }
                 }
                 Msg::Updates(Err(e)) => self.update_error = Some(e),
+                Msg::ServerSyncProgress(id, phase, line) => {
+                    self.server_sync_progress(id, phase, line)
+                }
+                Msg::ServerSynced(id, result) => self.server_sync_done(id, result),
                 Msg::NativeProgress(step) => self.native_step = Some(step),
                 Msg::Native(result) => {
                     // The last step of a build that worked says how it went.
@@ -1595,6 +1618,7 @@ impl Launcher {
                 }
             }
         }
+        changed |= self.server_sync_tick();
         changed |= self.servers_tick();
         changed |= self.mods_tick();
         changed |= self.github_tick();
@@ -1840,6 +1864,9 @@ impl Launcher {
             }
             self.starting_pack = None;
             self.start_java(instance, server);
+            return;
+        }
+        if self.server_sync_before_play() {
             return;
         }
         let Some(tag) = self.selected().cloned() else {
@@ -3402,12 +3429,21 @@ impl Launcher {
             .cloned()
             .or_else(|| java.is_some().then(String::new))
         else {
-            // No hero without a version: the page starts below the top bar like the others.
-            let memory = self.memory_row(cx);
-            // The first version, downloading since an instance was made to play it.
-            let waiting = match &self.installing {
-                Some((_, p)) => format!("{} {:.0}%", tr("Installing"), p * 100.),
-                None => tr("No version installed yet.").to_string(),
+            let status = self.server_sync_status();
+            let busy = status.is_some();
+            let play = button(
+                "server-sync-first-play",
+                status.as_deref().unwrap_or("Play"),
+                Kind::Primary,
+                &t,
+            );
+            let play = if busy {
+                disabled(play)
+            } else {
+                play.on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                    this.begin_server_sync(true);
+                    cx.notify();
+                }))
             };
             return div()
                 .flex()
@@ -3416,18 +3452,11 @@ impl Launcher {
                 .pt(px(28.))
                 .child(page_header(
                     "Play",
-                    "Start the game, or run a server for others to join.",
+                    "Game and mod versions follow the dedicated server automatically.",
                     &t,
                 ))
-                .child(centered(&waiting, &t).child(
-                    button("go-versions", "Choose a version", Kind::Secondary, &t).on_click(
-                        cx.listener(|this, _: &ClickEvent, _, cx| {
-                            this.go(Page::Versions);
-                            cx.notify();
-                        }),
-                    ),
-                ))
-                .children(memory);
+                .child(play)
+                .children(self.client_error.as_ref().map(|e| div().child(e.clone())));
         };
         let prepared = backend::is_prepared(&tag);
         // Prepared without sounds (#1035): Prepare again is the fix, so it stands out.

@@ -70,7 +70,6 @@ impl Launcher {
                 .items_center()
                 .gap(px(10.))
                 .child(self.play_group(tag, prepared || java.is_some(), cx))
-                .children(java.is_none().then(|| self.glass_picker(cx)))
                 .children(Some(mods))
                 .children(self.folder_group(java.is_none(), cx))
                 .child(div().flex_1().min_w(px(22.)))
@@ -87,7 +86,6 @@ impl Launcher {
                         .items_center()
                         .gap(px(10.))
                         .child(self.play_group(tag, prepared || java.is_some(), cx))
-                        .children(java.is_none().then(|| self.glass_picker(cx)))
                         .children(self.folder_group(java.is_none(), cx)),
                 )
                 .child(self.glass_join_friend(tag, false, cx))
@@ -277,6 +275,23 @@ impl Launcher {
     /// Play and its ⋯ menu (`PlayGroup`): Stop while the game runs, Update when the launcher's
     /// version has a newer one, the progress while preparing, updating or starting.
     fn play_group(&mut self, tag: &str, ready: bool, cx: &mut Context<Self>) -> Div {
+        if let Some(status) = self.server_sync_status() {
+            return div().child(
+                div()
+                    .id("play-sync")
+                    .h(px(TALL))
+                    .min_w(px(300.))
+                    .px(px(18.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(radius::CONTROL))
+                    .bg(white(fill::ACTIVE))
+                    .text_color(white(ink::OFF))
+                    .cursor_default()
+                    .child(status),
+            );
+        }
         let t = self.theme;
         let accent = ui::color(self.look.accent);
         let running = self.client.is_some();

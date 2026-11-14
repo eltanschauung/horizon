@@ -203,6 +203,15 @@ impl Launcher {
     pub(super) fn home_actions(&self, ready: bool, java: bool, cx: &mut Context<Self>) -> Div {
         let t = self.theme;
         let running = self.client.is_some() || self.starting_client.is_some();
+        if !java {
+            if let Some(status) = self.server_sync_status() {
+                return div().child(disabled(
+                    action("play-sync", Action::Main, &t)
+                        .min_w(px(260.))
+                        .child(label(status)),
+                ));
+            }
+        }
         if self.preparing {
             // Play waits for the steps below it; a download can stop (the next one goes on from
             // there).
@@ -269,7 +278,6 @@ impl Launcher {
             .gap(px(10.))
             .child(play)
             // Horizon's versions don't apply to a Java instance.
-            .children((!java).then(|| self.picker(cx)))
             .child(
                 action("home-mods", Action::Quiet, &t)
                     .child(label(tr("Mods").to_string()))

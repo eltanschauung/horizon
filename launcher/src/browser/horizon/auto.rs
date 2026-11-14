@@ -284,6 +284,9 @@ pub(super) fn run_with(
     let mut report = Report::default();
     let picked = super::chosen(home);
     for entry in installed::Installed::load(home).entries {
+        if super::mod_id(&entry).is_some_and(|id| crate::server_sync::managed(home, id)) {
+            continue;
+        }
         if picked.contains_key(&entry.project) {
             continue;
         }

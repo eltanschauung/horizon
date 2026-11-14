@@ -1743,6 +1743,11 @@ impl Launcher {
         use native_status::State;
         let t = self.theme;
         let instance = self.selected_instance()?;
+        if horizon_launcher::server_sync::manages_instance(instance) {
+            return Some(div().child(self.server_sync_status().unwrap_or_else(|| {
+                "Updates and builds follow the dedicated server automatically.".into()
+            })));
+        }
         let version = self.version_of(instance).cloned();
         let home = self.mods.home();
         let key = native_status::fingerprint(&home, version.as_deref());

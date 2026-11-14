@@ -4257,6 +4257,8 @@ pub enum Msg {
     OfficialPlayers(Option<u64>),
     /// Where the native-mods build is (`native_mods::Step::label`).
     NativeProgress(String),
+    ServerSyncProgress(String, crate::server_sync::Phase, String),
+    ServerSynced(String, Result<crate::server_sync::Outcome, String>),
     /// The native-mods build ended: the version built, or why not.
     Native(Result<String, String>),
     /// An imported game build is installed (`build_import::import`): its version, or why not.
