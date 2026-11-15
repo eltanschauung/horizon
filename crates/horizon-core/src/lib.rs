@@ -26,3 +26,6 @@ pub mod version;
 
 pub use level_key::LevelKey;
 pub use version::VANILLA_VERSION;
+
+/// Validation shared by the launcher and native authentication endpoints.
+pub mod auth_provider;

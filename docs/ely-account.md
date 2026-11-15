@@ -21,8 +21,10 @@ or Java authentication agent is required for Horizon's Rust game.
 
 Online-mode Horizon servers accepting portable accounts (`[server] allow_portable = true` in `server.toml`)
 also verify Ely joins through Ely's HTTPS `hasJoined` service after Microsoft.
-They retain Microsoft precedence and accept only Ely UUIDv5 identities, disjoint
-from Microsoft UUIDv4 and portable UUIDv8. Display names never link accounts or
+They retain Microsoft precedence and accept Ely registration UUIDv4 and legacy
+UUIDv5 profiles, including Ely-supported name punctuation and letters. UUID format
+is not authentication: Ely must prove the encrypted connection through its HTTPS
+session service. Provider credentials remain separately namespaced in the launcher. Display names never link accounts or
 transfer existing progress. Servers without this opt-in continue accepting only
 Microsoft authentication. Clients and servers need this change; older pinned
 game builds do not understand Ely sessions. Java instances retain Microsoft auth.

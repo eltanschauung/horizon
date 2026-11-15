@@ -980,7 +980,11 @@ fn serve_login(
         login::Serverbound::Hello(h) => h,
         _ => return Err("expected a login hello".into()),
     };
-    if !valid_name(&hello.name) {
+    let ely_name = shared.config.allow_portable
+        && shared.config.online.is_some()
+        && crate::auth::is_ely_uuid(hello.uuid)
+        && horizon_core::auth_provider::valid_ely_name(&hello.name);
+    if !valid_name(&hello.name) && !ely_name {
         // handleHello's validState throws; Connection.exceptionCaught sends the
         // exception as the login disconnect.
         login_disconnect(

@@ -58,11 +58,12 @@ fn response(v: Value, client: &str) -> Result<(Account, Tokens), String> {
     let name = profile["name"].as_str().unwrap_or_default();
     if uuid.len() != 32
         || !uuid.bytes().all(|b| b.is_ascii_hexdigit())
-        || uuid.as_bytes()[12] != b'5'
-        || !matches!(uuid.as_bytes()[16], b'8' | b'9' | b'a' | b'b')
-        || !valid_offline_name(name)
+        || !u128::from_str_radix(&uuid, 16).is_ok_and(horizon_core::auth_provider::valid_ely_uuid)
     {
-        return Err("Ely.by returned an invalid account profile.".into());
+        return Err("Ely.by returned an invalid account UUID.".into());
+    }
+    if !horizon_core::auth_provider::valid_ely_name(name) {
+        return Err("Ely.by returned an invalid account name.".into());
     }
     let access = v["accessToken"]
         .as_str()
@@ -258,7 +259,7 @@ mod tests {
         io::{BufRead, BufReader, Read, Write},
         net::TcpListener,
     };
-    const UUID: &str = "11111111222253338444555555555555";
+    const UUID: &str = "11111111222243338444555555555555";
     fn reply(token: &str) -> Value {
         json!({"selectedProfile":{"id":UUID,"name":"Ely_Player"},"clientToken":"client","accessToken":token})
     }
@@ -337,7 +338,7 @@ mod tests {
         v["clientToken"] = json!("other");
         assert!(response(v, "client").is_err());
         let mut v = reply("dummy");
-        v["selectedProfile"]["id"] = json!("069a79f444e94726a5befca90e38aaf5");
+        v["selectedProfile"]["id"] = json!("11111111222283338444555555555555");
         assert!(response(v, "client").is_err());
         let mut v = reply("dummy");
         v["accessToken"] = json!("");
@@ -372,6 +373,20 @@ mod tests {
             Some("microsoft-secret")
         );
         assert!(store.get(&key(UUID)).unwrap().is_none());
+    }
+    #[test]
+    fn ely_accepts_registration_uuid_and_provider_name_shapes() {
+        for id in [
+            "11111111222243338444555555555555",
+            "11111111-2222-5333-8444-555555555555",
+        ] {
+            for name in ["Lunar-Moon", "name.name", "Игрок"] {
+                let mut v = reply("dummy");
+                v["selectedProfile"] = json!({"id":id,"name":name});
+                let (account, _) = response(v, "client").unwrap();
+                assert_eq!(account.name, name);
+            }
+        }
     }
     #[test]
     fn ely_skin_hosts_are_restricted() {

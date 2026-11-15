@@ -80,7 +80,7 @@ impl AuthSession {
             Some("ely") => true,
             _ => return Err("the session has an unsupported account provider".into()),
         };
-        if ely && !is_ely_uuid(uuid) {
+        if ely && (!is_ely_uuid(uuid) || !horizon_core::auth_provider::valid_ely_name(name)) {
             return Err("the Ely.by account UUID is invalid".into());
         }
         Ok(Self {
@@ -618,9 +618,9 @@ fn url_encode(text: &str) -> String {
 /// no; `Err(Unavailable)`: no answer.
 pub const ELY_AUTH: &str = "https://authserver.ely.by";
 
-/// Ely's UUIDv5 identities cannot claim a Microsoft UUIDv4 or portable UUIDv8.
+/// Profile format only; the Ely session service must still verify the login proof.
 pub fn is_ely_uuid(uuid: u128) -> bool {
-    (uuid >> 76) & 15 == 5 && (uuid >> 62) & 3 == 2
+    horizon_core::auth_provider::valid_ely_uuid(uuid)
 }
 
 /// Only servers explicitly allowing non-Microsoft accounts call this verifier.
@@ -732,7 +732,7 @@ mod tests {
                         break;
                     }
                 }
-                let body=serde_json::json!({"id":"11111111222253338444555555555555","name":name,"properties":[]}).to_string();
+                let body=serde_json::json!({"id":"11111111222243338444555555555555","name":name,"properties":[]}).to_string();
                 write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
             }
             requests
@@ -756,7 +756,7 @@ mod tests {
 
     #[test]
     fn ely_sessions_do_not_expose_tokens_to_microsoft_services() {
-        let session=AuthSession::parse(r#"{"name":"Ely_Player","uuid":"11111111222253338444555555555555","access_token":"ely-dummy","user_type":"ely"}"#).unwrap();
+        let session=AuthSession::parse(r#"{"name":"Ely_Player","uuid":"11111111222243338444555555555555","access_token":"ely-dummy","user_type":"ely"}"#).unwrap();
         assert!(session.is_ely());
         assert_eq!(
             join_url(&session).unwrap(),
@@ -772,9 +772,9 @@ mod tests {
             fetch_chat_keys(&session).unwrap_err(),
             JoinError::InvalidSession
         );
-        assert!(!is_ely_uuid(0x069a79f444e94726a5befca90e38aaf5));
+        assert!(is_ely_uuid(0x069a79f444e94726a5befca90e38aaf5));
         assert!(!is_ely_uuid(0x11111111222283338444555555555555));
-        let invalid = r#"{"name":"Ely_Player","uuid":"069a79f444e94726a5befca90e38aaf5","access_token":"ely-dummy","user_type":"ely"}"#;
+        let invalid = r#"{"name":"Ely_Player","uuid":"11111111222283338444555555555555","access_token":"ely-dummy","user_type":"ely"}"#;
         assert!(AuthSession::parse(invalid).is_err());
     }
 
