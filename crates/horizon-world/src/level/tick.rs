@@ -592,7 +592,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             let fluid = b.fluid(state);
             let dry_spot = b.fluid(self.state(pos)).kind() == FluidKind::Empty;
             if self.sturdy(support, Direction::Up)
-                || (self.is_water_fluid(fluid.kind()) && fluid.is_source() && dry_spot)
+                || (b.is_water_fluid(fluid.kind()) && fluid.is_source() && dry_spot)
             {
                 let replaced = self.state(pos);
                 if dry_spot && b.is_replaceable(replaced) {
@@ -609,7 +609,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 return;
             }
             if fluid.kind() != FluidKind::Empty
-                || (!b.is_replaceable(state) && !self.instance_of(state, Class::Leaves))
+                || (!b.is_replaceable(state) && !b.instance_of(state, Class::Leaves))
             {
                 return;
             }
