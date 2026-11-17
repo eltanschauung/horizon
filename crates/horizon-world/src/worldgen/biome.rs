@@ -56,6 +56,7 @@ pub struct MultiNoiseBiomeSource {
     additions: Option<ClimateIndex<String>>,
     baseline: Option<ClimateIndex<String>>,
     groups: Vec<(f64, ClimateIndex<String>)>,
+    group_guards: Vec<bool>,
     selector_axis: usize,
     regions: Option<(Vec<u32>, u8, u32)>,
 }
@@ -70,6 +71,7 @@ impl MultiNoiseBiomeSource {
             additions: None,
             baseline: None,
             groups: Vec::new(),
+            group_guards: Vec::new(),
             selector_axis: 5,
             regions: None,
         })
@@ -85,6 +87,7 @@ impl MultiNoiseBiomeSource {
         let mut selector_axis = None;
         let mut region_options = None;
         let mut orders = std::collections::BTreeMap::new();
+        let mut guards = std::collections::BTreeMap::new();
         let mut groups =
             std::collections::BTreeMap::<String, (f64, Vec<(ParameterPoint, String)>)>::new();
         for entry in input
@@ -140,7 +143,9 @@ impl MultiNoiseBiomeSource {
                         .ok_or(DecodeError::Field("vanilla region weight"))?
                         as u32;
                     let minimum = entry["horizon:region_min_quarts"].as_u64().unwrap_or(0);
-                    if minimum > 4096 { return Err(DecodeError::Field("region minimum size").into()); }
+                    if minimum > 4096 {
+                        return Err(DecodeError::Field("region minimum size").into());
+                    }
                     let minimum = minimum as u32;
                     if order == 0
                         || order > 65535
@@ -160,6 +165,13 @@ impl MultiNoiseBiomeSource {
                 }
                 if !weight.is_finite() || weight < 0.0 || (weight == 0.0 && region.is_none()) {
                     return Err(DecodeError::Field("biome group weight").into());
+                }
+                let guard = entry["horizon:climate_guard"].as_bool().unwrap_or(false);
+                if guards
+                    .insert(group.to_owned(), guard)
+                    .is_some_and(|previous| previous != guard)
+                {
+                    return Err(DecodeError::Field("inconsistent climate guard").into());
                 }
                 let group = groups
                     .entry(group.to_owned())
@@ -202,7 +214,8 @@ impl MultiNoiseBiomeSource {
                 .map_err(DecodeError::Field)?;
             source.regions = Some((weights, zooms, minimum));
         }
-        for (_, (weight, points)) in groups {
+        for (name, (weight, points)) in groups {
+            source.group_guards.push(guards[&name]);
             source.groups.push((weight, ClimateIndex::new(points)?));
         }
         Ok(source)
@@ -229,6 +242,7 @@ impl MultiNoiseBiomeSource {
                 .with_min_quarts(climate.region_seed, *minimum)
             }),
             selector_axis: self.selector_axis,
+            group_guards: self.group_guards.clone(),
             groups: self
                 .groups
                 .iter()
@@ -244,6 +258,7 @@ pub struct BiomeResolver<'a> {
     search: ClimateSearch<'a, String>,
     additions: Option<ClimateSearch<'a, String>>,
     groups: Vec<(f64, ClimateSearch<'a, String>)>,
+    group_guards: Vec<bool>,
     selector_axis: usize,
 }
 impl<'a> BiomeResolver<'a> {
@@ -281,7 +296,14 @@ impl<'a> BiomeResolver<'a> {
             if index == 0 {
                 return Ok(self.search.find_entry(target)?.1.as_str());
             }
-            return Ok(self.groups[index - 1].1.find_entry(target)?.1.as_str());
+            let (candidate, biome) = self.groups[index - 1].1.find_entry(target)?;
+            if self.group_guards[index - 1] {
+                let (baseline, vanilla) = self.search.find_entry(target)?;
+                if candidate.fitness(target) > baseline.fitness(target) {
+                    return Ok(vanilla.as_str());
+                }
+            }
+            return Ok(biome.as_str());
         }
         let (point, name) = self.search.find_entry(target)?;
         if !self.groups.is_empty() {

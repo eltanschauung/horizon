@@ -171,6 +171,27 @@ impl FeatureCatalog {
             return self.named(&name, true, depth, work);
         }
         let mut object: Object = serde_json::from_str(value.get())?;
+        // Reuse a live placed feature's modifier suffix, e.g. a current vanilla
+        // patch whose old configured-feature holder was removed. This reads the
+        // player's resources rather than shipping a copied vanilla definition.
+        if let Some(reference) = object.get("horizon:placed_feature") {
+            let name: String = serde_json::from_str(reference.get())?;
+            let mut placed: serde_json::Value =
+                serde_json::from_str(&self.named(&name, true, depth + 1, work)?)?;
+            if let Some(after) = object.get("horizon:placement_after") {
+                let kind: String = serde_json::from_str(after.get())?;
+                let modifiers = placed["placement"]
+                    .as_array_mut()
+                    .ok_or(DecodeError::Field("placed feature modifiers"))?;
+                if let Some(index) = modifiers
+                    .iter()
+                    .rposition(|v| v["type"].as_str() == Some(kind.as_str()))
+                {
+                    modifiers.drain(..=index);
+                }
+            }
+            return Ok(placed.to_string());
+        }
         let feature = self.expand_feature(required(&object, "feature")?, depth + 1, work)?;
         object.insert("feature".into(), raw(feature)?);
         Ok(serde_json::to_string(&object)?)
@@ -227,6 +248,16 @@ impl FeatureCatalog {
         let kind = identifier(&serde_json::from_str::<String>(
             required(&object, "type")?.get(),
         )?)?;
+        // Native feature algorithms may compose ordinary placed features. Expand these
+        // holders with the same cycle and work budget as vanilla feature composition.
+        if let Some(posts) = object.get("post_features") {
+            let expanded = self.expand_set(posts, depth + 1, work)?;
+            object.insert("post_features".into(), raw(expanded)?);
+        }
+        if let Some(feature) = object.get("vegetation_feature") {
+            let expanded = self.expand_placed(feature, depth + 1, work)?;
+            object.insert("vegetation_feature".into(), raw(expanded)?);
+        }
         match kind.as_str() {
             "minecraft:single_block_pillar" => {
                 if let Some(value) = super::optional(&object, "cap_feature") {
@@ -235,9 +266,7 @@ impl FeatureCatalog {
                 }
             }
             "minecraft:vegetation_patch" | "minecraft:waterlogged_vegetation_patch" => {
-                let expanded =
-                    self.expand_placed(required(&object, "vegetation_feature")?, depth + 1, work)?;
-                object.insert("vegetation_feature".into(), raw(expanded)?);
+                required(&object, "vegetation_feature")?;
             }
             "minecraft:coral_tree" | "minecraft:coral_claw" | "minecraft:root_system" => {
                 let expanded =
@@ -300,5 +329,26 @@ impl FeatureCatalog {
             _ => {}
         }
         Ok(serde_json::to_string(&object)?)
+    }
+}
+
+#[cfg(test)]
+mod native_composition_tests {
+    use super::*;
+    #[test]
+    fn a_placed_suffix_reads_live_modifiers_and_drops_the_outer_biome_filter() {
+        let catalog = FeatureCatalog::from_resources(
+            &[("test:noop".into(), r#"{"type":"minecraft:no_op"}"#.into())].into(),
+            &[("test:patch".into(), r#"{"feature":"test:noop","placement":[{"type":"minecraft:rarity_filter","chance":9},{"type":"minecraft:biome"},{"type":"minecraft:count","count":37}]}"#.into())].into(),
+            &TagDefinitions::default(),
+        ).unwrap();
+        let feature = catalog.placed_feature(r#"{"horizon:placed_feature":"test:patch","horizon:placement_after":"minecraft:biome"}"#).unwrap();
+        assert_eq!(feature.placement.len(), 1);
+        assert_eq!(
+            feature.placement[0]
+                .repetitions(&mut horizon_core::random::LegacyRandom::new(0), [0; 3])
+                .unwrap(),
+            Some(37)
+        );
     }
 }

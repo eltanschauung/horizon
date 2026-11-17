@@ -73,7 +73,7 @@ is installed or enabled on the desktop/server.
 
 Overworld BOP declarations opt into nested, smoothly warped region cells with
 `region_min_quarts: 192`. Conditional seeded draws preserve the configured weight
-probabilities while separating footprint from rarity. With four BOP tiers, primary
+probabilities while separating footprint from rarity. Tier footprints follow rank independently of the number of installed pools. With four BOP tiers, primary
 cells span 3072 blocks, secondary 2048, and rare/extra rare target 1536 blocks.
 The bounded shared warp softens boundaries; overlapping tier gates and climate, rivers and
 mountains can still clip individual biomes. Nether and declarations without this
@@ -107,3 +107,14 @@ Windows release and portable packaging require the pinned, checksum-verified x64
 - Ely.by accounts: Settings sign-in with optional 2FA, provider-separated keychain sessions, automatic refresh, account switching and sign-out; native Ely authentication/skins with Microsoft-only ownership downloads. Online servers opt in through `server.allow_portable`. See [Ely accounts](docs/ely-account.md).
 
 - Horizonmatica 0.3.2 is bundled and enabled in frozen release defaults; vendored MIT source and upstream credits live in horizon-mods/native/horizonmatica.
+
+## Native biome feature extensions
+
+Registry-bound native features and placement modifiers preserve host randomness,
+world-query errors, write bounds and placement budgets. Native placement queries
+forward the world seed. Old octave-amplitude noise codecs retain parity normalization.
+Placed-feature suffix references reuse current game patches without shipping vanilla
+feature tables; composed native features resolve their post-feature holders normally.
+Regional pools can opt into `climate_guard` to fall back to vanilla outside their
+climate ranges. Gensokyo Legacy uses this for its 17 Overworld biomes alongside BOP
+and Tectonic; its content and algorithms live in `horizon-mods/native/gensokyo-legacy`.

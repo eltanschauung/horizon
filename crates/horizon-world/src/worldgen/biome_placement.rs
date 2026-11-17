@@ -20,7 +20,10 @@ pub fn extend_presets(
             return Err(DecodeError::Field("region weight divisor"));
         }
         let preset = doc["preset"].as_str().unwrap_or_default().to_owned();
-        scales.entry(preset).and_modify(|v| *v = (*v).max(divisor)).or_insert(divisor);
+        scales
+            .entry(preset)
+            .and_modify(|v| *v = (*v).max(divisor))
+            .or_insert(divisor);
     }
     let mut assembled = presets.clone();
     for (name, text) in declarations {
@@ -82,16 +85,26 @@ pub fn extend_presets(
                 .ok_or(DecodeError::Field("biome pool selector"))?;
                 candidate["horizon:selector_axis"] = json!(axis);
                 candidate["horizon:group"] = json!(group);
+                candidate["horizon:climate_guard"] =
+                    json!(doc["climate_guard"].as_bool().unwrap_or(false));
                 let scale = scales[&preset];
                 let divisor = doc["weight_divisor"].as_u64().unwrap_or(1);
                 candidate["horizon:weight"] = json!(weight * scale as f64 / divisor as f64);
                 if !doc["region_order"].is_null() {
-                    candidate["horizon:region_min_quarts"] = doc.get("region_min_quarts").cloned().unwrap_or(json!(0));
+                    candidate["horizon:region_min_quarts"] =
+                        doc.get("region_min_quarts").cloned().unwrap_or(json!(0));
                     for key in ["region_order", "region_zooms", "vanilla_weight"] {
                         candidate[format!("horizon:{key}")] = if key == "vanilla_weight" {
-                            json!(doc[key].as_u64().ok_or(DecodeError::Field("vanilla region weight"))?
-                                .checked_mul(scale).ok_or(DecodeError::Field("region weight overflow"))?)
-                        } else { doc[key].clone() };
+                            json!(
+                                doc[key]
+                                    .as_u64()
+                                    .ok_or(DecodeError::Field("vanilla region weight"))?
+                                    .checked_mul(scale)
+                                    .ok_or(DecodeError::Field("region weight overflow"))?
+                            )
+                        } else {
+                            doc[key].clone()
+                        };
                     }
                 }
             }
@@ -121,17 +134,70 @@ mod tests {
             "biome":"minecraft:plains", "coordinates":[[0,0],[-10000,10000],[-10000,10000],[-10000,10000],[-10000,10000],[-10000,10000]], "offset":0
         }]).to_string())].into()
     }
+
+    #[test]
+    fn native_guarded_region_falls_back_outside_its_climate() {
+        use crate::worldgen::climate::ClimateSampler;
+        use horizon_core::density::{ConstantSampler, DensitySampler, SamplerContext};
+        use std::sync::Arc;
+        let mut declaration: Value =
+            serde_json::from_str(&contribution("example:forest", 0.)).unwrap();
+        declaration["biomes"][0]["parameters"]["temperature"] = json!([0.3, 0.5]);
+        for (key, value) in [
+            ("group", json!("example:forest")),
+            ("weight", json!(1)),
+            ("region_order", json!(1)),
+            ("region_zooms", json!(3)),
+            ("vanilla_weight", json!(0)),
+            ("climate_guard", json!(true)),
+        ] {
+            declaration[key] = value;
+        }
+        let mut presets = base();
+        extend_presets(
+            &mut presets,
+            &[("example:forest".into(), declaration.to_string())].into(),
+            &["minecraft:plains".into(), "example:forest".into()].into(),
+        )
+        .unwrap();
+        let source =
+            MultiNoiseBiomeSource::from_quantized_json(&presets["minecraft:overworld"]).unwrap();
+        for (temperature, expected) in [(-0.5, "minecraft:plains"), (0.4, "example:forest")] {
+            let climate = ClimateSampler::new(std::array::from_fn(|i| {
+                Arc::new(ConstantSampler(if i == 0 { temperature } else { 0. }))
+                    as Arc<dyn DensitySampler>
+            }));
+            assert_eq!(
+                source
+                    .resolver(&climate)
+                    .sample(&mut SamplerContext::cached(), [0, 0, 0])
+                    .unwrap(),
+                expected
+            );
+        }
+    }
     #[test]
     fn tiered_region_minimum_reaches_the_biome_codec() {
-        let mut d: Value = serde_json::from_str(&contribution("example:forest",0.)).unwrap();
-        for (key,value) in [("group",json!("example:forest")),("weight",json!(1)),
-            ("region_order",json!(1)),("region_zooms",json!(3)),
-            ("vanilla_weight",json!(10)),("region_min_quarts",json!(192))] { d[key]=value; }
-        let mut presets=base();
-        extend_presets(&mut presets,&[("example:forest".into(),d.to_string())].into(),
-            &["minecraft:plains".into(),"example:forest".into()].into()).unwrap();
-        let entries: Vec<Value>=serde_json::from_str(&presets["minecraft:overworld"]).unwrap();
-        assert_eq!(entries[1]["horizon:region_min_quarts"],json!(192));
+        let mut d: Value = serde_json::from_str(&contribution("example:forest", 0.)).unwrap();
+        for (key, value) in [
+            ("group", json!("example:forest")),
+            ("weight", json!(1)),
+            ("region_order", json!(1)),
+            ("region_zooms", json!(3)),
+            ("vanilla_weight", json!(10)),
+            ("region_min_quarts", json!(192)),
+        ] {
+            d[key] = value;
+        }
+        let mut presets = base();
+        extend_presets(
+            &mut presets,
+            &[("example:forest".into(), d.to_string())].into(),
+            &["minecraft:plains".into(), "example:forest".into()].into(),
+        )
+        .unwrap();
+        let entries: Vec<Value> = serde_json::from_str(&presets["minecraft:overworld"]).unwrap();
+        assert_eq!(entries[1]["horizon:region_min_quarts"], json!(192));
         MultiNoiseBiomeSource::from_quantized_json(&presets["minecraft:overworld"]).unwrap();
     }
     #[test]
@@ -141,16 +207,30 @@ mod tests {
             let mut files = BTreeMap::new();
             for (i, weight, divisor) in [(1, 2, 1), (2, extra, 4)] {
                 let mut d: Value = serde_json::from_str(&contribution(names[i], 0.)).unwrap();
-                for (key, value) in [("group", json!(names[i])), ("weight", json!(weight)),
-                    ("weight_divisor", json!(divisor)), ("region_order", json!(i)),
-                    ("region_zooms", json!(3)), ("vanilla_weight", json!(10))] { d[key] = value; }
+                for (key, value) in [
+                    ("group", json!(names[i])),
+                    ("weight", json!(weight)),
+                    ("weight_divisor", json!(divisor)),
+                    ("region_order", json!(i)),
+                    ("region_zooms", json!(3)),
+                    ("vanilla_weight", json!(10)),
+                ] {
+                    d[key] = value;
+                }
                 files.insert(names[i].into(), d.to_string());
             }
             let mut presets = base();
             extend_presets(&mut presets, &files, &names.map(String::from).into()).unwrap();
-            let entries: Vec<Value> = serde_json::from_str(&presets["minecraft:overworld"]).unwrap();
-            let rare = entries.iter().find(|e| e["horizon:group"] == "example:rare").unwrap();
-            let extra_entry = entries.iter().find(|e| e["horizon:group"] == "example:extra").unwrap();
+            let entries: Vec<Value> =
+                serde_json::from_str(&presets["minecraft:overworld"]).unwrap();
+            let rare = entries
+                .iter()
+                .find(|e| e["horizon:group"] == "example:rare")
+                .unwrap();
+            let extra_entry = entries
+                .iter()
+                .find(|e| e["horizon:group"] == "example:extra")
+                .unwrap();
             assert_eq!(rare["horizon:weight"], json!(8.0));
             assert_eq!(extra_entry["horizon:weight"], json!(extra as f64));
             assert_eq!(rare["horizon:vanilla_weight"], json!(40));

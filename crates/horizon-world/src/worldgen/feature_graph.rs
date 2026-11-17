@@ -85,6 +85,7 @@ pub enum FeatureDefinition {
     ProjectedPatchySquare(Box<super::projected::ProjectedPatchySquareFeature>),
     SteppedColumnCluster(Box<super::projected::SteppedColumnClusterFeature>),
     FallenTree(Box<super::tree::FallenTreeFeature>),
+    Native(super::native_feature::NativeFeature),
     NoOp,
     Template(Box<super::structure::features::TemplateFeature>),
     Fossil(Box<super::structure::features::FossilFeature>),
@@ -312,6 +313,11 @@ impl FeatureDefinition {
         let kind = identifier(&serde_json::from_str::<String>(
             required(&object, "type")?.get(),
         )?)?;
+        if let Some(bindings) = blocks {
+            if let Some(result) = super::native_feature::decode(&kind, json, bindings) {
+                return result.map(Self::Native);
+            }
+        }
         match kind.as_str() {
             "minecraft:no_op" => Ok(Self::NoOp),
             "minecraft:template" => super::structure::features::TemplateFeature::decode(
@@ -789,7 +795,7 @@ impl FeatureDefinition {
                     let chance: f32 = number_text(required(&entry, "chance")?)?
                         .parse()
                         .map_err(|_| DecodeError::Field("feature chance"))?;
-                    if !(0. ..=1.).contains(&chance) || chance.is_sign_negative() {
+                    if !(0.0..=1.0).contains(&chance) || chance.is_sign_negative() {
                         return Err(DecodeError::Field("feature chance"));
                     }
                     features.push((chance, feature));
@@ -854,6 +860,7 @@ impl FeatureDefinition {
             Self::Basic(feature) => feature
                 .place(world, random, origin, run.blocks)
                 .map_err(FeatureExecutionError::Basic),
+            Self::Native(f) => f.place(world, random, origin),
             Self::NoOp => Ok(true),
             Self::Template(feature) => feature
                 .place(world, random, origin)

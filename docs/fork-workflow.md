@@ -122,3 +122,10 @@ excluded. Small builds use the same policy without recompiling any game code.
 
 Abandoned `.native-*.partial` client/server installations are also removed when
 no native compiler is active; running or data-bearing partials remain protected.
+
+## Gensokyo Legacy port
+
+The biome port is maintained in `../horizon-mods/native/gensokyo-legacy`.
+Run its `python3 tools/build.py --install` after content/native changes, then freeze
+and validate the complete installed mod set normally. Both the content `.hmod`
+and native `.hnmod` are required. New biomes affect new chunks only.

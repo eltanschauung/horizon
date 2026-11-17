@@ -15,8 +15,23 @@ use serde_json::value::RawValue;
 mod context;
 pub use context::{LayerBlock, PlacementContext, PlacementQueryError};
 
+/// A native placement filter/point emitter; the host retains callback and work budgets.
+pub trait NativePlacement: std::fmt::Debug + Send + Sync {
+    fn positions(
+        &self,
+        context: &mut dyn PlacementContext,
+        position: [i32; 3],
+    ) -> Result<Vec<[i32; 3]>, PlacementQueryError>;
+}
+pub fn decode_native_placement(
+    json: &str,
+) -> Option<Result<std::sync::Arc<dyn NativePlacement>, DecodeError>> {
+    let _ = json;
+    None
+}
 #[derive(Clone, Debug)]
 pub enum PlacementModifier {
+    Native(std::sync::Arc<dyn NativePlacement>),
     Biome,
     BlockPredicate(BlockPredicate),
     EnvironmentScan {
@@ -113,6 +128,9 @@ impl PlacementModifier {
             return Err(DecodeError::Field("placement depth or node count"));
         }
         *remaining -= 1;
+        if let Some(result) = decode_native_placement(json) {
+            return result.map(Self::Native);
+        }
         let object: Object = serde_json::from_str(json)?;
         let kind = identifier(&serde_json::from_str::<String>(
             required(&object, "type")?.get(),
@@ -235,7 +253,7 @@ impl PlacementModifier {
                 let chance: f32 = number_text(required(&object, "chance")?)?
                     .parse()
                     .map_err(|_| DecodeError::Field("chance"))?;
-                if !(0. ..=1.).contains(&chance) || chance.is_sign_negative() {
+                if !(0.0..=1.0).contains(&chance) || chance.is_sign_negative() {
                     return Err(DecodeError::Field("chance"));
                 }
                 Ok(Self::RandomChance(chance))
@@ -342,6 +360,16 @@ impl PlacementModifier {
         *remaining -= 1;
         let [x, y, z] = position;
         match self {
+            Self::Native(modifier) => {
+                let positions = modifier.positions(context, position)?;
+                if positions.len() > *remaining {
+                    return Err(PlacementError::WorkLimit);
+                }
+                *remaining -= positions.len();
+                for p in positions {
+                    emit(random, p).map_err(PlacementError::Output)?;
+                }
+            }
             Self::Biome => {
                 let feature = context
                     .top_feature()

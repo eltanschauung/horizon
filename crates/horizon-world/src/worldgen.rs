@@ -53,6 +53,7 @@ pub mod material_condition;
 pub mod material_extensions;
 pub mod material_stage;
 pub mod material_surface;
+pub mod native_feature;
 pub mod native_generate;
 pub mod ore_feature;
 pub mod overrides;
@@ -227,6 +228,20 @@ fn double_range(
 /// numeric width. Unknown object fields are ignored, as in vanilla's codec.
 pub fn decode_noise(json: &str) -> Result<NormalNoise, DecodeError> {
     let object: Object = serde_json::from_str(json)?;
+    // Older Java datapacks encode explicit octave amplitudes. Preserve their
+    // parity normalization instead of treating them as Horizon builder knobs.
+    if let Some(base) = object.get("firstOctave") {
+        let base = int_range(base, "firstOctave", -32, 32)?;
+        let amplitudes: Vec<f64> = serde_json::from_str(required(&object, "amplitudes")?.get())?;
+        if amplitudes
+            .iter()
+            .any(|a| !a.is_finite() || *a < 0.0 || *a > 1e6)
+        {
+            return Err(DecodeError::Field("amplitudes"));
+        }
+        return Ok(NormalNoise::create_parity(base, &amplitudes)?);
+    }
+
     let base = int_range(required(&object, "base_octave")?, "base_octave", -32, 32)?;
     let count = optional(&object, "octave_count")
         .map(|raw| int_range(raw, "octave_count", 1, 32))
@@ -310,5 +325,13 @@ mod tests {
             decode_noise(r#"{"base_octave":-7,"octave_count":2,"amplitude_modifiers":[1]}"#)
                 .is_err()
         );
+    }
+    #[test]
+    fn native_legacy_octave_json_preserves_parity_noise_parameters() {
+        let old = decode_noise(r#"{"firstOctave":-5,"amplitudes":[1.0,0.5]}"#).unwrap();
+        let expected = NormalNoise::create_parity(-5, &[1.0, 0.5]).unwrap();
+        assert_eq!(old.range(), expected.range());
+        assert_eq!(old.normalization_factor(), expected.normalization_factor());
+        assert!(decode_noise(r#"{"firstOctave":-5,"amplitudes":[-1.0]}"#).is_err());
     }
 }

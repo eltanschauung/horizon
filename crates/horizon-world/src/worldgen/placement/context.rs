@@ -138,7 +138,10 @@ pub trait PlacementContext {
         _position: [i32; 3],
         _table: &str,
         _random: &mut impl horizon_core::random::RandomSource,
-    ) -> Result<(), PlacementQueryError> {
+    ) -> Result<(), PlacementQueryError>
+    where
+        Self: Sized,
+    {
         Err(PlacementQueryError::Unavailable)
     }
 

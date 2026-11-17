@@ -543,7 +543,10 @@ impl Decoration {
                     id,
                     |world, random, p| feature.feature.place(world, random, p, blocks),
                 );
-                if placed.is_err() {
+                if let Err(error) = &placed {
+                    if std::env::var_os("HORIZON_WORLDGEN_DIAGNOSTICS").is_some() {
+                        eprintln!("worldgen feature {}: {error:?}", self.names[id.0 as usize]);
+                    }
                     stats.failed += 1;
                     stats.skipped.insert(self.names[id.0 as usize].clone());
                 }

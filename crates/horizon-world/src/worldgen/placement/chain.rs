@@ -10,6 +10,10 @@ struct Queries<'a, C> {
     top: Option<FeatureIdentity>,
 }
 impl<C: PlacementContext> PlacementContext for Queries<'_, C> {
+    fn world_seed(&mut self) -> Result<i64, PlacementQueryError> {
+        self.world.world_seed()
+    }
+
     fn block_survives(
         &mut self,
         state: crate::registry::BlockStateId,
@@ -266,5 +270,54 @@ impl FeaturePlacer {
             self.modified.clear();
         }
         Ok(any)
+    }
+}
+
+#[cfg(test)]
+mod native_seed_tests {
+    use super::*;
+    #[derive(Debug)]
+    struct Seeded;
+    impl super::super::NativePlacement for Seeded {
+        fn positions(
+            &self,
+            context: &mut dyn PlacementContext,
+            p: [i32; 3],
+        ) -> Result<Vec<[i32; 3]>, PlacementQueryError> {
+            Ok(vec![[p[0] + context.world_seed()? as i32, p[1], p[2]]])
+        }
+    }
+    struct Context;
+    impl PlacementContext for Context {
+        fn generation(&self) -> WorldGenerationContext {
+            WorldGenerationContext::new(0, 256, 63)
+        }
+        fn min_y(&mut self) -> Result<i32, PlacementQueryError> {
+            Ok(0)
+        }
+        fn height(&mut self, _: HeightmapType, _: i32, _: i32) -> Result<i32, PlacementQueryError> {
+            Ok(64)
+        }
+        fn world_seed(&mut self) -> Result<i64, PlacementQueryError> {
+            Ok(17)
+        }
+    }
+    #[test]
+    fn native_modifiers_read_the_seed_through_biome_query_wrappers() {
+        let mut positions = Vec::new();
+        FeaturePlacer::new()
+            .place_with_biome_check(
+                &[PlacementModifier::Native(std::sync::Arc::new(Seeded))],
+                &mut Context,
+                &mut horizon_core::random::LegacyRandom::new(1),
+                [2, 64, 3],
+                FeatureIdentity(0),
+                |_, _, p| {
+                    positions.push(p);
+                    Ok::<_, ()>(true)
+                },
+            )
+            .unwrap();
+        assert_eq!(positions, [[19, 64, 3]]);
     }
 }
