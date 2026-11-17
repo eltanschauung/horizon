@@ -552,52 +552,76 @@ impl VanillaTerrain {
         radius: i32,
         skip_known: bool,
     ) -> Option<(String, [i32; 3])> {
-        if !skip_known {
-            return self.locate(names, from, radius);
+        loop {
+            let found = self.find_for_map_until(names, from, radius, skip_known, &|| false)?;
+            if !skip_known || self.claim_map_target(&found.0, found.1) {
+                return Some(found);
+            }
         }
+    }
+    /// Find without claiming: an asynchronous request must not consume a target
+    /// if its item/world disappears before the result is applied. The caller
+    /// claims on the game thread, retrying if another map got there first.
+    pub fn find_for_map_until(
+        &self,
+        names: &[String],
+        from: [i32; 3],
+        radius: i32,
+        skip_known: bool,
+        stop: &dyn Fn() -> bool,
+    ) -> Option<(String, [i32; 3])> {
         let saved = self
             .saved_references
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone();
-        // The skip check locks per candidate: `locate_skipping` runs it here
-        // on the calling thread, and a `dyn Fn` cannot carry a guard.
-        let found =
-            self.generator
-                .worker()
-                .locate_skipping(names, from, radius, &|name, chunk| {
-                    // This session's references first: they grow as maps resolve.
-                    if self
-                        .referenced
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .get(name)
-                        .is_some_and(|chunks| chunks.contains(&(chunk.x, chunk.z)))
-                    {
-                        return true;
-                    }
-                    let mut checked = self.saved_checked.lock().unwrap_or_else(|e| e.into_inner());
-                    if let Some(count) = checked
-                        .get(name)
-                        .and_then(|chunks| chunks.get(&(chunk.x, chunk.z)))
-                    {
-                        return *count > 0;
-                    }
-                    let count = saved.as_ref().map_or(0, |f| f(name, chunk.x, chunk.z));
-                    checked
-                        .entry(name.to_owned())
-                        .or_default()
-                        .insert((chunk.x, chunk.z), count);
-                    count > 0
-                })?;
-        self.referenced
+        self.generator.worker().locate_skipping_until(
+            names,
+            from,
+            radius,
+            &|name, chunk| {
+                if !skip_known {
+                    return false;
+                }
+                // This session's references first: they grow as maps resolve.
+                if self
+                    .referenced
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(name)
+                    .is_some_and(|chunks| chunks.contains(&(chunk.x, chunk.z)))
+                {
+                    return true;
+                }
+                let mut checked = self.saved_checked.lock().unwrap_or_else(|e| e.into_inner());
+                if let Some(count) = checked
+                    .get(name)
+                    .and_then(|chunks| chunks.get(&(chunk.x, chunk.z)))
+                {
+                    return *count > 0;
+                }
+                let count = saved.as_ref().map_or(0, |f| f(name, chunk.x, chunk.z));
+                checked
+                    .entry(name.to_owned())
+                    .or_default()
+                    .insert((chunk.x, chunk.z), count);
+                count > 0
+            },
+            stop,
+        )
+    }
+    pub fn claim_map_target(&self, name: &str, at: [i32; 3]) -> bool {
+        let claimed = self
+            .referenced
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .entry(found.0.clone())
+            .entry(name.to_owned())
             .or_default()
-            .insert((found.1[0] >> 4, found.1[2] >> 4));
-        self.save_references();
-        Some(found)
+            .insert((at[0] >> 4, at[2] >> 4));
+        if claimed {
+            self.save_references();
+        }
+        claimed
     }
     /// Where the starts maps pointed at are kept, and the ones kept there:
     /// vanilla keeps the count in each start's chunk (`references`), which a
@@ -667,6 +691,10 @@ impl VanillaTerrain {
         let mut worker = self.query.lock().unwrap_or_else(|e| e.into_inner());
         let worker = worker.get_or_insert_with(|| self.generator.worker());
         worker.noise_biomes(quarts)
+    }
+    /// Background previews must not hold the game's shared query worker.
+    pub fn map_preview_biomes(&self, quarts: &[[i32; 3]]) -> Vec<Option<String>> {
+        self.generator.worker().noise_biomes(quarts)
     }
     /// `/place jigsaw`: `JigsawPlacement.addPieces`.
     pub fn jigsaw_pieces(

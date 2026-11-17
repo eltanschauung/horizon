@@ -2597,6 +2597,7 @@ trait SeededPipeline: Send + Sync {
         from: [i32; 3],
         radius: i32,
         skip: &dyn Fn(&str, ChunkPos) -> bool,
+        stop: &dyn Fn() -> bool,
     ) -> Option<(String, [i32; 3])>;
     /// The chunks an older version generated, for `Blender.of`.
     fn set_old_world(&self, world: Arc<dyn super::blending::OldWorld>);
@@ -2800,6 +2801,7 @@ where
         from: [i32; 3],
         radius: i32,
         skip: &dyn Fn(&str, ChunkPos) -> bool,
+        stop: &dyn Fn() -> bool,
     ) -> Option<(String, [i32; 3])> {
         self.structures.as_ref()?.locate(
             &mut StructureQueries {
@@ -2811,6 +2813,7 @@ where
             from,
             radius,
             skip,
+            stop,
         )
     }
     fn set_old_world(&self, world: Arc<dyn super::blending::OldWorld>) {
@@ -3856,8 +3859,20 @@ impl GeneratorWorker {
         radius: i32,
         skip: &dyn Fn(&str, ChunkPos) -> bool,
     ) -> Option<(String, [i32; 3])> {
+        self.locate_skipping_until(names, from, radius, skip, &|| false)
+    }
+    /// A map search can be abandoned when its world is closed. Cancellation is
+    /// checked between candidate chunks; it never changes ordinary locate results.
+    pub fn locate_skipping_until(
+        &mut self,
+        names: &[String],
+        from: [i32; 3],
+        radius: i32,
+        skip: &dyn Fn(&str, ChunkPos) -> bool,
+        stop: &dyn Fn() -> bool,
+    ) -> Option<(String, [i32; 3])> {
         self.pipeline
-            .locate(&mut self.state, names, from, radius, skip)
+            .locate(&mut self.state, names, from, radius, skip, stop)
     }
     /// Direct far sampling: work scales with rendered vertical resolution,
     /// without allocating chunks, carving masks or propagated aquifers.

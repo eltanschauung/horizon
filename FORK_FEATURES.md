@@ -25,6 +25,13 @@ features move upstream or their implementation moves between modules.
 Paths without a crate prefix above are under `crates/horizon-client/src/`;
 “render” means `crates/horizon-client-render/src/`.
 
+Loot explorer maps resolve their structure search and biome preview on one bounded
+worker per world. Opening chests and ticking inventories only enqueue/poll; saved
+pending items retain their request, source position and dimension across moves and
+reloads. Targets are claimed only when the finished map is applied, and closing a
+world cancels outstanding searches. Random-spread searches initialize stronghold
+rings only near relevant candidates. Preserve upstream's saved-reference cache.
+
 Player equipment has a render-only opacity policy (`equipment_render_opacity`), shared by
 player armor layers, trims/emissive overlays and elytra; fractional alpha uses entity OIT.
 Native cosmetic mods can override it without modifying equipment or networking.

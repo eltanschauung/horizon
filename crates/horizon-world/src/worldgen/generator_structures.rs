@@ -673,9 +673,9 @@ impl StructureState {
         from: [i32; 3],
         radius: i32,
         skip: &dyn Fn(&str, ChunkPos) -> bool,
+        stop: &dyn Fn() -> bool,
     ) -> Option<(String, [i32; 3])> {
         let seed = context.seed();
-        let rings = self.rings(context).clone();
         let wanted = |s: usize| names.iter().any(|n| *n == self.registry.structures[s].name);
         let dist = |p: [i32; 3]| {
             let (dx, dz) = (f64::from(p[0] - from[0]), f64::from(p[2] - from[2]));
@@ -712,18 +712,25 @@ impl StructureState {
                 .map(|s| s.name.clone())
         };
         for &si in &self.possible_sets {
+            if stop() {
+                return None;
+            }
             let set = &self.registry.sets[si];
             if !set.structures.iter().any(|(s, _)| wanted(*s)) {
                 continue;
             }
             match set.spacing() {
                 None => {
+                    let rings = self.rings(context);
                     // Rings: nearest by the chunk's (8, 32, 8) block.
                     let Some(chunks) = rings.get(&set.name) else {
                         continue;
                     };
                     let mut nearest: Option<(f64, ChunkPos, String)> = None;
                     for &c in chunks {
+                        if stop() {
+                            return None;
+                        }
                         let d = dist([c.x * 16 + 8, 32, c.z * 16 + 8]);
                         if nearest.as_ref().is_none_or(|(n, ..)| d < *n)
                             && self
@@ -748,6 +755,9 @@ impl StructureState {
                         for dx in -r..=r {
                             let x_edge = dx == -r || dx == r;
                             for dz in -r..=r {
+                                if stop() {
+                                    return None;
+                                }
                                 if !(x_edge || dz == -r || dz == r) {
                                     continue;
                                 }
@@ -756,6 +766,9 @@ impl StructureState {
                                 else {
                                     continue;
                                 };
+                                // Random-spread targets do not need all 128 stronghold
+                                // biome searches before even checking their first sector.
+                                let rings = self.rings_for(context, c);
                                 if !self
                                     .registry
                                     .is_structure_chunk(set, seed, c.x, c.z, &rings)

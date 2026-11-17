@@ -13,6 +13,7 @@ use horizon_client::{
 };
 use horizon_world::nbt::{JavaString, Tag};
 use std::collections::HashMap;
+mod search;
 
 /// What a decoration is filed under in `MapItemSavedData.decorations` (a
 /// `LinkedHashMap<String, MapDecoration>`): a player's marker by their
@@ -677,6 +678,86 @@ impl MapData {
         Some(map)
     }
 }
+/// Vanilla's sea-level preview, also run entirely by the loot-map worker.
+fn render_preview(
+    m: &mut MapData,
+    terrain: &horizon_client::vanillagen::VanillaTerrain,
+    zoom: horizon_core::biome::BiomeZoom,
+    watery_biomes: &std::collections::HashSet<String>,
+) {
+    let scale = 1i32 << m.scale;
+    let start_x = m.center[0] / scale - 64;
+    let start_z = m.center[1] / scale - 64;
+    let sea_level = 63;
+    let quarts: Vec<[i32; 3]> = (0..128)
+        .flat_map(|row| {
+            (0..128).map(move |column| {
+                zoom.quart_at_block(horizon_core::position::BlockPos::new(
+                    (start_x + column) * scale,
+                    sea_level,
+                    (start_z + row) * scale,
+                ))
+            })
+        })
+        .collect();
+    let watery: Vec<bool> = terrain
+        .map_preview_biomes(&quarts)
+        .into_iter()
+        .map(|b| b.is_some_and(|b| watery_biomes.contains(&b)))
+        .collect();
+    let is_watery = |x: i32, z: i32| watery[(z * 128 + x) as usize];
+    // MapColor ids and MapColor.Brightness ids.
+    const ORANGE: u8 = 15;
+    const BROWN: u8 = 26;
+    const LOW: u8 = 0;
+    const NORMAL: u8 = 1;
+    const HIGH: u8 = 2;
+    const LOWEST: u8 = 3;
+    for mx in 1..127 {
+        for mz in 1..127 {
+            let mut water_count = 0;
+            for dx in -1..2 {
+                for dz in -1..2 {
+                    if (dx != 0 || dz != 0) && is_watery(mx + dx, mz + dz) {
+                        water_count += 1;
+                    }
+                }
+            }
+            let mut brightness = LOWEST;
+            let mut color = 0;
+            if is_watery(mx, mz) {
+                color = ORANGE;
+                if water_count > 7 && mz % 2 == 0 {
+                    let sin = horizon_core::geometry::trig::sin(f64::from(mz as f32 + 0.0));
+                    match (mx + (sin * 7.0) as i32) / 8 % 5 {
+                        0 | 4 => brightness = LOW,
+                        1 | 3 => brightness = NORMAL,
+                        2 => brightness = HIGH,
+                        _ => {}
+                    }
+                } else if water_count > 7 {
+                    color = 0;
+                } else if water_count > 5 {
+                    brightness = NORMAL;
+                } else if water_count > 1 {
+                    brightness = LOW;
+                }
+            } else if water_count > 0 {
+                color = BROWN;
+                brightness = if water_count > 3 { NORMAL } else { LOWEST };
+            }
+            if color != 0 {
+                m.update_color(mx, mz, color << 2 | brightness);
+            }
+        }
+    }
+}
+struct LocatedMap {
+    terrain: std::sync::Arc<horizon_client::vanillagen::VanillaTerrain>,
+    structure: String,
+    at: [i32; 3],
+    data: MapData,
+}
 pub(super) struct Maps {
     pub data: HashMap<i32, MapData>,
     /// The highest map id handed out (`maps/last_id.dat`), loaded on first use.
@@ -684,6 +765,9 @@ pub(super) struct Maps {
     /// The atlas slots holding map textures.
     pub slots: super::atlas_slots::AtlasSlots<i32>,
     missing: std::collections::HashSet<i32>,
+    searches: search::Searches<Option<LocatedMap>>,
+    // Keep completed requests identifiable if the same pending item was copied.
+    searched: HashMap<String, Option<(i32, [i32; 3])>>,
 }
 impl Default for Maps {
     fn default() -> Self {
@@ -692,6 +776,8 @@ impl Default for Maps {
             last_id: None,
             slots: super::atlas_slots::AtlasSlots::new(MAP_SLOTS),
             missing: Default::default(),
+            searches: Default::default(),
+            searched: Default::default(),
         }
     }
 }
@@ -998,36 +1084,79 @@ impl Game<'_> {
             self.render_biome_preview(id);
         }
     }
-    /// `ExplorationMapFunction.run` for an item a generated chest still holds
-    /// unsearched (`structure_blocks::take_pending_map`): the nearest
-    /// structure of the tag around `origin`, a new map centred on it with its
-    /// biome preview and target decoration. False when nothing is found: the
-    /// loot table's `filtered` map_id check would have discarded the item.
+    /// Start/poll a loot map without searching or sampling terrain on the game
+    /// thread. The item keeps its saved request until a result is available.
+    /// False only after a completed search found no eligible structure.
     pub(super) fn resolve_pending_map(&mut self, item: &mut ItemStack, origin: [f64; 3]) -> bool {
-        let Some(map) = horizon_client::structure_blocks::take_pending_map(item) else {
+        let from = origin.map(|v| v.floor() as i32);
+        let Some((map, token, from, source_dimension)) =
+            horizon_client::structure_blocks::pending_map_request(item, from, self.dimension_id())
+        else {
             return true;
         };
-        let names = self.structure_tag(&map.destination);
-        let from = origin.map(|v| v.floor() as i32);
-        let found = self
-            .end
-            .locator()
-            .filter(|_| !names.is_empty())
-            .and_then(|t| {
-                t.locate_for_map(&names, from, map.search_radius, map.skip_existing_chunks)
-            });
-        let Some((_, at)) = found else {
+        if !self.maps.searched.contains_key(&token) {
+            if let Some(result) = self.maps.searches.take_ready(&token) {
+                if let Some(found) = &result
+                    && map.skip_existing_chunks
+                    && !found.terrain.claim_map_target(&found.structure, found.at)
+                {
+                    // A concurrent trade or another queued map claimed this target.
+                    return true;
+                }
+                let result = result.map(|found| (self.new_map_id(found.data), found.at));
+                self.maps.searched.insert(token.clone(), result);
+            } else {
+                if !self.maps.searches.contains(&token) {
+                    // A saved, unfinished map moved through a portal resumes in its
+                    // source dimension, never searches the wrong world's coordinates.
+                    if source_dimension != self.dimension_id() {
+                        return true;
+                    }
+                    let names = self.structure_tag(&map.destination);
+                    let Some(terrain) = self.end.locator() else {
+                        return true;
+                    };
+                    let dimension = self.dimension_id().to_owned();
+                    let zoom = self.streaming.biome_zoom;
+                    let watery = self
+                        .tag_entries("worldgen/biome", "minecraft:water_on_map_outlines")
+                        .into_iter()
+                        .collect();
+                    let request = map.clone();
+                    self.maps.searches.queue(token, move |stop| {
+                        let (structure, at) = terrain.find_for_map_until(
+                            &names,
+                            from,
+                            request.search_radius,
+                            request.skip_existing_chunks,
+                            &|| stop.load(std::sync::atomic::Ordering::Relaxed),
+                        )?;
+                        if stop.load(std::sync::atomic::Ordering::Relaxed) {
+                            return None;
+                        }
+                        let mut data = MapData::fresh(
+                            f64::from(at[0]),
+                            f64::from(at[2]),
+                            request.zoom,
+                            &dimension,
+                        );
+                        data.unlimited = true;
+                        render_preview(&mut data, &terrain, zoom, &watery);
+                        Some(LocatedMap {
+                            terrain,
+                            structure,
+                            at,
+                            data,
+                        })
+                    });
+                }
+                return true;
+            }
+        }
+        horizon_client::structure_blocks::take_pending_map(item);
+        let Some((id, at)) = self.maps.searched[&token] else {
             return false;
         };
-        let mut data = MapData::fresh(
-            f64::from(at[0]),
-            f64::from(at[2]),
-            map.zoom,
-            self.dimension_id(),
-        );
-        data.unlimited = true;
-        let id = self.new_map_id(data);
-        self.render_biome_preview(id);
         let d = item.data_mut();
         d.map_id = Some(id);
         d.other.retain(|(k, _)| k != "minecraft:map_decorations");
@@ -1066,92 +1195,19 @@ impl Game<'_> {
             }
         }
     }
-    /// `MapItem.renderBiomePreviewMap`: the map's biomes at sea level, water
-    /// outlines (`#water_on_map_outlines`) drawn in orange and brown.
+    /// `MapItem.renderBiomePreviewMap` for maps already located by trades.
     pub(super) fn render_biome_preview(&mut self, id: i32) {
         let Some(terrain) = self.end.locator() else {
             return;
         };
-        let dim = self.dimension_id();
+        let dim = self.dimension_id().to_owned();
         let zoom = self.streaming.biome_zoom;
-        let watery_biomes: std::collections::HashSet<String> = self
+        let watery = self
             .tag_entries("worldgen/biome", "minecraft:water_on_map_outlines")
             .into_iter()
             .collect();
-        let Some(m) = self.maps.data.get(&id) else {
-            return;
-        };
-        if m.dimension != dim {
-            return;
-        }
-        let scale = 1i32 << m.scale;
-        let start_x = m.center[0] / scale - 64;
-        let start_z = m.center[1] / scale - 64;
-        let sea_level = 63;
-        let quarts: Vec<[i32; 3]> = (0..128)
-            .flat_map(|row| {
-                (0..128).map(move |column| {
-                    zoom.quart_at_block(horizon_core::position::BlockPos::new(
-                        (start_x + column) * scale,
-                        sea_level,
-                        (start_z + row) * scale,
-                    ))
-                })
-            })
-            .collect();
-        let watery: Vec<bool> = terrain
-            .noise_biomes(&quarts)
-            .into_iter()
-            .map(|b| b.is_some_and(|b| watery_biomes.contains(&b)))
-            .collect();
-        let is_watery = |x: i32, z: i32| watery[(z * 128 + x) as usize];
-        // MapColor ids and MapColor.Brightness ids.
-        const ORANGE: u8 = 15;
-        const BROWN: u8 = 26;
-        const LOW: u8 = 0;
-        const NORMAL: u8 = 1;
-        const HIGH: u8 = 2;
-        const LOWEST: u8 = 3;
-        let Some(m) = self.maps.data.get_mut(&id) else {
-            return;
-        };
-        for mx in 1..127 {
-            for mz in 1..127 {
-                let mut water_count = 0;
-                for dx in -1..2 {
-                    for dz in -1..2 {
-                        if (dx != 0 || dz != 0) && is_watery(mx + dx, mz + dz) {
-                            water_count += 1;
-                        }
-                    }
-                }
-                let mut brightness = LOWEST;
-                let mut color = 0;
-                if is_watery(mx, mz) {
-                    color = ORANGE;
-                    if water_count > 7 && mz % 2 == 0 {
-                        let sin = horizon_core::geometry::trig::sin(f64::from(mz as f32 + 0.0));
-                        match (mx + (sin * 7.0) as i32) / 8 % 5 {
-                            0 | 4 => brightness = LOW,
-                            1 | 3 => brightness = NORMAL,
-                            2 => brightness = HIGH,
-                            _ => {}
-                        }
-                    } else if water_count > 7 {
-                        color = 0;
-                    } else if water_count > 5 {
-                        brightness = NORMAL;
-                    } else if water_count > 1 {
-                        brightness = LOW;
-                    }
-                } else if water_count > 0 {
-                    color = BROWN;
-                    brightness = if water_count > 3 { NORMAL } else { LOWEST };
-                }
-                if color != 0 {
-                    m.update_color(mx, mz, color << 2 | brightness);
-                }
-            }
+        if let Some(m) = self.maps.data.get_mut(&id).filter(|m| m.dimension == dim) {
+            render_preview(m, &terrain, zoom, &watery);
         }
     }
     /// Registers `data` under a free map id.
@@ -1346,6 +1402,13 @@ impl Game<'_> {
         let Some(p) = self.player.as_ref().map(|p| p.position) else {
             return;
         };
+        if let Some(key) = self.container {
+            let (x, y, z) = key;
+            self.resolve_container_maps(
+                key,
+                [f64::from(x) + 0.5, f64::from(y) + 0.5, f64::from(z) + 0.5],
+            );
+        }
         // A generated exploration map that reached the inventory unsearched
         // (moved out of its chest by a hopper): searched from here.
         for i in 0..self.inventory.len() {
@@ -1357,6 +1420,15 @@ impl Game<'_> {
                 let keep = self.resolve_pending_map(&mut item, [p.x, p.y, p.z]);
                 self.inventory[i] = keep.then_some(item);
             }
+        }
+        if self
+            .offhand
+            .as_ref()
+            .is_some_and(horizon_client::structure_blocks::has_pending_map)
+            && let Some(mut item) = self.offhand.take()
+        {
+            let keep = self.resolve_pending_map(&mut item, [p.x, p.y, p.z]);
+            self.offhand = keep.then_some(item);
         }
         let held: Vec<i32> = [Some(self.selected), Some(super::shield::OFFHAND_SLOT)]
             .into_iter()

@@ -93,6 +93,10 @@ pub fn take_pending_map(item: &mut ItemStack) -> Option<horizon_world::loot::Exp
     if matches!(&custom, Tag::Compound(c) if !c.is_empty()) {
         data.other.insert(i, (CUSTOM_DATA.into(), custom));
     }
+    decode_pending_map(&search)
+}
+
+fn decode_pending_map(search: &Tag) -> Option<horizon_world::loot::ExplorationMap> {
     let text = |k: &str| match search.get(k) {
         Some(Tag::String(s)) => Some(s.to_string_lossy()),
         _ => None,
@@ -109,6 +113,66 @@ pub fn take_pending_map(item: &mut ItemStack) -> Option<horizon_world::loot::Exp
         search_radius: int("search_radius").unwrap_or(50),
         skip_existing_chunks: int("skip_existing_chunks").unwrap_or(1) != 0,
     })
+}
+
+/// Keep the request and its original chest position on the item while a background
+/// search runs. Moving, dropping or saving the item must not lose or restart it
+/// from a different position. The token also identifies copies of the same map.
+pub fn pending_map_request(
+    item: &mut ItemStack,
+    origin: [i32; 3],
+    dimension: &str,
+) -> Option<(
+    horizon_world::loot::ExplorationMap,
+    String,
+    [i32; 3],
+    String,
+)> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let search = item.data_mut().other.iter_mut().find_map(|(k, t)| {
+        if k == CUSTOM_DATA {
+            match t {
+                Tag::Compound(c) => c.get_mut(&JavaString::from(PENDING_MAP)),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    })?;
+    let map = decode_pending_map(search)?;
+    let Tag::Compound(c) = search else {
+        return None;
+    };
+    let token = c.entry("request".into()).or_insert_with(|| {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        Tag::String(
+            format!("{now:x}-{:x}", NEXT.fetch_add(1, Ordering::Relaxed))
+                .as_str()
+                .into(),
+        )
+    });
+    let Tag::String(token) = token else {
+        return None;
+    };
+    let token = token.to_string_lossy();
+    let origin = c
+        .entry("origin".into())
+        .or_insert_with(|| Tag::IntArray(origin.to_vec()));
+    let Tag::IntArray(origin) = origin else {
+        return None;
+    };
+    let origin = origin.as_slice().try_into().ok()?;
+    let dimension = c
+        .entry("dimension".into())
+        .or_insert_with(|| Tag::String(dimension.into()));
+    let Tag::String(dimension) = dimension else {
+        return None;
+    };
+    Some((map, token, origin, dimension.to_string_lossy()))
 }
 
 /// Whether an item still waits for its exploration map search.
@@ -477,6 +541,17 @@ mod tests {
         {
             c.insert("note".into(), Tag::Int(7));
         }
+        let request = pending_map_request(&mut item, [10, 64, -20], "minecraft:overworld").unwrap();
+        // A hopper/inventory move, reload, or portal trip retains the chest's
+        // request identity and origin until the worker has completed it.
+        let encoded = crate::save::encode_items(&[Some(item)]);
+        let mut saved = crate::save::decode_items(Some(&encoded), 1);
+        let mut item = saved[0].take().unwrap();
+        assert_eq!(
+            pending_map_request(&mut item, [999, 80, 999], "minecraft:the_nether").unwrap(),
+            request,
+        );
+        assert!(has_pending_map(&item));
         let map = take_pending_map(&mut item).unwrap();
         assert_eq!(
             map,
