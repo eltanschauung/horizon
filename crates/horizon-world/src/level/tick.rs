@@ -16,6 +16,37 @@ use horizon_core::{
 use std::rc::Rc;
 use std::sync::Arc;
 
+impl Behaviours {
+    pub(super) fn bamboo_shoot_for(
+        &self,
+        stalk: super::states::BlockId,
+    ) -> Option<super::states::BlockId> {
+        match self.table.info(stalk).name.as_ref() {
+            "minecraft:bamboo" => Some(self.named.bamboo_sapling),
+            "lunatic:bushy_bamboo" => self.table.block_by_name("lunatic:bushy_bamboo_shoot"),
+            _ => None,
+        }
+    }
+
+    pub(super) fn bamboo_stalk_for(&self, shoot: super::states::BlockId) -> super::states::BlockId {
+        if self.table.info(shoot).name.as_ref() == "lunatic:bushy_bamboo_shoot" {
+            self.table
+                .block_by_name("lunatic:bushy_bamboo")
+                .unwrap_or(self.named.bamboo)
+        } else {
+            self.named.bamboo
+        }
+    }
+
+    pub(super) fn bamboo_max_height(&self, state: BlockStateId) -> i32 {
+        if self.table.info(self.block(state)).name.as_ref() == "lunatic:bushy_bamboo" {
+            20
+        } else {
+            16
+        }
+    }
+}
+
 impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     fn rand_int(&mut self, bound: i32) -> i32 {
         self.random().next_int_bound(bound).unwrap_or(0)
@@ -320,7 +351,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                         && self.raw_brightness(above(pos), 0) >= 9
                     {
                         let height = self.bamboo_height_below(pos) + 1;
-                        if height < 16 {
+                        if height < b.bamboo_max_height(state) {
                             self.bamboo_grow(state, pos, height);
                         }
                     }
@@ -1168,13 +1199,13 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     }
     pub(crate) fn bamboo_sapling_grow(&mut self, pos: BlockPos) {
         let b = self.b;
-        let bamboo = b.default_of(b.named.bamboo);
+        let bamboo = b.default_of(b.bamboo_stalk_for(b.block(self.state(pos))));
         let state = b.table.set_text(bamboo, b.props.leaves, "small");
         self.set_block(above(pos), state, 3);
     }
     pub(crate) fn bamboo_height_below(&self, pos: BlockPos) -> i32 {
         let mut height = 0;
-        while height < 16
+        while height < self.b.bamboo_max_height(self.state(pos))
             && self.b.is_block(
                 self.state(pos.offset(0, -(height + 1), 0)),
                 self.b.block(self.state(pos)),
@@ -1186,7 +1217,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     }
     pub(crate) fn bamboo_height_above(&self, pos: BlockPos) -> i32 {
         let mut height = 0;
-        while height < 16
+        while height < self.b.bamboo_max_height(self.state(pos))
             && self.b.is_block(
                 self.state(pos.offset(0, height + 1, 0)),
                 self.b.block(self.state(pos)),
@@ -1233,11 +1264,13 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         } else {
             1
         };
-        let stage = if (height < 11 || self.random().next_float() >= 0.25) && height != 15 {
-            0
-        } else {
-            1
-        };
+        let limit = b.bamboo_max_height(state);
+        let stage =
+            if (height < limit - 5 || self.random().next_float() >= 0.25) && height != limit - 1 {
+                0
+            } else {
+                1
+            };
         let next = b.table.set_int(
             b.table.set_int(
                 b.table

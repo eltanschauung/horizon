@@ -155,8 +155,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             Class::BambooSapling => {
                 if !self.can_survive(state, pos) {
                     air
-                } else if dir == Direction::Up && b.is_block(nstate, n.bamboo) {
-                    b.default_of(n.bamboo)
+                } else if dir == Direction::Up && b.is_block(nstate, b.bamboo_stalk_for(block)) {
+                    let stalk = b.default_of(b.bamboo_stalk_for(block));
+                    table.set_text(stalk, p.leaves, "none")
                 } else {
                     sup!()
                 }
@@ -166,7 +167,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     self.schedule_tick(pos, block, 1);
                 }
                 if dir == Direction::Up
-                    && b.is_block(nstate, n.bamboo)
+                    && (b.is_block(nstate, n.bamboo) || b.is_block(nstate, block))
                     && table.int(nstate, p.age) > table.int(state, p.age)
                 {
                     table.cycle(state, p.age)

@@ -38,6 +38,7 @@ fn clone_item<'a>(name: &str, block_item: &'a str) -> &'a str {
         // BambooSaplingBlock, SweetBerryBushBlock and the two cave vine
         // blocks: new ItemStack(their harvest item).
         "minecraft:bamboo_sapling" => "minecraft:bamboo",
+        "lunatic:bushy_bamboo_shoot" => "lunatic:bushy_bamboo",
         "minecraft:sweet_berry_bush" => "minecraft:sweet_berries",
         "minecraft:cave_vines" | "minecraft:cave_vines_plant" => "minecraft:glow_berries",
         // BigDripleafStemBlock: new ItemStack(Blocks.BIG_DRIPLEAF).

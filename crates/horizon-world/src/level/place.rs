@@ -414,7 +414,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 let below_state = self.below_state(pos);
                 if !b.in_set(below_state, &t.supports_bamboo) {
                     None
-                } else if b.is_block(below_state, n.bamboo_sapling) {
+                } else if b.bamboo_shoot_for(block) == Some(b.block(below_state)) {
                     Some(table.set_int(default, p.age, 0))
                 } else if b.is_block(below_state, block) {
                     let age = if table.int(below_state, p.age) > 0 {
@@ -428,7 +428,10 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     if b.is_block(above_state, block) {
                         Some(table.set_int(default, p.age, table.int(above_state, p.age)))
                     } else {
-                        Some(if block == n.bamboo { b.default_of(n.bamboo_sapling) } else { default })
+                        Some(
+                            b.bamboo_shoot_for(block)
+                                .map_or(default, |shoot| b.default_of(shoot)),
+                        )
                     }
                 }
             }

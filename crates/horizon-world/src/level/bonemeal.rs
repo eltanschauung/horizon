@@ -382,7 +382,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 let height_above = self.bamboo_height_above(pos);
                 let height_below = self.bamboo_height_below(pos);
                 let growth = pos.offset(0, height_above + 1, 0);
-                height_above + height_below + 1 < 16
+                height_above + height_below + 1 < b.bamboo_max_height(state)
                     && b.table
                         .int(self.state(pos.offset(0, height_above, 0)), p.stage)
                         != 1
@@ -567,7 +567,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     let top = pos.offset(0, height_above + i, 0);
                     let top_state = self.state(top);
                     let growth = above(top);
-                    if total + i >= 16
+                    if total + i >= b.bamboo_max_height(top_state)
                         || b.table.int(top_state, p.stage) == 1
                         || !self.is_empty_block(growth)
                         || !self.is_inside_build_height(growth.y)
