@@ -1174,7 +1174,7 @@ where
             .decode(&source_json)?
             .resolve(&data.presets)
             .map_err(|e| resource(format!("biome source: {e}")))?;
-        let (rule, source) = super::extensions::compose(
+        let (rule, mut source) = super::extensions::compose(
             rule,
             source,
             generator["settings"].as_str().unwrap_or_default(),
@@ -1183,6 +1183,7 @@ where
             registry,
             &mut library,
         )?;
+        source.configure_landforms(&data.biome_tags);
         if !data.generation_extensions.is_empty() {
             source_json.push_str(&format!("{:?}", data.generation_extensions));
         }

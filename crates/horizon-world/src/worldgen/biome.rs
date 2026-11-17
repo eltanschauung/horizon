@@ -1,5 +1,6 @@
 //! Multi-noise biome resolution over an imported immutable parameter table.
 //! Vanilla biome JSON codecs and built-in preset builders remain separate work.
+use super::surface_regions::{Habitat, Province, SurfaceRegions};
 use super::{
     DecodeError,
     climate::{
@@ -9,6 +10,7 @@ use super::{
     density::identifier,
 };
 use horizon_core::density::{SampleError, SamplerContext};
+use std::collections::BTreeMap;
 
 /// Identity within an immutable biome registry snapshot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -59,13 +61,34 @@ pub struct MultiNoiseBiomeSource {
     group_guards: Vec<bool>,
     selector_axis: usize,
     regions: Option<(Vec<u32>, u8, u32)>,
+    landforms: BTreeMap<String, Habitat>,
 }
 impl MultiNoiseBiomeSource {
     pub fn new(entries: Vec<(ParameterPoint, String)>) -> Result<Self, BiomeError> {
-        let entries = entries
+        let entries: Vec<(ParameterPoint, String)> = entries
             .into_iter()
             .map(|(point, name)| Ok((point, identifier(&name)?)))
             .collect::<Result<_, DecodeError>>()?;
+        // Surface declarations include depth 0 or 1. A biome present only in
+        // underground depth intervals must never become a surface province.
+        let mut landforms = BTreeMap::new();
+        for (point, name) in &entries {
+            let depth = point.coordinates[4];
+            let role = if depth.distance(0) == 0 || depth.distance(10000) == 0 {
+                Habitat::Temperate
+            } else {
+                Habitat::Preserve
+            };
+            landforms
+                .entry(name.clone())
+                .and_modify(|v| {
+                    if role == Habitat::Temperate {
+                        *v = role;
+                    }
+                })
+                .or_insert(role);
+        }
+        landforms.retain(|_, role| *role == Habitat::Preserve);
         Ok(Self {
             parameters: ClimateIndex::new(entries)?,
             additions: None,
@@ -74,6 +97,7 @@ impl MultiNoiseBiomeSource {
             group_guards: Vec::new(),
             selector_axis: 5,
             regions: None,
+            landforms,
         })
     }
     /// Horizon's quantized import format, not the vanilla biome definition
@@ -223,8 +247,33 @@ impl MultiNoiseBiomeSource {
     pub fn parameters(&self) -> &ClimateIndex<String> {
         &self.parameters
     }
+    /// Respect the registry's geography, including modded lakes, shores and
+    /// mountains. Ordinary forests/fields share one temperate habitat.
+    pub(super) fn configure_landforms(&mut self, tags: &BTreeMap<String, Vec<String>>) {
+        for (tag, habitat) in [
+            ("minecraft:is_mountain", Habitat::Highland),
+            ("c:is_mountain", Habitat::Highland),
+            ("minecraft:is_ocean", Habitat::Preserve),
+            ("minecraft:is_beach", Habitat::Preserve),
+            ("minecraft:is_river", Habitat::Preserve),
+            ("c:is_ocean", Habitat::Preserve),
+            ("c:is_beach", Habitat::Preserve),
+            ("c:is_river", Habitat::Preserve),
+            ("c:is_underground", Habitat::Preserve),
+        ] {
+            for biome in tags.get(tag).into_iter().flatten() {
+                self.landforms.insert(biome.clone(), habitat);
+            }
+        }
+    }
     pub fn resolver<'a>(&'a self, climate: &'a ClimateSampler) -> BiomeResolver<'a> {
         BiomeResolver {
+            surface: self
+                .regions
+                .as_ref()
+                .filter(|(weights, _, min)| *min > 0 && weights.iter().skip(1).any(|&w| w > 0))
+                .map(|(_, _, minimum)| SurfaceRegions::new(climate.region_seed, *minimum)),
+            landforms: &self.landforms,
             climate,
             search: self
                 .baseline
@@ -253,6 +302,8 @@ impl MultiNoiseBiomeSource {
 }
 #[derive(Debug)]
 pub struct BiomeResolver<'a> {
+    surface: Option<SurfaceRegions<'a>>,
+    landforms: &'a BTreeMap<String, Habitat>,
     regions: Option<super::region_weights::RegionWeights>,
     climate: &'a ClimateSampler,
     search: ClimateSearch<'a, String>,
@@ -291,14 +342,99 @@ impl<'a> BiomeResolver<'a> {
         target: super::climate::TargetPoint,
         quart: [i32; 3],
     ) -> Result<&'a str, BiomeError> {
+        let stable = self.surface.is_some();
+        let raw = self.resolve_original(target, quart, stable)?;
+        if !stable {
+            return Ok(raw);
+        }
+        let habitat = self.habitat(target, raw)?;
+        if habitat == Habitat::Preserve {
+            return Ok(raw);
+        }
+        let sites = self.surface.as_ref().unwrap().sites(quart[0], quart[2]);
+        for site in sites {
+            let province = if let Some(&p) = self.surface.as_ref().unwrap().cache.get(&site.cell) {
+                p
+            } else {
+                let span = self.surface.as_ref().unwrap().span;
+                let mut samples = Vec::with_capacity(9);
+                for dz in [-1, 0, 1] {
+                    for dx in [-1, 0, 1] {
+                        let q = [
+                            site.position[0].wrapping_add(dx * span / 3),
+                            16,
+                            site.position[1].wrapping_add(dz * span / 3),
+                        ];
+                        let mut t = self
+                            .climate
+                            .sample(&mut self.surface.as_mut().unwrap().context, q)?;
+                        // Survey the surface palette, not a cave at a fixed world Y.
+                        t.depth = 0;
+                        let name = self.resolve_original(t, q, true)?;
+                        samples.push((self.habitat(t, name)?, name, t));
+                    }
+                }
+                let regions = self.surface.as_mut().unwrap();
+                let province = Province::census(regions.seed, site.cell, &samples);
+                regions.insert(site, province);
+                province
+            };
+            if let Some(biome) = province.choose(habitat, target) {
+                return Ok(biome);
+            }
+        }
+        // Small islands or exceptional climate/height niches may have no
+        // supported nearby province of their habitat; retain their real biome.
+        Ok(raw)
+    }
+    fn habitat(
+        &mut self,
+        target: super::climate::TargetPoint,
+        biome: &str,
+    ) -> Result<Habitat, BiomeError> {
+        let vanilla = Habitat::vanilla(biome);
+        if vanilla == Habitat::Preserve {
+            return Ok(vanilla);
+        }
+        if let Some(&habitat) = self.landforms.get(biome) {
+            return Ok(habitat);
+        }
+        if biome.starts_with("minecraft:") {
+            return Ok(vanilla);
+        }
+        // Placement climate, not an imported biome's cosmetic temperature,
+        // identifies its ecology (e.g. a lush desert is still an arid habitat).
+        Ok(Habitat::vanilla(self.search.find_entry_stable(target)?.1))
+    }
+    fn resolve_original(
+        &mut self,
+        target: super::climate::TargetPoint,
+        quart: [i32; 3],
+        stable: bool,
+    ) -> Result<&'a str, BiomeError> {
         if let Some(regions) = &mut self.regions {
             let index = regions.sample(quart[0], quart[2]);
             if index == 0 {
-                return Ok(self.search.find_entry(target)?.1.as_str());
+                return Ok(if stable {
+                    self.search.find_entry_stable(target)?
+                } else {
+                    self.search.find_entry(target)?
+                }
+                .1
+                .as_str());
             }
-            let (candidate, biome) = self.groups[index - 1].1.find_entry(target)?;
+            let search = &mut self.groups[index - 1].1;
+            let (candidate, biome) = if stable {
+                search.find_entry_stable(target)?
+            } else {
+                search.find_entry(target)?
+            };
             if self.group_guards[index - 1] {
-                let (baseline, vanilla) = self.search.find_entry(target)?;
+                let (baseline, vanilla) = if stable {
+                    self.search.find_entry_stable(target)?
+                } else {
+                    self.search.find_entry(target)?
+                };
                 if candidate.fitness(target) > baseline.fitness(target) {
                     return Ok(vanilla.as_str());
                 }
@@ -334,3 +470,6 @@ impl<'a> BiomeResolver<'a> {
         Ok(name.as_str())
     }
 }
+
+#[cfg(test)]
+mod coherence_tests;

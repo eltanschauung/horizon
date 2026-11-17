@@ -90,6 +90,16 @@ impl BiomeSourceDefinition {
     }
 }
 impl ResolvedBiomeSource {
+    pub(in crate::worldgen) fn configure_landforms(
+        &mut self,
+        tags: &BTreeMap<String, Vec<String>>,
+    ) {
+        match self {
+            Self::MultiNoise(source) => source.configure_landforms(tags),
+            Self::Replaced(source, _) => source.configure_landforms(tags),
+            _ => {}
+        }
+    }
     pub fn possible_biomes(&self) -> BTreeSet<&str> {
         match self {
             Self::Fixed(source) => [source.biome.as_str()].into(),

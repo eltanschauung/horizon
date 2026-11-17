@@ -62,6 +62,7 @@ pub mod placement_config;
 pub mod placement_config_menu;
 pub mod projected;
 pub mod region_weights;
+mod surface_regions;
 pub mod replace_blobs;
 pub mod root_system;
 pub mod router;

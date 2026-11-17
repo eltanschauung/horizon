@@ -87,6 +87,19 @@ mountains can still clip individual biomes. Nether and declarations without this
 option retain the existing Java-oracle-compatible region sampler. Changes affect
 newly generated terrain; saved chunks are preserved.
 
+Regional Overworld packs also share a climate-aware biome-coherence pass. Bounded,
+warped Voronoi provinces (768 blocks with the current 192-quart setting) survey the
+original surface palette and choose supported biomes across vanilla and mod pools.
+Similar forests/fields and arid variants consolidate; climate checks, wetland/upland
+habitats and registry landform tags protect genuine ecological boundaries. Rivers,
+oceans, shores, caves and alpine cores retain their local geography. Underground-only
+climate entries cannot supply surface provinces. Stable climate ties make scalar,
+bulk and reversed queries agree. Worker caches are bounded and cannot change answers.
+Tier weights/footprints still govern the source palette; disabling every regional
+pool disables this pass. Fixed sources, vanilla-only presets, Nether and End keep
+their existing behavior. Main code: `worldgen/surface_regions.rs`, `biome.rs`, and
+`biome_source/runtime.rs`; worldgen tags are bound in `generator.rs`.
+
 Bamboo features accept an optional `patch` selector (`block`, `size` 4–256 blocks, `chance` 0–1). Seeded irregular patches replace complete stalks and caps without consuming feature randomness; absent selectors preserve vanilla generation. Lunatic enables this for Bushy Bamboo.
 
 Item cooldowns support independent `/action/` groups with latest-action display priority and fallback; `/action_update/` retimes without stealing display priority. Characters support numeric/string `hunger` (default 20), derived food capacity, extra HUD rows and persisted nonstandard capacity.
