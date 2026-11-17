@@ -768,6 +768,9 @@ pub(super) struct Maps {
     searches: search::Searches<Option<LocatedMap>>,
     // Keep completed requests identifiable if the same pending item was copied.
     searched: HashMap<String, Option<(i32, [i32; 3])>>,
+    // Guest menus are owned by the hub, not Game::container. Track initiated
+    // containers at world scope so completed maps also settle in closed menus.
+    pending_containers: std::collections::HashSet<(i32, i32, i32)>,
 }
 impl Default for Maps {
     fn default() -> Self {
@@ -778,6 +781,7 @@ impl Default for Maps {
             missing: Default::default(),
             searches: Default::default(),
             searched: Default::default(),
+            pending_containers: Default::default(),
         }
     }
 }
@@ -1171,6 +1175,7 @@ impl Game<'_> {
     pub(super) fn resolve_container_maps(&mut self, key: (i32, i32, i32), origin: [f64; 3]) {
         use horizon_client::containers::BlockEntity;
         let Some(BlockEntity::Chest(slots)) = self.world.block_entities.get(&key) else {
+            self.maps.pending_containers.remove(&key);
             return;
         };
         let pending: Vec<usize> = slots
@@ -1182,6 +1187,11 @@ impl Game<'_> {
             })
             .map(|(i, _)| i)
             .collect();
+        if pending.is_empty() {
+            self.maps.pending_containers.remove(&key);
+            return;
+        }
+        self.maps.pending_containers.insert(key);
         for i in pending {
             let Some(BlockEntity::Chest(slots)) = self.world.block_entities.get_mut(&key) else {
                 return;
@@ -1192,6 +1202,7 @@ impl Game<'_> {
             let keep = self.resolve_pending_map(&mut item, origin);
             if let Some(BlockEntity::Chest(slots)) = self.world.block_entities.get_mut(&key) {
                 slots[i] = keep.then_some(item);
+                self.world.modified.insert((key.0 >> 4, key.2 >> 4));
             }
         }
     }
@@ -1402,7 +1413,8 @@ impl Game<'_> {
         let Some(p) = self.player.as_ref().map(|p| p.position) else {
             return;
         };
-        if let Some(key) = self.container {
+        let pending: Vec<_> = self.maps.pending_containers.iter().copied().collect();
+        for key in pending {
             let (x, y, z) = key;
             self.resolve_container_maps(
                 key,
