@@ -92,7 +92,9 @@ warped Voronoi provinces (768 blocks with the current 192-quart setting) survey 
 original surface palette and choose supported biomes across vanilla and mod pools.
 Similar forests/fields and arid variants consolidate; climate checks, wetland/upland
 habitats and registry landform tags protect genuine ecological boundaries. Rivers,
-oceans, shores, caves and alpine cores retain their local geography. Underground-only
+oceans, shores, caves and alpine cores retain their local geography.
+A river or frozen river selected by the host climate takes precedence over a
+regional land biome before smoothing and cannot vote for a land province. Underground-only
 climate entries cannot supply surface provinces. Stable climate ties make scalar,
 bulk and reversed queries agree. Worker caches are bounded and cannot change answers.
 Tier weights/footprints still govern the source palette; disabling every regional

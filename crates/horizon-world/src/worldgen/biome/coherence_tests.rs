@@ -145,3 +145,56 @@ fn disabling_all_regional_packs_retains_the_original_vanilla_resolver() {
         "minecraft:plains"
     );
 }
+
+#[test]
+fn host_rivers_survive_a_regional_land_selection() {
+    use crate::worldgen::climate::quantize;
+
+    for river in ["minecraft:river", "minecraft:frozen_river"] {
+        let (mut source, climate) = fixture("test:bamboo_forest", -0.15);
+        let box_at_temperature = |temperature: Parameter| ParameterPoint {
+            coordinates: [
+                temperature,
+                Parameter::new(-10000, 10000),
+                Parameter::new(-10000, 10000),
+                Parameter::new(-10000, 10000),
+                Parameter::point(0.),
+                Parameter::new(-10000, 10000),
+            ],
+            offset: 0,
+        };
+        source.baseline = Some(
+            ClimateIndex::new(vec![
+                (box_at_temperature(Parameter::point(0.)), river.into()),
+                (
+                    box_at_temperature(Parameter::new(quantize(0.1), 10000)),
+                    "minecraft:plains".into(),
+                ),
+            ])
+            .unwrap(),
+        );
+        let mut resolver = source.resolver(&climate);
+        let mut context = SamplerContext::cached();
+        let river_quart = [0, 17, -4];
+        let bank_quart = [2, 17, -4];
+        let target = climate.sample(&mut context, river_quart).unwrap();
+        assert_eq!(
+            resolver
+                .resolve_original(target, river_quart, true)
+                .unwrap(),
+            "test:bamboo_forest"
+        );
+        let volume = resolver
+            .prepare_volume(&mut context, river_quart, [4, 1, 4])
+            .unwrap();
+        assert_eq!(
+            resolver.sample_prepared(&volume, bank_quart).unwrap(),
+            "test:forest"
+        );
+        assert_eq!(
+            resolver.sample_prepared(&volume, river_quart).unwrap(),
+            river
+        );
+        assert_eq!(resolver.sample(&mut context, river_quart).unwrap(), river);
+    }
+}

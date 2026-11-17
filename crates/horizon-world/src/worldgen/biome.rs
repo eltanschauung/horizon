@@ -347,7 +347,7 @@ impl<'a> BiomeResolver<'a> {
         if !stable {
             return Ok(raw);
         }
-        let habitat = self.habitat(target, raw)?;
+        let (habitat, raw) = self.surface_habitat(target, raw)?;
         if habitat == Habitat::Preserve {
             return Ok(raw);
         }
@@ -371,7 +371,8 @@ impl<'a> BiomeResolver<'a> {
                         // Survey the surface palette, not a cave at a fixed world Y.
                         t.depth = 0;
                         let name = self.resolve_original(t, q, true)?;
-                        samples.push((self.habitat(t, name)?, name, t));
+                        let (habitat, name) = self.surface_habitat(t, name)?;
+                        samples.push((habitat, name, t));
                     }
                 }
                 let regions = self.surface.as_mut().unwrap();
@@ -387,24 +388,34 @@ impl<'a> BiomeResolver<'a> {
         // supported nearby province of their habitat; retain their real biome.
         Ok(raw)
     }
-    fn habitat(
+    /// A regional pool can select a land biome even where the host climate
+    /// selects a river (a broad land entry can tie a narrow river entry).
+    /// Honor the host's river at the actual depth before assigning a province
+    /// or counting votes. Explicit coasts, waters and caves keep their rules.
+    fn surface_habitat(
         &mut self,
         target: super::climate::TargetPoint,
-        biome: &str,
-    ) -> Result<Habitat, BiomeError> {
-        let vanilla = Habitat::vanilla(biome);
-        if vanilla == Habitat::Preserve {
-            return Ok(vanilla);
+        biome: &'a str,
+    ) -> Result<(Habitat, &'a str), BiomeError> {
+        let local = Habitat::vanilla(biome);
+        let tagged = self.landforms.get(biome).copied();
+        if local == Habitat::Preserve || tagged == Some(Habitat::Preserve) {
+            return Ok((Habitat::Preserve, biome));
         }
-        if let Some(&habitat) = self.landforms.get(biome) {
-            return Ok(habitat);
+        let baseline = self.search.find_entry_stable(target)?.1.as_str();
+        if matches!(baseline, "minecraft:river" | "minecraft:frozen_river") {
+            return Ok((Habitat::Preserve, baseline));
         }
-        if biome.starts_with("minecraft:") {
-            return Ok(vanilla);
-        }
-        // Placement climate, not an imported biome's cosmetic temperature,
-        // identifies its ecology (e.g. a lush desert is still an arid habitat).
-        Ok(Habitat::vanilla(self.search.find_entry_stable(target)?.1))
+        // Placement climate identifies a mod biome's ecology, even when its
+        // displayed temperature differs (for example, a lush desert).
+        let habitat = tagged.unwrap_or_else(|| {
+            if biome.starts_with("minecraft:") {
+                local
+            } else {
+                Habitat::vanilla(baseline)
+            }
+        });
+        Ok((habitat, biome))
     }
     fn resolve_original(
         &mut self,
