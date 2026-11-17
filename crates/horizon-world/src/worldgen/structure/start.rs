@@ -951,6 +951,8 @@ pub trait StartContext: JigsawContext {
     }
     fn seed(&self) -> i64;
     fn sea_level(&self) -> i32;
+    /// Number of columns without dry ground in an inclusive piece footprint.
+    fn wet_footprint_columns(&mut self, bounds: &BoundingBox) -> Option<u64>;
     /// `ChunkGenerator.getMinY`: the noise settings' minimum Y, or a superflat generator's 0
     /// (`MineshaftStructure` and `StrongholdStructure` read it, not the level's).
     fn generator_min_y(&self) -> i32 {
@@ -1110,7 +1112,11 @@ pub(crate) fn try_generate(
             else {
                 continue;
             };
-            if score >= best_score {
+            if score >= best_score
+                || !super::surface_terrain::has_ground_support(&start, |bounds| {
+                    context.wet_footprint_columns(bounds)
+                })
+            {
                 continue;
             }
             start.bounding_box.encapsulate(&plan.bounds());

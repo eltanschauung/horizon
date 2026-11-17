@@ -1749,25 +1749,7 @@ where
         }
         worker.timings.structures += lap(&mut clock);
         worker.timings.noise += lap(&mut clock);
-        let mut aquifer: Box<dyn TerrainAquifer> = match &self.aquifer {
-            Some(samplers) => Box::new(
-                NoiseBasedAquifer::new(
-                    AquiferSamplers::new(samplers.clone()),
-                    self.picker,
-                    self.root
-                        .from_hash_of("minecraft:aquifer")
-                        .fork_positional(),
-                    RegistryAquiferBlockStates::new(data.registry).map_err(stage("aquifer"))?,
-                    volume,
-                    context,
-                )
-                .map_err(stage("aquifer"))?,
-            ),
-            None => Box::new(DisabledAquifer::new(
-                self.picker,
-                data.registry.default_state("minecraft:air").unwrap(),
-            )),
-        };
+        let mut aquifer = self.terrain_aquifer(volume, context)?;
         worker.timings.noise += lap(&mut clock);
         if native {
             // The mod's blocks stand where the noise's would: the surface rule
@@ -1928,6 +1910,80 @@ where
         } else {
             (self.settings.noise_min_y, self.settings.noise_height)
         }
+    }
+    fn terrain_aquifer(
+        &self,
+        volume: DensityVolume,
+        context: &mut SamplerContext,
+    ) -> Result<Box<dyn TerrainAquifer + '_>, GeneratorError> {
+        Ok(match &self.aquifer {
+            Some(samplers) => Box::new(
+                NoiseBasedAquifer::new(
+                    AquiferSamplers::new(samplers.clone()),
+                    self.picker,
+                    self.root
+                        .from_hash_of("minecraft:aquifer")
+                        .fork_positional(),
+                    RegistryAquiferBlockStates::new(self.data.registry)
+                        .map_err(stage("aquifer"))?,
+                    volume,
+                    context,
+                )
+                .map_err(stage("aquifer"))?,
+            ),
+            None => Box::new(DisabledAquifer::new(
+                self.picker,
+                self.data.registry.default_state("minecraft:air").unwrap(),
+            )),
+        })
+    }
+
+    /// A bit per column that the fitter cannot use as dry ground. Run the
+    /// same chunk noise/aquifer fill as terrain generation, before any
+    /// structure adaptation, without generating or referencing neighbours.
+    fn wet_surface_rows(&self, pos: ChunkPos) -> Result<[u16; 16], GeneratorError> {
+        let volume = DensityVolume::new(
+            [16, self.settings.noise_height, 16],
+            [
+                pos.x.wrapping_shl(4),
+                self.settings.noise_min_y,
+                pos.z.wrapping_shl(4),
+            ],
+            [1; 3],
+        )
+        .map_err(stage("structure support"))?;
+        let mut chunk = TerrainChunk::new(
+            pos,
+            self.settings.level_min_y,
+            self.settings.level_height,
+            self.data.registry,
+            self.data.states.clone(),
+        )
+        .map_err(stage("structure support"))?;
+        let mut context = SamplerContext::cached();
+        let mut aquifer = self.terrain_aquifer(volume, &mut context)?;
+        fill_noise(
+            &mut chunk,
+            volume,
+            self.router.get(RouterField::FinalDensity).as_ref(),
+            &mut context,
+            aquifer.as_mut(),
+            self.settings.default_block,
+        )
+        .map_err(stage("structure support"))?;
+        let floor = chunk
+            .heightmap(HeightmapType::OceanFloorWg)
+            .expect("noise floor map");
+        let surface = chunk
+            .heightmap(HeightmapType::WorldSurfaceWg)
+            .expect("noise surface map");
+        Ok(std::array::from_fn(|z| {
+            (0..16).fold(0, |row, x| {
+                let ground = floor.first_available(x, z as i32).expect("local column");
+                let top = surface.first_available(x, z as i32).expect("local column");
+                row | (u16::from(ground < self.settings.sea_level || top > ground) << x)
+            })
+        }))
     }
     /// ChunkGenerator.getBaseHeight: the first free Y above the noise column
     /// (with aquifers, without terrain adaptation) for a heightmap type.
@@ -2144,6 +2200,41 @@ where
     }
     fn surface_fitting(&self) -> bool {
         self.pipeline.flat.is_none()
+    }
+    fn wet_footprint_columns(&mut self, bounds: &super::structure::BoundingBox) -> Option<u64> {
+        let mut wet = 0;
+        let [min_x, _, min_z] = bounds.min;
+        let [max_x, _, max_z] = bounds.max;
+        for cz in min_z >> 4..=max_z >> 4 {
+            for cx in min_x >> 4..=max_x >> 4 {
+                let key = (cx, cz);
+                if !self.worker.wet_surfaces.contains_key(&key) {
+                    if self.worker.wet_surfaces.len() >= 512 {
+                        self.worker.wet_surfaces.clear();
+                    }
+                    let rows = self.pipeline.wet_surface_rows(ChunkPos::new(cx, cz)).ok()?;
+                    self.worker.wet_surfaces.insert(key, rows);
+                }
+                let min_col = if cx == min_x >> 4 { min_x & 15 } else { 0 };
+                let max_col = if cx == max_x >> 4 { max_x & 15 } else { 15 };
+                let min_row = if cz == min_z >> 4 {
+                    (min_z & 15) as usize
+                } else {
+                    0
+                };
+                let max_row = if cz == max_z >> 4 {
+                    (max_z & 15) as usize
+                } else {
+                    15
+                };
+                let mask = (u16::MAX << min_col) & (u16::MAX >> (15 - max_col));
+                wet += self.worker.wet_surfaces[&key][min_row..=max_row]
+                    .iter()
+                    .map(|row| u64::from((row & mask).count_ones()))
+                    .sum::<u64>();
+            }
+        }
+        Some(wet)
     }
     fn generator_min_y(&self) -> i32 {
         if self.pipeline.flat.is_some() {
@@ -2489,6 +2580,8 @@ pub(super) struct WorkerState {
     structure_biomes: HashMap<[i32; 3], BiomeId>,
     timings: StageTimings,
     heights: HashMap<(i32, i32, u8), i32>,
+    /// Bounded noise-only support masks shared by overlapping site candidates.
+    wet_surfaces: HashMap<(i32, i32), [u16; 16]>,
     /// Decorate with structure pieces only (for structure parity checks).
     pub(super) structures_only: bool,
     pub(super) structure_mobs: Option<Arc<dyn StructureMobs>>,
@@ -3777,6 +3870,7 @@ impl OverworldGenerator {
                 structures_only: false,
                 structure_mobs: None,
                 heights: HashMap::new(),
+                wet_surfaces: HashMap::new(),
                 surface_rule: None,
             },
         }

@@ -88,6 +88,49 @@ fn fixed_legacy_floor(pieces: &[Piece]) -> Option<i32> {
         })
         .min()
 }
+
+fn above_another_piece(pieces: &[Piece], bounds: &BoundingBox) -> bool {
+    pieces.iter().any(|other| {
+        let lower = other.bounding_box();
+        lower.min[1] < bounds.min[1]
+            && lower.min[0] <= bounds.min[0]
+            && lower.max[0] >= bounds.max[0]
+            && lower.min[2] <= bounds.min[2]
+            && lower.max[2] >= bounds.max[2]
+    })
+}
+
+fn follows_terrain(piece: &Piece) -> bool {
+    matches!(piece, Piece::Pool(p) if p.element.projection() == Projection::TerrainMatching)
+}
+
+/// The nine height samples used to choose the grade cannot rule out a channel
+/// between samples. Check every column before accepting a promising site.
+pub(super) fn has_ground_support(
+    start: &StructureStart,
+    mut wet_columns: impl FnMut(&BoundingBox) -> Option<u64>,
+) -> bool {
+    start.pieces.iter().enumerate().all(|(index, piece)| {
+        let bounds = piece.bounding_box();
+        if index != 0 && above_another_piece(&start.pieces, &bounds) {
+            return true;
+        }
+        let Some(wet) = wet_columns(&bounds) else {
+            return false;
+        };
+        if index == 0 || !follows_terrain(piece) {
+            return wet == 0;
+        }
+        // Terrain-matching paths can cross a narrow channel. Most of each
+        // crossing must rest on dry land and the root must always be dry.
+        let span =
+            |axis: usize| (i64::from(bounds.max[axis]) - i64::from(bounds.min[axis]) + 1) as u64;
+        span(0)
+            .checked_mul(span(2))
+            .is_some_and(|area| wet < area.div_ceil(2))
+    })
+}
+
 impl Plan {
     /// Sample noise-only terrain; never ask neighbouring generated chunks.
     pub fn evaluate(
@@ -102,6 +145,11 @@ impl Plan {
         let legacy_floor = fixed_legacy_floor(&start.pieces);
         'pieces: for (index, piece) in start.pieces.iter().enumerate() {
             let b = piece.bounding_box();
+            // Upper storeys need no independent ground platform.
+            if above_another_piece(&start.pieces, &b) {
+                continue;
+            }
+            let road = follows_terrain(piece);
             let xs = [b.min[0], (b.min[0] + b.max[0]) / 2, b.max[0]];
             let zs = [b.min[2], (b.min[2] + b.max[2]) / 2, b.max[2]];
             let mut heights = Vec::with_capacity(9);
@@ -111,8 +159,10 @@ impl Plan {
                     let surface = context.base_height(x, z, HeightmapType::WorldSurfaceWg);
                     // No reclaiming sea/lakes or draining rivers for a surface building.
                     if ground < sea || ground != surface {
-                        // Preserve bridges and waterfront pieces. Penalize these
-                        // candidates, but never reclaim their fluid footprint.
+                        if index == 0 || !road {
+                            return None;
+                        }
+                        // Prefer dry candidates and keep the water under paths.
                         score += 1000.0;
                         continue 'pieces;
                     }
@@ -122,24 +172,10 @@ impl Plan {
             let mut sorted = heights.clone();
             sorted.sort_unstable();
             let median = sorted[4];
-            let (floor, road) = match piece {
-                Piece::Pool(p) => (
-                    floors[index].unwrap_or(b.min[1] + p.ground_level_delta),
-                    p.element.projection() == Projection::TerrainMatching,
-                ),
-                Piece::Legacy(_) => (legacy_floor.unwrap_or(median), false),
+            let floor = match piece {
+                Piece::Pool(p) => floors[index].unwrap_or(b.min[1] + p.ground_level_delta),
+                Piece::Legacy(_) => legacy_floor.unwrap_or(median),
             };
-            // Upper storeys need no independent ground platform.
-            if start.pieces.iter().any(|other| {
-                let lower = other.bounding_box();
-                lower.min[1] < b.min[1]
-                    && lower.min[0] <= b.min[0]
-                    && lower.max[0] >= b.max[0]
-                    && lower.min[2] <= b.min[2]
-                    && lower.max[2] >= b.max[2]
-            }) {
-                continue;
-            }
             let mut grade = [0.0; 2];
             let mut floor = f64::from(floor);
             if road {
@@ -709,6 +745,38 @@ mod settlement_tests {
             waterlogging: false,
         })
     }
+    #[test]
+    fn surface_terrain_rejects_a_channel_between_height_samples() {
+        let mut start = StructureStart {
+            surface: None,
+            structure: 0,
+            name: "test:riverside_village".into(),
+            chunk: ChunkPos::new(0, 0),
+            bounding_box: BoundingBox::new([0; 3], [32; 3]),
+            pieces: vec![piece(0, 64, false), piece(8, 64, false)],
+        };
+        // A one-block channel through the second building, missing its
+        // corners, centre and edge midpoints. A dry root cannot save this site.
+        let wet = |bounds: &BoundingBox| {
+            Some(if (bounds.min[0]..=bounds.max[0]).contains(&10) {
+                8
+            } else {
+                0
+            })
+        };
+        assert!(!has_ground_support(&start, wet));
+        assert!(has_ground_support(&start, |_| Some(0)));
+        start.pieces[1] = piece(8, 64, true);
+        assert!(has_ground_support(&start, wet));
+        assert!(!has_ground_support(&start, |b| Some(if b.min[0] == 8 {
+            32
+        } else {
+            0
+        })));
+        start.pieces.swap(0, 1);
+        assert!(!has_ground_support(&start, wet));
+    }
+
     #[test]
     fn surface_terrain_settles_buildings_without_flattening_village() {
         let mut start = StructureStart {

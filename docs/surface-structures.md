@@ -3,7 +3,11 @@
 New natural surface starts retain their seeded structure-set owner and weights.
 They evaluate the original site and eight adjacent chunk sites in a fixed order,
 using each candidate's generated piece footprints and noise-only terrain queries.
-Biome and generator checks run for each candidate. Ties keep the earlier site;
+Biome and generator checks run for each candidate. Before accepting a site,
+the fitter checks every column beneath each building footprint with the
+generator's noise and aquifer settings. A building or root piece over water
+rejects the site. A terrain-following path can cross water if most of its
+footprint rests on dry ground. Ties keep the earlier site;
 no additional structure slots are added. Unsafe sites can be rejected, so stricter
 limits can lower the number of generated structures.
 
@@ -54,8 +58,8 @@ Tectonic's native settings adapter includes `minecraft:beardifier` in its final
 density graph, restoring the existing kernel pipeline for non-fitted structures.
 
 Flat generators retain original placement. Saved plans retain their original limits;
-configuration changes affect new starts. Waterfront pieces are penalized during site
-selection and retain their original water footprint. Excavation beside fluids is
+configuration changes affect new starts. Dry path layouts score better during site
+selection. Allowed crossings keep their original water footprint. Excavation beside fluids is
 clamped to their level; edge queries use cached noise-only neighbour columns.
 
 Fixed-height legacy templates (mansions) retain a shared foundation at their
