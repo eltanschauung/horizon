@@ -379,6 +379,7 @@ enum ModAnimation {
 #[derive(Clone, Copy, Debug, Default, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct ModBehaviour {
+    falling_petal: bool,
     velocity: Option<[f64; 3]>,
     /// Random extra velocity, each axis uniform in `-jitter..=jitter`.
     velocity_jitter: Option<[f64; 3]>,
@@ -427,6 +428,33 @@ impl ModBehaviour {
     /// `spawn` is the velocity the spawn call passed; a declared velocity is added to it,
     /// with the jitter drawn from `random`.
     fn apply(self, particle: &mut Particle, spawn: [f64; 3], random: &mut LegacyRandom) {
+        if self.falling_petal {
+            let size = if random.next_boolean() { 0.075 } else { 0.1 };
+            let angle = f64::from(random.next_float() * 60.0).to_radians();
+            let rot_speed = if random.next_boolean() {
+                -30.0f32
+            } else {
+                30.0
+            };
+            let spin = if random.next_boolean() { -5.0f32 } else { 5.0 };
+            particle.lifetime = 300;
+            particle.gravity = 0.00075;
+            particle.friction = 1.0;
+            particle.size = size;
+            particle.set_size(size, size);
+            particle.velocity = [0.0; 3];
+            particle.set = None;
+            particle.behaviour = Behaviour::Leaves {
+                rot_speed: rot_speed.to_radians(),
+                spin: spin.to_radians(),
+                wind: 2.0,
+                swirl: false,
+                flow: true,
+                flow_scale: [2.0 * angle.cos(), 2.0 * angle.sin()],
+                swirl_period: 0.0,
+            };
+            return;
+        }
         if self.velocity.is_some() || self.velocity_jitter.is_some() {
             let base = self.velocity.unwrap_or([0.0; 3]);
             let jitter = self.velocity_jitter.unwrap_or([0.0; 3]);

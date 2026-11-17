@@ -416,6 +416,22 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                         self.drop_resources(state, pos);
                         self.remove_block(pos, false);
                     }
+                    if self.state(pos) == state {
+                        let carpet = match b.table.name(state) {
+                            "horizon_gensokyo_legacy:pink_cherry_leaves" => {
+                                "horizon_gensokyo_legacy:pink_cherry_fallen_leaves"
+                            }
+                            "horizon_gensokyo_legacy:purple_cherry_leaves" => {
+                                "horizon_gensokyo_legacy:purple_cherry_fallen_leaves"
+                            }
+                            _ => continue,
+                        };
+                        if let Some(carpet) = b.table.block_by_name(carpet)
+                            && self.random().next_float() < 0.1
+                        {
+                            self.accumulate_sakura_leaves(pos, carpet);
+                        }
+                    }
                 }
                 Class::Liquid => {
                     if matches!(
@@ -546,6 +562,61 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             || b.liquid(state)
             || b.is_replaceable(state)
     }
+    // Gensokyo Legacy checks up to eight blocks beneath the canopy for a carpet or a surface.
+    fn accumulate_sakura_leaves(&mut self, mut pos: BlockPos, carpet: super::states::BlockId) {
+        let b = self.b;
+        let layers = b.props.layers;
+        for _ in 0..8 {
+            let support = below(pos);
+            let state = self.state(support);
+            let name = b.table.name(state);
+            if name.starts_with("horizon_gensokyo_legacy:") && name.ends_with("_fallen_leaves") {
+                let thin = b.table.text(state, layers) == "2";
+                if b.is_block(state, carpet) {
+                    if thin {
+                        self.set_block_and_update(support, b.table.set_text(state, layers, "1"));
+                    }
+                } else if thin || self.random().next_float() < 0.3 {
+                    let replacement = b.table.set_text(
+                        b.default_of(carpet),
+                        b.props.facing,
+                        b.table.text(state, b.props.facing),
+                    );
+                    let replacement =
+                        b.table
+                            .set_text(replacement, layers, if thin { "2" } else { "1" });
+                    self.set_block_and_update(support, replacement);
+                }
+                return;
+            }
+            let fluid = b.fluid(state);
+            let dry_spot = b.fluid(self.state(pos)).kind() == FluidKind::Empty;
+            if self.sturdy(support, Direction::Up)
+                || (self.is_water_fluid(fluid.kind()) && fluid.is_source() && dry_spot)
+            {
+                let replaced = self.state(pos);
+                if dry_spot && b.is_replaceable(replaced) {
+                    let facing = ["north", "east", "south", "west"][self.rand_int(4) as usize];
+                    let placed = b
+                        .table
+                        .set_text(b.default_of(carpet), b.props.facing, facing);
+                    let placed = b.table.set_text(placed, layers, "2");
+                    if !b.is_air(replaced) {
+                        self.destroy_block(pos, true, 512);
+                    }
+                    self.set_block_and_update(pos, placed);
+                }
+                return;
+            }
+            if fluid.kind() != FluidKind::Empty
+                || (!b.is_replaceable(state) && !self.instance_of(state, Class::Leaves))
+            {
+                return;
+            }
+            pos = support;
+        }
+    }
+
     fn leaves_update_distance(&self, state: BlockStateId, pos: BlockPos) -> BlockStateId {
         let mut distance = 7;
         for direction in Direction::ALL {

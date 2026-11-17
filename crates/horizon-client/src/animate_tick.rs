@@ -39,6 +39,7 @@ enum Animate {
     /// the biome foliage colour unless a fixed colour is given (azalea); and
     /// whether they have the poplar ambient sound (`AmbientLeavesBlockSoundPlayer`).
     Leaves(Option<(T, f32)>, Option<u32>, bool),
+    SakuraLeaves(&'static str),
     NetherPortal,
     EnchantingTable,
     EndRod([i32; 3]),
@@ -139,6 +140,12 @@ fn classify(name: &str, prop: &dyn Fn(&str) -> Option<String>) -> Animate {
         },
         "oak_leaves" | "birch_leaves" | "jungle_leaves" | "acacia_leaves" | "dark_oak_leaves"
         | "mangrove_leaves" => Animate::Leaves(Some((T::TintedLeaves, 0.01)), None, false),
+        "horizon_gensokyo_legacy:pink_cherry_leaves" => {
+            Animate::SakuraLeaves("horizon_gensokyo_legacy:pink_cherry_blossom")
+        }
+        "horizon_gensokyo_legacy:purple_cherry_leaves" => {
+            Animate::SakuraLeaves("horizon_gensokyo_legacy:purple_cherry_blossom")
+        }
         "cherry_leaves" => Animate::Leaves(Some((T::CherryLeaves, 0.1)), None, false),
         "pale_oak_leaves" => Animate::Leaves(Some((T::PaleOakLeaves, 0.02)), None, false),
         "red_poplar_leaves" => Animate::Leaves(Some((T::RedPoplarLeaves, 0.01)), None, true),
@@ -957,7 +964,11 @@ fn block_animate_tick(
                 }
             }
         }
-        Animate::Leaves(falling, fixed_tint, poplar) => {
+        leaves @ (Animate::Leaves(..) | Animate::SakuraLeaves(_)) => {
+            let (falling, fixed_tint, poplar) = match leaves {
+                Animate::Leaves(falling, fixed_tint, poplar) => (falling, fixed_tint, poplar),
+                _ => (None, None, false),
+            };
             let below = [pos[0], pos[1] - 1, pos[2]];
             // LeavesBlock.makeDrippingWaterParticles.
             if (ctx.raining_at)([pos[0], pos[1] + 1, pos[2]]) && next_int(engine.random(), 15) == 1
@@ -971,6 +982,14 @@ fn block_animate_tick(
             }
             if poplar {
                 leaves_ambient_sound(tables, engine, ctx, state, pos);
+            }
+            if let Animate::SakuraLeaves(particle) = leaves
+                && next_int(engine.random(), 10) == 0
+                && !ctx.sturdy(below)
+            {
+                let r = engine.random();
+                let p = [fx + r.next_double(), fy - 0.05, fz + r.next_double()];
+                engine.add(&ParticleOptions::named(particle), p, [0.0; 3]);
             }
             // FallingParticlesLeavesBlock.makeFallingLeavesParticles.
             if let Some((ty, chance)) = falling
