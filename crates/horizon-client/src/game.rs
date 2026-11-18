@@ -213,8 +213,10 @@ mod locator_bar;
 mod loom;
 mod mace;
 mod machines;
+mod magic;
 mod maps;
 mod memory;
+mod miasma;
 mod minecarts;
 mod mob_blocks;
 #[cfg(test)]
@@ -346,7 +348,6 @@ mod quick_actions;
 mod raids;
 mod random_textures;
 mod recipe_book;
-mod magic;
 mod remote;
 mod remote_camera;
 mod remote_chat;
@@ -5490,6 +5491,7 @@ impl Game<'_> {
             }
         });
         self.process_level_events()?;
+        self.tick_miasma_exposure();
         laps.lap("tb_entity_inside");
         // ServerLevel.tick: a Debug world runs no scheduled block or fluid ticks, and
         // ServerChunkCache.tickChunks no random ticks.
@@ -8685,7 +8687,8 @@ impl Game<'_> {
                 // Hud.extractAirBubbles: `isEyeInFluidMatching`, so the eyes are below
                 // the surface, not merely in the water block.
                 let under_water = p.is_eye_in_fluid(horizon_client::motion::WATER);
-                let inputs = hud_layout::HealthInputs { max_food:p.health.food.max_food,
+                let inputs = hud_layout::HealthInputs {
+                    max_food: p.health.food.max_food,
                     tick: visual_ticks as i32,
                     millis: visual_millis,
                     health: p.health.health(),
@@ -9066,7 +9069,9 @@ impl Game<'_> {
     }
 
     fn slot_at(&self, batch: &HudBatch, x: f32, y: f32) -> Option<usize> {
-        if self.magic_page_open() { return None; }
+        if self.magic_page_open() {
+            return None;
+        }
         if self.book_covers_menu(batch.width) {
             return None;
         }
@@ -9442,7 +9447,9 @@ impl Game<'_> {
         button: i32,
         input: horizon_client::menu::Input,
     ) -> bool {
-        if self.magic_page_open() { return true; }
+        if self.magic_page_open() {
+            return true;
+        }
         if let Some(slot) = slot
             && slot >= Creative::DISPLAY
             && self.creative_tab_open()
@@ -9533,7 +9540,9 @@ impl Game<'_> {
     }
     /// Several clicks on one menu instance (a quick craft drag is three).
     fn menu_ops(&mut self, ops: &[(Option<usize>, i32, horizon_client::menu::Input)]) -> bool {
-        if self.magic_page_open() { return true; }
+        if self.magic_page_open() {
+            return true;
+        }
         use horizon_client::menu::Input;
         // BundleMouseActions.onSlotClicked: a Shift click or a swap clears the bundle's selection.
         for &(slot, _, input) in ops {
@@ -10168,7 +10177,9 @@ impl Game<'_> {
     /// Number keys, F and Q over a slot of the open menu: SWAP with a hotbar
     /// slot or the off hand, THROW one or the whole stack.
     fn inventory_hotkey(&mut self, key: KeyCode) -> bool {
-        if self.magic_page_open() { return true; }
+        if self.magic_page_open() {
+            return true;
+        }
         use horizon_client::menu::Input;
         let Some(size) = self
             .renderer
@@ -10200,7 +10211,9 @@ impl Game<'_> {
     /// menu (`AbstractContainerScreen.keyPressed`): `CLONE` with button 0. The
     /// search tab's box takes the key instead.
     fn inventory_pick_key(&mut self) {
-        if self.magic_page_open() { return; }
+        if self.magic_page_open() {
+            return;
+        }
         let menu = (self.screen == Screen::Inventory
             || (self.screen == Screen::Creative && !self.creative_screen.tab().search))
             && !self.dialog_open();
@@ -10228,7 +10241,9 @@ impl Game<'_> {
     /// stack is held, gathers on a double click, else the normal click.
     fn inventory_press(&mut self, right: bool) {
         if self.magic_page_open() {
-            if !self.recipe_book_click(right) { self.magic_press(right); }
+            if !self.recipe_book_click(right) {
+                self.magic_press(right);
+            }
             return;
         }
         use horizon_client::container_screen::Target;
@@ -10382,7 +10397,9 @@ impl Game<'_> {
     }
     /// Mouse movement while a quick craft drag is running.
     fn inventory_drag_move(&mut self) {
-        if self.magic_page_open() { return; }
+        if self.magic_page_open() {
+            return;
+        }
         if self.tweaks_on() && self.tweak_drag_move(self.inventory_target().0) {
             return;
         }
@@ -10529,7 +10546,10 @@ impl Game<'_> {
     /// Mouse release over an inventory screen: `mouseReleased` ends or
     /// cancels the drag, drops a stack released outside, or clicks.
     fn inventory_mouse_release(&mut self, right: bool) {
-        if self.magic_page_open() { self.magic_release(right); return; }
+        if self.magic_page_open() {
+            self.magic_release(right);
+            return;
+        }
         use horizon_client::container_screen::{Release, Target};
         self.tweak_release();
         let (slot, outside) = self.inventory_target();
@@ -10646,7 +10666,9 @@ impl Game<'_> {
         }
     }
     fn click_inventory(&mut self, right: bool) {
-        if self.magic_page_open() { return; }
+        if self.magic_page_open() {
+            return;
+        }
         if self.mod_browser_press(right) || self.mount_click(right) {
             return;
         }
@@ -14658,7 +14680,10 @@ impl Game<'_> {
         }
         if let Some(model) = self.player_model.as_ref() {
             let camera = glam::DVec3::new(model.position.x, model.position.y, model.position.z);
-            player_presentation::fade_vertices(&mut out, self.player_presentation_opacity(model, camera));
+            player_presentation::fade_vertices(
+                &mut out,
+                self.player_presentation_opacity(model, camera),
+            );
         }
         (out, runs)
     }

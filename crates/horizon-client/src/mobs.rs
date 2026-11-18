@@ -3608,7 +3608,15 @@ impl Mob {
         // touched yet, and only a hit outside `#bypasses_armor` asks at all.
         let armor_hit = (!source.bypasses_armor() && amount > 0.0).then_some(amount);
         if !source.bypasses_armor() {
-            let (armor, armor_toughness) = armor::values(self);
+            let (mut armor, armor_toughness) = armor::values(self);
+            if let Some((_, _, amp)) = self
+                .extra
+                .effects
+                .iter()
+                .find(|e| e.0 == crate::effects::MIASMA)
+            {
+                armor *= (1.0 - 0.5 * (*amp + 1) as f32).max(0.0);
+            }
             if armor > 0.0 {
                 // CombatRules.getDamageAfterAbsorb
                 let toughness = 2.0 + armor_toughness / 4.0;
@@ -4072,6 +4080,25 @@ impl Mob {
         let mut through = through;
         crate::health::damage_pre(crate::health::Hurting::Mob(self, source), &mut through);
         self.health -= through;
+        if through > 0.0
+            && self.alive()
+            && let Some((_, _, amp)) = self
+                .extra
+                .effects
+                .iter()
+                .find(|e| e.0 == crate::effects::MIASMA)
+            && [
+                "minecraft:slowness",
+                "minecraft:weakness",
+                "minecraft:poison",
+            ]
+            .iter()
+            .all(|id| !self.has_effect(id))
+            && let Some((effect, amp)) =
+                crate::effects::miasma_on_hurt(*amp, self.random.next_double())
+        {
+            self.add_effect(effect, 100, amp);
+        }
         through
     }
     /// [`Mob::soak_absorption`] for a hit from `source`: `LivingEntity.actuallyHurt`

@@ -301,7 +301,11 @@ impl Game<'_> {
                     let Some(d) = self.health_resources.damage.definition(*source) else {
                         continue;
                     };
-                    (d.name.clone(), *amount)
+                    let name = d.name.clone();
+                    if *amount > 0.0 {
+                        self.apply_miasma_on_hurt();
+                    }
+                    (name, *amount)
                 }
                 _ => continue,
             };

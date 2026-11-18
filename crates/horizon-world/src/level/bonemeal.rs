@@ -327,6 +327,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             }
             Kind::Propagule => !b.table.bool(state, p.hanging) || b.table.int(state, p.age) != 4,
             Kind::Mushroom => {
+                if let Some(features) = Self::gensokyo_mushroom_features(b.table.name(state)) {
+                    return features.iter().all(|feature| self.feature_exists(feature));
+                }
                 let Some(feature) = b.data(state).feature.as_deref() else {
                     return false;
                 };

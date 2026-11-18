@@ -302,7 +302,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         *self.random() = random;
         placed
     }
-    fn feature_exists(&self, name: &str) -> bool {
+    pub(super) fn feature_exists(&self, name: &str) -> bool {
         self.b
             .live_features()
             .is_some_and(|f| f.configured(name).is_some())
@@ -458,11 +458,42 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             }),
         }
     }
+    pub(crate) fn gensokyo_mushroom_features(state_name: &str) -> Option<[&'static str; 3]> {
+        macro_rules! sizes {
+            ($kind:literal) => {
+                [
+                    concat!("horizon_gensokyo_legacy:magical_forest/", $kind, "_small"),
+                    concat!("horizon_gensokyo_legacy:magical_forest/", $kind, "_medium"),
+                    concat!("horizon_gensokyo_legacy:magical_forest/", $kind, "_large"),
+                ]
+            };
+        }
+        Some(match state_name {
+            "horizon_gensokyo_legacy:ghost_fire_mushroom" => sizes!("ghost_fire"),
+            "horizon_gensokyo_legacy:dream_mushroom" => sizes!("dream"),
+            "horizon_gensokyo_legacy:demonic_miasma_mushroom" => sizes!("demonic_miasma"),
+            _ => return None,
+        })
+    }
+
     /// `MushroomBlock.growMushroom`.
     pub(crate) fn grow_mushroom(&mut self, pos: BlockPos, state: BlockStateId) -> bool {
-        let Some(feature) = self.b.data(state).feature.clone() else {
-            return false;
-        };
+        let feature =
+            if let Some(features) = Self::gensokyo_mushroom_features(self.b.table.name(state)) {
+                let roll = self.random().next_float();
+                features[if roll < 0.5 {
+                    0
+                } else if roll < 0.9 {
+                    1
+                } else {
+                    2
+                }]
+                .to_owned()
+            } else if let Some(feature) = self.b.data(state).feature.clone() {
+                feature
+            } else {
+                return false;
+            };
         if !self.feature_exists(&feature) {
             return false;
         }

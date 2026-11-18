@@ -505,6 +505,7 @@ props! {
     age = "age",
     level = "level",
     layers = "layers",
+    intensity = "intensity",
     snowy = "snowy",
     north = "north",
     south = "south",

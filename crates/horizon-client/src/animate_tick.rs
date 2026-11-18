@@ -40,6 +40,10 @@ enum Animate {
     /// whether they have the poplar ambient sound (`AmbientLeavesBlockSoundPlayer`).
     Leaves(Option<(T, f32)>, Option<u32>, bool),
     SakuraLeaves(&'static str),
+    MiasmaMushroom {
+        huge: bool,
+    },
+    MiasmaAir(u8),
     NetherPortal,
     EnchantingTable,
     EndRod([i32; 3]),
@@ -105,6 +109,23 @@ enum Animate {
     /// A creaking heart that is not uprooted (`CreakingHeartBlock.animateTick`).
     CreakingHeart,
 }
+fn miasma_particle(engine: &mut ParticleEngine, [x, y, z]: [f64; 3], small: bool, above: bool) {
+    let rng = engine.random();
+    let x = x + 0.2 + rng.next_double() * 0.6;
+    let y = y + if above {
+        1.0 + rng.next_double() * 0.2
+    } else {
+        0.2 + rng.next_double() * 0.6
+    };
+    let z = z + 0.2 + rng.next_double() * 0.6;
+    let id = if small {
+        "horizon_gensokyo_legacy:miasma_small"
+    } else {
+        "horizon_gensokyo_legacy:miasma"
+    };
+    engine.add(&ParticleOptions::named(id), [x, y, z], [0.0, 0.03, 0.0]);
+}
+
 fn step(facing: &str) -> [i32; 3] {
     match facing {
         "north" => [0, 0, -1],
@@ -145,6 +166,15 @@ fn classify(name: &str, prop: &dyn Fn(&str) -> Option<String>) -> Animate {
         }
         "horizon_gensokyo_legacy:purple_cherry_leaves" => {
             Animate::SakuraLeaves("horizon_gensokyo_legacy:purple_cherry_blossom")
+        }
+        "horizon_gensokyo_legacy:demonic_miasma_mushroom" => {
+            Animate::MiasmaMushroom { huge: false }
+        }
+        "horizon_gensokyo_legacy:demonic_miasma_mushroom_block" => {
+            Animate::MiasmaMushroom { huge: true }
+        }
+        "horizon_gensokyo_legacy:miasma_air" => {
+            Animate::MiasmaAir(prop("intensity").and_then(|v| v.parse().ok()).unwrap_or(1))
         }
         "cherry_leaves" => Animate::Leaves(Some((T::CherryLeaves, 0.1)), None, false),
         "pale_oak_leaves" => Animate::Leaves(Some((T::PaleOakLeaves, 0.02)), None, false),
@@ -1006,6 +1036,24 @@ fn block_animate_tick(
                     ParticleOptions::simple(ty)
                 };
                 engine.add(&options, p, [0.0; 3]);
+            }
+        }
+        Animate::MiasmaMushroom { huge } => {
+            if engine.random().next_float() < if huge { 0.2 } else { 0.1 }
+                && (!huge
+                    || ctx
+                        .shape_y([pos[0], pos[1] + 1, pos[2]])
+                        .is_some_and(|(_, top, _)| top == 0.0))
+            {
+                miasma_particle(engine, [fx, fy, fz], false, huge);
+            }
+        }
+        Animate::MiasmaAir(intensity) => {
+            if engine.random().next_float() < 0.02 * f32::from((intensity + 1).min(5)) {
+                miasma_particle(engine, [fx, fy, fz], true, false);
+            }
+            if engine.random().next_float() < 0.04 * f32::from(intensity.saturating_sub(4)) {
+                miasma_particle(engine, [fx, fy, fz], false, false);
             }
         }
         Animate::NetherPortal => {

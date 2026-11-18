@@ -4,6 +4,21 @@
 //! effects), and the derived flags the movement and damage code read.
 use horizon_client_core::potions;
 
+pub const MIASMA: &str = "horizon_gensokyo_legacy:miasma";
+
+/// Gensokyo Legacy's secondary debuff when a Miasma-afflicted entity takes damage.
+pub fn miasma_on_hurt(amplifier: i32, roll: f64) -> Option<(&'static str, i32)> {
+    if roll < 0.4 {
+        Some(("slowness", amplifier))
+    } else if roll < 0.8 {
+        Some(("weakness", amplifier))
+    } else if amplifier > 0 {
+        Some(("poison", 0))
+    } else {
+        None
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct EffectInstance {
     /// Effect id: vanilla's without namespace (`speed`, `poison`, ...), a
@@ -482,6 +497,12 @@ impl StatusFlags {
 /// `f32` to keep the low digits.
 pub fn effect_modifier(effect: &str) -> Option<(&'static str, &'static str, f64, &'static str)> {
     match effect {
+        MIASMA => Some((
+            "minecraft:armor",
+            "horizon_gensokyo_legacy:miasma_armor",
+            -0.5,
+            "add_multiplied_total",
+        )),
         "speed" => Some((
             "minecraft:movement_speed",
             "minecraft:effect.speed",

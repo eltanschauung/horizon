@@ -220,6 +220,7 @@ enum Behaviour {
     Controlled {
         translucent: bool,
     },
+    RisingSpore,
     Mod {
         size: [f32; 2],
         alpha: [f32; 2],
@@ -380,6 +381,7 @@ enum ModAnimation {
 #[serde(default, deny_unknown_fields)]
 struct ModBehaviour {
     falling_petal: bool,
+    rising_spore: Option<f32>,
     velocity: Option<[f64; 3]>,
     /// Random extra velocity, each axis uniform in `-jitter..=jitter`.
     velocity_jitter: Option<[f64; 3]>,
@@ -396,8 +398,11 @@ impl ModBehaviour {
     fn parse(json: &serde_json::Value) -> Option<Self> {
         let behaviour: Self = serde_json::from_value(json.clone()).ok()?;
         if behaviour
-            .velocity
-            .is_some_and(|v| v.iter().any(|c| !c.is_finite() || c.abs() > 16.0))
+            .rising_spore
+            .is_some_and(|size| !(0.0..=16.0).contains(&size))
+            || behaviour
+                .velocity
+                .is_some_and(|v| v.iter().any(|c| !c.is_finite() || c.abs() > 16.0))
             || behaviour
                 .velocity_jitter
                 .is_some_and(|v| v.iter().any(|c| !(0.0..=16.0).contains(c)))
@@ -428,6 +433,21 @@ impl ModBehaviour {
     /// `spawn` is the velocity the spawn call passed; a declared velocity is added to it,
     /// with the jitter drawn from `random`.
     fn apply(self, particle: &mut Particle, spawn: [f64; 3], random: &mut LegacyRandom) {
+        if let Some(size) = self.rising_spore {
+            particle.size = size * (0.75 + random.next_float() * 0.5);
+            particle.set_size(size, size);
+            particle.lifetime = 25 + random.next_int_bound(20).unwrap_or(0);
+            particle.velocity = [
+                spawn[0] + f64::from(random.next_float() - 0.5) * 0.03,
+                spawn[1],
+                spawn[2] + f64::from(random.next_float() - 0.5) * 0.03,
+            ];
+            particle.friction = 0.96;
+            particle.free_move = true;
+            particle.light = Light::FullBright;
+            particle.behaviour = Behaviour::RisingSpore;
+            return;
+        }
         if self.falling_petal {
             let size = if random.next_boolean() { 0.075 } else { 0.1 };
             let angle = f64::from(random.next_float() * 60.0).to_radians();
@@ -3863,6 +3883,11 @@ impl ParticleEngine {
                 p.rgba[3] = mod_curve(alpha, p.age, p.lifetime);
                 self.sprite_from_age(p);
             }
+            Behaviour::RisingSpore => {
+                p.base_tick(level);
+                p.rgba[3] = 1.0 - (p.age - p.lifetime / 2).max(0) as f32 / p.lifetime as f32;
+                self.sprite_from_age(p);
+            }
             Behaviour::Animated => {
                 p.base_tick(level);
                 self.sprite_from_age(p);
@@ -4775,6 +4800,7 @@ impl ParticleEngine {
                     self.rects.get(*i as usize).copied().flatten(),
                     p.ty.translucent_layer()
                         || matches!(p.behaviour, Behaviour::Controlled { translucent: true })
+                        || matches!(p.behaviour, Behaviour::RisingSpore)
                         || matches!(p.behaviour, Behaviour::Mod { alpha, .. } if alpha != [1.0; 2]),
                 ),
                 Sprite::Named(name) => match self.atlas.get(name) {

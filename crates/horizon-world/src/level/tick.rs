@@ -333,6 +333,15 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         let p = b.props;
         let block = b.block(state);
         let data = b.data(state);
+        match b.table.name(state) {
+            "horizon_gensokyo_legacy:demonic_miasma_mushroom" => self.emit_miasma(pos, 3),
+            "horizon_gensokyo_legacy:demonic_miasma_mushroom_block" => self.emit_miasma(pos, 6),
+            "horizon_gensokyo_legacy:miasma_air" => {
+                self.tick_miasma(pos, state);
+                return;
+            }
+            _ => {}
+        }
         let chain = &data.chain;
         for class in chain.iter().copied() {
             match class {
@@ -562,6 +571,80 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             || b.liquid(state)
             || b.is_replaceable(state)
     }
+    fn miasma_intensity(&self, state: BlockStateId) -> i32 {
+        let b = self.b;
+        b.table.int(state, b.props.intensity)
+    }
+
+    fn set_miasma_intensity(&mut self, pos: BlockPos, state: BlockStateId, intensity: i32) {
+        let b = self.b;
+        self.set_block_and_update(pos, b.table.set_int(state, b.props.intensity, intensity));
+    }
+
+    fn emit_miasma(&mut self, pos: BlockPos, limit: i32) {
+        for direction in Direction::ALL {
+            let chance = match direction {
+                Direction::Down => 1.0,
+                Direction::Up => 0.1,
+                _ => 0.3,
+            };
+            self.spread_miasma(rel(pos, direction), limit, chance);
+        }
+    }
+
+    fn tick_miasma(&mut self, pos: BlockPos, state: BlockStateId) {
+        let b = self.b;
+        let intensity = self.miasma_intensity(state);
+        let sustained = Direction::ALL.into_iter().any(|direction| {
+            let neighbor = self.state(rel(pos, direction));
+            match b.table.name(neighbor) {
+                "horizon_gensokyo_legacy:demonic_miasma_mushroom" => intensity <= 3,
+                "horizon_gensokyo_legacy:demonic_miasma_mushroom_block" => intensity <= 6,
+                "horizon_gensokyo_legacy:miasma_air" => {
+                    let loss = match direction {
+                        Direction::Up => 0,
+                        Direction::Down => 2,
+                        _ => 1,
+                    };
+                    self.miasma_intensity(neighbor) >= intensity + loss
+                }
+                _ => false,
+            }
+        });
+        if !sustained {
+            if intensity <= 1 {
+                self.remove_block(pos, false);
+            } else {
+                self.set_miasma_intensity(pos, state, intensity - 1);
+            }
+            return;
+        }
+        self.spread_miasma(below(pos), intensity, 1.0);
+        for direction in HORIZONTAL {
+            self.spread_miasma(rel(pos, direction), intensity - 1, 0.3);
+        }
+        self.spread_miasma(above(pos), intensity - 2, 0.1);
+    }
+
+    fn spread_miasma(&mut self, pos: BlockPos, limit: i32, chance: f32) {
+        let b = self.b;
+        if limit < 1 || self.random().next_float() >= chance {
+            return;
+        }
+        let Some(cloud) = b.table.block_by_name("horizon_gensokyo_legacy:miasma_air") else {
+            return;
+        };
+        let state = self.state(pos);
+        if b.is_block(state, cloud) {
+            let intensity = self.miasma_intensity(state);
+            if intensity < limit {
+                self.set_miasma_intensity(pos, state, intensity + 1);
+            }
+        } else if b.is_air(state) {
+            self.set_miasma_intensity(pos, b.default_of(cloud), 1);
+        }
+    }
+
     // Gensokyo Legacy checks up to eight blocks beneath the canopy for a carpet or a surface.
     fn accumulate_sakura_leaves(&mut self, mut pos: BlockPos, carpet: super::states::BlockId) {
         let b = self.b;
