@@ -2,7 +2,7 @@
 use super::{Game, Hit};
 use horizon_assets::item_model::DisplayContext;
 use horizon_client::{
-    collisions::SceneCollisions,
+    collisions::{SceneCollisions, no_collision_empty},
     effects::EffectInstance,
     items::ItemStack,
     mobs::{
@@ -54,7 +54,7 @@ impl Game<'_> {
             Vec3::new(x - 0.45, y, z - 0.45),
             Vec3::new(x + 0.45, y + height, z + 0.45),
         );
-        let scene = SceneCollisions {
+        let mut scene = SceneCollisions {
             world: &self.world,
             binding: self.collision,
             subject: None,
@@ -63,7 +63,7 @@ impl Game<'_> {
             .chunks
             .get(&((x.floor() as i32) >> 4, (z.floor() as i32) >> 4))
             .is_some()
-            && scene.cells_without_collision(bounds)
+            && no_collision_empty(&mut scene, bounds)
     }
 
     fn place_broom_at(&mut self, mut stack: ItemStack, position: Vec3, rack: bool) -> bool {
