@@ -11077,7 +11077,9 @@ impl Game<'_> {
         } else {
             self.clock.camera_fraction()
         };
-        self.player_model_geometry(camera, player_alpha, &mut out);
+        if !self.magic_is_bat() || !self.camera_type.first_person() {
+            self.player_model_geometry(camera, player_alpha, &mut out);
+        }
         // A native pack has no per-entity draws to hide it with: its shadow pass alone gets
         // the first-person model.
         if self.pack_ids.is_none() && !self.own_body_in_view() {

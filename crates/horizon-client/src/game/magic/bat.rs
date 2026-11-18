@@ -35,7 +35,7 @@ pub(super) struct BatForm {
 #[derive(Default)]
 pub(super) struct BatVisuals {
     forms: BTreeMap<u128, [u8; 3]>,
-    viewers: Vec<u128>,
+    viewers: Vec<(u32, u128)>,
     model: RefCell<Option<Mob>>,
 }
 
@@ -271,7 +271,7 @@ impl Game<'_> {
             .guests
             .iter()
             .filter(|g| g.placed)
-            .map(|g| g.uuid)
+            .map(|g| (g.conn, g.uuid))
             .collect::<Vec<_>>();
         if self.magic.bat_visuals.forms == forms && self.magic.bat_visuals.viewers == viewers {
             return;
@@ -281,7 +281,7 @@ impl Game<'_> {
             .flat_map(|(uuid, tint)| uuid.to_be_bytes().into_iter().chain(*tint))
             .collect::<Vec<_>>();
         let mut sent = true;
-        for &viewer in &viewers {
+        for &(_, viewer) in &viewers {
             sent &= self
                 .native_net_send_to_player(viewer, CHANNEL, &data)
                 .is_ok();

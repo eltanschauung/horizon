@@ -254,6 +254,8 @@ impl Game<'_> {
                 .flatten()
         });
         let id = character.map(|c| c.id.clone());
+        let starters = (actor.character != id)
+            .then(|| character.map(|c| c.starting_spells.clone()).unwrap_or_default());
         if let Some(form) = actor.bat.take() {
             if form.character == id && self.bat_effect_active(&form) && !self.spectator() {
                 self.bat_apply_body(player);
@@ -263,8 +265,7 @@ impl Game<'_> {
                 self.bat_finish(player, form);
             }
         }
-        if actor.character != id {
-            let spells = character.map(|c| c.starting_spells.clone()).unwrap_or_default();
+        if let Some(spells) = starters {
             let switched = actor.ledger.character.as_ref().is_some_and(|previous| Some(previous) != id.as_ref())
                 || actor.character.as_ref().is_some_and(|previous| Some(previous) != id.as_ref());
             if switched {
