@@ -269,6 +269,37 @@ impl Game<'_> {
         true
     }
 
+    pub(super) fn magic_broom_passives(&mut self, index: usize) {
+        let broom = &self.mobs[index];
+        let Some(variant) = Variant::of(&broom.kind.id) else {
+            return;
+        };
+        let tick = self.world.game_time;
+        if tick % 20 == 0 {
+            if variant.upgraded && !broom.on_ground {
+                self.add_player_effect(
+                    EffectInstance::new("night_vision", 45, 0).with_flags(false, false),
+                );
+            }
+            if variant.family == Family::Tide {
+                self.add_player_effect(
+                    EffectInstance::new("water_breathing", 45, 0).with_flags(false, false),
+                );
+            }
+        }
+        if variant.family == Family::Grove && tick % (if variant.upgraded { 80 } else { 100 }) == 0
+        {
+            self.add_player_effect(
+                EffectInstance::new(
+                    "regeneration",
+                    if variant.upgraded { 45 } else { 35 },
+                    i32::from(variant.upgraded),
+                )
+                .with_flags(false, false),
+            );
+        }
+    }
+
     pub(super) fn use_broom_scroll(&mut self, stack: &ItemStack) -> bool {
         let Some(index) = self.mount_index() else {
             return false;
@@ -291,24 +322,50 @@ impl Game<'_> {
                 -pitch.sin(),
                 yaw.cos() * pitch.cos(),
             );
-            let max = if variant.upgraded { 24 } else { 16 };
-            let mut target = None;
-            for step in 1..=max {
-                let point = at.add_vector(direction.scale(f64::from(step) * 0.5));
-                if !self.broom_space(point, 1.7) {
-                    break;
-                }
-                target = Some(point);
-            }
+            let max = if variant.upgraded { 36 } else { 24 };
+            let target = (4..=max)
+                .rev()
+                .map(|step| at.add_vector(direction.scale(f64::from(step) * 0.5)))
+                .find(|&p| self.broom_space(p, 1.7));
             let Some(target) = target else {
                 self.use_failed = true;
                 return true;
             };
             self.mobs[index].position = target;
             self.mobs[index].previous = target;
-            self.mobs[index].velocity = Vec3::ZERO;
+            self.mobs[index].velocity = direction
+                .scale(if variant.upgraded { 0.38 } else { 0.24 })
+                .add_vector(Vec3::new(
+                    0.0,
+                    if variant.upgraded { 0.08 } else { 0.04 },
+                    0.0,
+                ));
             self.position_rider();
         } else {
+            if variant.family == Family::Lightning {
+                let rays = if variant.upgraded { 7 } else { 3 };
+                for ray in 0..rays {
+                    let angle = std::f64::consts::TAU * f64::from(ray) / f64::from(rays);
+                    let point = [at.x + angle.cos() * 4.6, at.y, at.z + angle.sin() * 4.6];
+                    let pos = point.map(|v| v.floor() as i32);
+                    if self.lightning_strike_allowed(self.lan_acting_uuid, pos, "magic_broom") {
+                        self.spawn_bolt(point, false);
+                        if let Some(bolt) = self.bolts.last_mut() {
+                            bolt.cause = Some(self.lan_acting);
+                        }
+                    }
+                }
+            }
+            if variant.family == Family::Tide {
+                self.add_player_effect(
+                    EffectInstance::new(
+                        "water_breathing",
+                        if variant.upgraded { 520 } else { 360 },
+                        0,
+                    )
+                    .with_flags(false, false),
+                );
+            }
             let (radius, particle) = match variant.family {
                 Family::Fire => (
                     if variant.upgraded { 60.0 } else { 30.0 },
@@ -336,12 +393,22 @@ impl Game<'_> {
                     i32::from(variant.upgraded),
                 ));
             }
+            let yaw = f64::from(self.yaw.to_radians());
+            let forward = Vec3::new(-yaw.sin(), 0.0, yaw.cos());
             for mob in &mut self.mobs {
                 if !mob.alive() || mob.id == id || Variant::of(&mob.kind.id).is_some() {
                     continue;
                 }
                 let delta = mob.position.subtract(at);
-                if delta.length_squared() > radius * radius {
+                let affected = if variant.family == Family::Tide {
+                    let reach = if variant.upgraded { 22.0 } else { 16.0 };
+                    let along = delta.x * forward.x + delta.z * forward.z;
+                    let cross = delta.x * forward.z - delta.z * forward.x;
+                    (0.0..=reach).contains(&along) && cross.abs() <= 4.0 && delta.y.abs() <= 3.0
+                } else {
+                    delta.length_squared() <= radius * radius
+                };
+                if !affected {
                     continue;
                 }
                 match variant.family {
@@ -354,13 +421,11 @@ impl Game<'_> {
                         );
                     }
                     Family::Ice => {
-                        mob.add_effect("slowness", 100, if variant.upgraded { 2 } else { 1 });
-                    }
-                    Family::Lightning => {
                         mob.damage(
-                            if variant.upgraded { 8.0 } else { 5.0 },
+                            if variant.upgraded { 3.0 } else { 2.0 },
                             Damage::of(DamageKind::Magic),
                         );
+                        mob.add_effect("slowness", 100, if variant.upgraded { 2 } else { 1 });
                     }
                     Family::Grove if mob.hostile() => {
                         mob.add_effect("slowness", 60, 0);
@@ -369,7 +434,7 @@ impl Game<'_> {
                     Family::Tide => {
                         mob.velocity = mob
                             .velocity
-                            .add_vector(delta.normalize().scale(0.65))
+                            .add_vector(forward.scale(0.65))
                             .add_vector(Vec3::new(0.0, 0.25, 0.0));
                         mob.damage(
                             if variant.upgraded { 5.0 } else { 3.0 },
@@ -423,9 +488,12 @@ impl Game<'_> {
             .previous
             .add_vector(mob.position.subtract(mob.previous).scale(alpha));
         let relative = (glam::DVec3::new(p.x, p.y, p.z) - camera).as_vec3();
+        let yaw = mob.yaw.to_radians();
+        let lateral = mob.velocity.x * f64::from(yaw.cos()) + mob.velocity.z * f64::from(yaw.sin());
         let pose = glam::Mat4::from_translation(relative)
             * glam::Mat4::from_rotation_y(-(mob.yaw + 180.0).to_radians())
-            * glam::Mat4::from_rotation_x(mob.head_pitch.clamp(-19.0, 19.0).to_radians());
+            * glam::Mat4::from_rotation_x(mob.head_pitch.clamp(-19.0, 19.0).to_radians())
+            * glam::Mat4::from_rotation_z((lateral as f32 * 1.05).clamp(-0.36, 0.36));
         self.submit_item_world(&model, pose, packed, out);
         true
     }

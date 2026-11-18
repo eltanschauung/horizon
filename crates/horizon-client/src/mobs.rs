@@ -1141,6 +1141,9 @@ pub struct Extra {
     /// `Parrot.partyParrot` and `jukebox`: the playing jukebox it dances to.
     pub party_jukebox: Option<[i32; 3]>,
     /// The owner's UUID (tamed animals).
+    /// Ender Broom dash state. A parked broom clears the input edge.
+    pub broom_dash_cooldown: u8,
+    pub broom_was_ascending: bool,
     pub owner: Option<[i32; 4]>,
     /// Slime/magma cube size (0 = not sized).
     pub size: i32,

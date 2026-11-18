@@ -510,6 +510,7 @@ impl Game<'_> {
             self.dismount_mount();
             return true;
         }
+        self.magic_broom_passives(i);
         let strafe = f32::from(u8::from(keys.left)) - f32::from(u8::from(keys.right));
         let forward = f32::from(u8::from(keys.forward)) - f32::from(u8::from(keys.backward));
         // LocalPlayer.aiStep: the riding jump charges while space is held.

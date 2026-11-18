@@ -79,7 +79,8 @@ pub(super) fn tick(
     if !mob.alive() || mob.removed {
         return false;
     }
-    mob.age += 1;
+    mob.age = mob.age.saturating_add(1);
+    mob.extra.broom_dash_cooldown = mob.extra.broom_dash_cooldown.saturating_sub(1);
     mob.previous = mob.position;
     mob.previous_yaw = mob.yaw;
     mob.previous_body_yaw = mob.body_yaw;
@@ -108,7 +109,7 @@ pub(super) fn tick(
             .add_vector(left.scale(f64::from(rider.strafe) * 0.72));
         let strength = wish.length().min(1.0);
         let current = mob.velocity;
-        let water = variant.family == Family::Tide && mob.fluids.in_water;
+        let water = variant.family == Family::Tide && w.fluids(mob.bounds(), mob.eye_y()).in_water;
         let mut speed = variant.cruise();
         if water {
             speed *= if variant.upgraded { 1.32 } else { 1.22 };
@@ -152,6 +153,26 @@ pub(super) fn tick(
             y = y.max(if variant.upgraded { 0.1305 } else { 0.1125 });
         }
         mob.velocity = Vec3::new(horizontal.x, y, horizontal.z);
+        if variant.family == Family::Ender
+            && rider.jumping
+            && !mob.extra.broom_was_ascending
+            && !mob.on_ground
+            && mob.extra.broom_dash_cooldown == 0
+        {
+            let dash_direction = if strength > 0.0001 {
+                wish.normalize()
+            } else {
+                forward
+            };
+            let thrust = if variant.upgraded { 0.855 } else { 0.648 };
+            let lift = if variant.upgraded { 0.198 } else { 0.162 };
+            mob.velocity = mob
+                .velocity
+                .add_vector(dash_direction.scale(thrust))
+                .add_vector(Vec3::new(0.0, lift, 0.0));
+            mob.extra.broom_dash_cooldown = if variant.upgraded { 30 } else { 44 };
+        }
+        mob.extra.broom_was_ascending = rider.jumping;
         let turn = (rider.yaw - mob.yaw + 180.0).rem_euclid(360.0) - 180.0;
         mob.yaw += turn.clamp(-14.0, 14.0);
         mob.body_yaw = mob.yaw;
@@ -179,10 +200,11 @@ pub(super) fn tick(
         // The broom's own movement still owns ground detection.
         mob.velocity.x = safe.x;
         mob.velocity.z = safe.z;
-        if y > 0.0 {
+        if mob.velocity.y > 0.0 {
             mob.velocity.y = safe.y;
         }
     } else {
+        mob.extra.broom_was_ascending = false;
         mob.velocity.x *= 0.65;
         mob.velocity.y = (mob.velocity.y - 0.05).max(-0.55);
         mob.velocity.z *= 0.65;
