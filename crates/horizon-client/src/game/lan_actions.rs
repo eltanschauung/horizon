@@ -2043,7 +2043,7 @@ impl Game<'_> {
         self.as_guest(host, conn, |g| {
             g.native_player_toggle_flight(uuid, &name, flying, &mut cancel);
         });
-        if !cancel {
+        if !cancel && (flying || self.magic_bat_tint(uuid).is_none()) {
             return;
         }
         if let Some(g) = host.hub.guest_mut(conn) {

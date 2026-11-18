@@ -1160,6 +1160,9 @@ impl MotionWorld<'_, '_, '_> {
         if self.player.spectator {
             self.player.flying = true;
             self.player.ground.on_ground = false;
+        } else if self.player.form_dimensions.is_some() {
+            // Bat form flies on contact with the ground as well as in the air.
+            self.player.flying = true;
         } else if self.player.may_fly && !was_jumping && jumping && !self.player.was_auto_jump {
             // `LocalPlayer.aiStep`: mayfly gates the flight toggle, not the
             // flying state independently supplied by the server's abilities.
@@ -1266,7 +1269,10 @@ impl MotionWorld<'_, '_, '_> {
         }
         if self.player.flying {
             self.player.fall_distance = 0.0;
-            if self.player.ground.on_ground && !self.player.spectator {
+            if self.player.ground.on_ground
+                && !self.player.spectator
+                && self.player.form_dimensions.is_none()
+            {
                 self.player.flying = false;
             }
         }
