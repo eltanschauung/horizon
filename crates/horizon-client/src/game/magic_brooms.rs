@@ -7,7 +7,7 @@ use horizon_client::{
     items::ItemStack,
     mobs::{
         Damage, DamageKind, Mob,
-        magic_brooms::{Family, NAMESPACE, Variant},
+        magic_brooms::{Family, NAMESPACE, Variant, rack_facing, rack_marker, stored_rack_slot},
     },
     particles::{ParticleOptions, ParticleType},
     text::Text,
@@ -234,32 +234,7 @@ impl Game<'_> {
         let held = self.held().cloned();
         let item = held.as_ref().map_or("", |s| s.item.as_ref());
         if station == "broom_rack" {
-            let position = Vec3::new(
-                f64::from(x) + 0.5,
-                f64::from(y) + 1.0,
-                f64::from(z)
-                    + if hit.point[2] - f64::from(z) < 0.5 {
-                        0.23
-                    } else {
-                        0.77
-                    },
-            );
-            let occupied = self.mobs.iter().position(|mob| {
-                mob.no_gravity
-                    && !mob.removed
-                    && Variant::of(&mob.kind.id).is_some()
-                    && mob.position.subtract(position).length() < 0.1
-            });
-            if let Some(index) = occupied {
-                if item.is_empty() {
-                    self.recover_magic_broom(index);
-                }
-            } else if let Some(stack) = held
-                && Variant::of(&stack.item).is_some()
-            {
-                self.place_broom_at(stack, position, true);
-            }
-            return true;
+            return self.use_broom_rack(hit, held);
         }
         let stage = state
             .properties
@@ -391,6 +366,63 @@ impl Game<'_> {
             self.broom_station_effect(at, particle, count, sound, pitch);
             self.broom_notice(notice);
             self.swing_arm();
+        }
+        true
+    }
+
+    fn use_broom_rack(&mut self, hit: &Hit, held: Option<ItemStack>) -> bool {
+        let pos = hit.pos;
+        let Some(facing) = rack_facing(&self.pack.assets.registry, &self.world, pos) else {
+            return false;
+        };
+        let x = hit.point[0] - f64::from(pos[0]) - 0.5;
+        let z = hit.point[2] - f64::from(pos[2]) - 0.5;
+        let across = match facing {
+            "east" => z,
+            "south" => -x,
+            "west" => -z,
+            _ => x,
+        };
+        let preferred = if across > 0.18 {
+            0
+        } else if across < -0.18 {
+            2
+        } else {
+            1
+        };
+        let mut slots = [None; 3];
+        for (index, mob) in self.mobs.iter().enumerate() {
+            if !mob.removed
+                && mob.alive()
+                && Variant::of(&mob.kind.id).is_some()
+                && let Some((anchor, slot)) = stored_rack_slot(mob)
+                && anchor == pos
+            {
+                slots[slot] = Some(index);
+            }
+        }
+        if let Some(stack) = held {
+            if Variant::of(&stack.item).is_none() {
+                self.broom_notice("Hold a broom or use an empty hand to retrieve one.");
+            } else if let Some(slot) = std::iter::once(preferred)
+                .chain(0..slots.len())
+                .find(|&slot| slots[slot].is_none())
+            {
+                if self.place_broom_at(stack, rack_marker(pos, slot), true) {
+                    self.broom_notice("Broom placed on the rack.");
+                } else {
+                    self.broom_notice("The broom could not be placed.");
+                }
+            } else {
+                self.broom_notice("The rack is full.");
+            }
+        } else if let Some(index) =
+            slots[preferred].or_else(|| slots.into_iter().rev().flatten().next())
+        {
+            self.recover_magic_broom(index);
+            self.broom_notice("Broom recovered.");
+        } else {
+            self.broom_notice("That rack slot is empty.");
         }
         true
     }
@@ -643,7 +675,34 @@ impl Game<'_> {
         if Variant::of(&mob.kind.id).is_none() {
             return false;
         }
-        let stack = ItemStack::new(&mob.kind.id, 1);
+        let mut stack = ItemStack::new(&mob.kind.id, 1);
+        if let Some((pos, slot)) = stored_rack_slot(mob)
+            && let Some(facing) = rack_facing(&self.pack.assets.registry, &self.world, pos)
+        {
+            let id = format!("{}_rack", mob.kind.id);
+            stack.data_mut().set_other(
+                "minecraft:item_model",
+                Some(horizon_world::nbt::Tag::String(id.as_str().into())),
+            );
+            let model = self.resolve_item(&stack, DisplayContext::Fixed, None, mob.id as i32);
+            let local_x = (slot as f64 - 1.0) * 0.625;
+            let local_z = -0.06;
+            let (x, z, yaw): (_, _, f32) = match facing {
+                "north" => (-local_x, -local_z, 180.0),
+                "east" => (local_z, -local_x, -90.0),
+                "west" => (-local_z, local_x, 90.0),
+                _ => (local_x, local_z, 0.0),
+            };
+            let at = glam::DVec3::new(
+                f64::from(pos[0]) + 0.5 + x,
+                f64::from(pos[1]) + 1.29,
+                f64::from(pos[2]) + 0.5 + z,
+            );
+            let pose = glam::Mat4::from_translation((at - camera).as_vec3())
+                * glam::Mat4::from_rotation_y(yaw.to_radians());
+            self.submit_item_world(&model, pose, packed, out);
+            return true;
+        }
         let model = self.resolve_item(&stack, DisplayContext::Fixed, None, mob.id as i32);
         let p = mob
             .previous

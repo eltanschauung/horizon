@@ -522,6 +522,11 @@ pub(super) fn mob_meta(
     if shared != 0 {
         meta.push((0, serializer::BYTE, Value::Byte(shared)));
     }
+    // Entity.DATA_NO_GRAVITY_ID also distinguishes parked brooms on clients.
+    if m.no_gravity {
+        meta.push((5, serializer::BOOLEAN, Value::Bool(true)));
+    }
+    defaults.push((5, serializer::BOOLEAN, Value::Bool(false)));
     // Entity.DATA_POSE: the pose the species keeps in its own fields (a
     // pose back at standing goes out by the entity's own default).
     let pose = horizon_client::mobs::sync::pose_id(m);

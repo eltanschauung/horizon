@@ -2,10 +2,46 @@
 use super::{Mob, MobEvent, MobWorld};
 use crate::collisions::SceneCollisions;
 use horizon_core::geometry::{Aabb, Vec3};
+use horizon_world::registry::BlockRegistry;
 
 pub const NAMESPACE: &str = "horizon_magic_brooms";
+pub const RACK: &str = "horizon_magic_brooms:broom_rack";
 // The rider's feet anchor is below the broom entity origin and slightly behind it.
 pub const SEAT: [f64; 3] = [0.0, -0.15, -0.1];
+
+// Keep the saved entities inside the rack's central column, including the
+// two offsets used by older versions. The renderer maps them to the slots.
+const RACK_MARKERS: [f64; 3] = [0.23, 0.5, 0.77];
+
+pub fn rack_marker(pos: [i32; 3], slot: usize) -> Vec3 {
+    let [x, y, z] = pos.map(f64::from);
+    Vec3::new(x + 0.5, y + 1.0, z + RACK_MARKERS[slot])
+}
+
+pub fn stored_rack_slot(mob: &Mob) -> Option<([i32; 3], usize)> {
+    if !mob.no_gravity {
+        return None;
+    }
+    let p = mob.position;
+    let pos = [p.x, p.y - 0.1, p.z].map(|v| v.floor() as i32);
+    RACK_MARKERS.iter().enumerate().find_map(|(slot, _)| {
+        (p.subtract(rack_marker(pos, slot)).length_squared() < 0.01).then_some((pos, slot))
+    })
+}
+
+pub fn rack_facing<'a>(
+    registry: &'a BlockRegistry,
+    world: &crate::world::World,
+    [x, y, z]: [i32; 3],
+) -> Option<&'a str> {
+    let state = registry.state(world.block(x, y, z))?;
+    (state.name == RACK).then(|| {
+        state
+            .properties
+            .get("facing")
+            .map_or("north", String::as_str)
+    })
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Family {
@@ -86,21 +122,26 @@ pub(super) fn tick(
     mob.previous_yaw = mob.yaw;
     mob.previous_body_yaw = mob.body_yaw;
 
-    if mob.no_gravity {
-        let p = mob.position;
-        let support = w.world.block(
-            p.x.floor() as i32,
-            (p.y - 0.1).floor() as i32,
-            p.z.floor() as i32,
-        );
-        if w.registry
-            .state(support)
-            .is_some_and(|s| s.name == "horizon_magic_brooms:broom_rack")
-        {
+    if let Some((pos, _)) = stored_rack_slot(mob) {
+        if !w.world.loaded(pos[0], pos[2]) || rack_facing(w.registry, w.world, pos).is_some() {
             return true;
         }
-        mob.no_gravity = false;
+        let stack = mob
+            .extra
+            .main_hand_stack()
+            .cloned()
+            .unwrap_or_else(|| crate::items::ItemStack::new(&mob.kind.id, 1));
+        events.push(MobEvent::ThrowItem {
+            mob: mob.id,
+            stack,
+            at: [mob.position.x, mob.position.y, mob.position.z],
+            motion: [0.0, 0.12, 0.0],
+            pickup_delay: 10,
+        });
+        mob.removed = true;
+        return false;
     }
+    mob.no_gravity = false;
     if let Some(rider) = mob.rider {
         let yaw = f64::from(rider.yaw).to_radians();
         let forward = Vec3::new(-yaw.sin(), 0.0, yaw.cos());

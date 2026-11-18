@@ -56,6 +56,7 @@ fn apply(m: &mut Mob, values: &[(u8, i32, Value)], builtin: &Builtin, local_enti
             // Entity.DATA_SILENT: Entity.isSilent, which keeps the sounds
             // a client plays itself quiet (LivingEntity.breakItem's).
             (4, Value::Bool(silent)) => m.silent = *silent,
+            (5, Value::Bool(no_gravity)) => m.no_gravity = *no_gravity,
             // Entity.DATA_POSE: the pose the species animates by.
             (6, Value::Id(pose)) => sync::set_pose(m, (*pose).clamp(0, 17) as u8),
             // LivingEntity.DATA_LIVING_ENTITY_FLAGS: using an item 1, in the
