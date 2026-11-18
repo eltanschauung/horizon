@@ -214,6 +214,7 @@ mod loom;
 mod mace;
 mod machines;
 mod magic;
+mod magic_brooms;
 mod maps;
 mod memory;
 mod miasma;
@@ -6997,6 +6998,12 @@ impl Game<'_> {
                 return Ok(true);
             }
         }
+        if let Some(hit) = block_hit
+            && self.use_broom_station(hit)
+        {
+            self.process_level_events()?;
+            return Ok(true);
+        }
         // MultiPlayerGameMode.useItemOn: blocks react first.
         let block_phase = horizon_client::spans::guard("use_block");
         if !(sneaking && hands_full)
@@ -7219,6 +7226,9 @@ impl Game<'_> {
         }
         if claimed {
             self.swing_arm();
+            return Ok(true);
+        }
+        if !on_block && (self.use_broom_scroll(&stack) || self.use_magic_broom(&stack)) {
             return Ok(true);
         }
         // ItemStack.useOn: after the block's own useItemOn/useWithoutItem

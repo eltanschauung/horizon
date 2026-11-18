@@ -547,7 +547,8 @@ impl Game<'_> {
             jumping: keys.jump,
             // A server's player (a LAN guest, single player's window) drives
             // a horse from its own client (`handleMoveVehicle`).
-            client: self.lan_acting.is_some(),
+            client: self.lan_acting.is_some()
+                && horizon_client::mobs::magic_brooms::Variant::of(&m.kind.id).is_none(),
         });
         true
     }
@@ -574,7 +575,12 @@ impl Game<'_> {
             return;
         };
         let m = &self.mobs[i];
-        let mut at = Vec3::new(m.position.x, m.position.y + seat(m.species()), m.position.z);
+        let height = if horizon_client::mobs::magic_brooms::Variant::of(&m.kind.id).is_some() {
+            horizon_client::mobs::magic_brooms::SEAT
+        } else {
+            seat(m.species())
+        };
+        let mut at = Vec3::new(m.position.x, m.position.y + height, m.position.z);
         if horizon_client::mobs::camel::is_camel(m.species()) {
             // Camel.getPassengerAttachmentPoint: the driver half a block
             // forward, at the body anchor (lower while sitting), turned with

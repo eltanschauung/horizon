@@ -908,7 +908,9 @@ impl Game<'_> {
     pub(super) fn mob_world_base<'s>(&'s self, others: &'s [Seen]) -> MobWorld<'s> {
         let (rain, thunder) = self.weather_levels(1.0);
         let weather = self.can_have_weather();
-        let player = self.player_view().filter(|p| self.player_sensory_visible(horizon_client::lan::playerdata::ints_uuid(p.uuid)));
+        let player = self.player_view().filter(|p| {
+            self.player_sensory_visible(horizon_client::lan::playerdata::ints_uuid(p.uuid))
+        });
         MobWorld {
             world: &self.world,
             registry: self.pack.assets.registry,
@@ -1105,7 +1107,9 @@ impl Game<'_> {
         let ticking = self.entity_ticking_area();
         // With guests on, each mob sees its nearest player (game/lan_mobs.rs).
         let mut guests = self.lan_guest_views();
-        guests.retain(|(_, view)| self.player_sensory_visible(horizon_client::lan::playerdata::ints_uuid(view.uuid)));
+        guests.retain(|(_, view)| {
+            self.player_sensory_visible(horizon_client::lan::playerdata::ints_uuid(view.uuid))
+        });
         // What stands in a guest's slot while a mob holds that guest's view for
         // its tick (see `lent` below).
         let mut spare = guests.first().map(|g| g.1.clone());
@@ -5950,6 +5954,9 @@ impl Game<'_> {
         let Some(index) = self.mob_interaction_target(target) else {
             return Ok(false);
         };
+        if self.interact_magic_broom(index) {
+            return Ok(true);
+        }
         // PlayerInteractTrigger: the name tag as it was before it named the mob.
         let used = self.held().cloned();
         if self.name_mob(index) {
@@ -7508,10 +7515,19 @@ impl Game<'_> {
             if culling.hides_entity() {
                 continue;
             }
-            let opacity = if is_player { self.player_presentation_opacity(mob, camera).clamp(0.0, 1.0) } else { 1.0 };
+            let opacity = if is_player {
+                self.player_presentation_opacity(mob, camera)
+                    .clamp(0.0, 1.0)
+            } else {
+                1.0
+            };
             let entity_start = out.len();
             self.mark_motion(entity_start, (1 << 32) | u64::from(mob.id));
-            if opacity < 1.0 { self.mark_translucent_entity(entity_start, &mob.kind.id); } else { self.mark_entity(entity_start, &mob.kind.id); }
+            if opacity < 1.0 {
+                self.mark_translucent_entity(entity_start, &mob.kind.id);
+            } else {
+                self.mark_entity(entity_start, &mob.kind.id);
+            }
             self.rendered_mobs.set(self.rendered_mobs.get() + 1);
             // `EntityRenderer.getPackedLightCoords`: the block the mob's light
             // probe (its eye) is in, at the position this frame draws rather
@@ -7533,6 +7549,9 @@ impl Game<'_> {
                 )
             {
                 packed = (packed & 0xFF) | ((15 * 16) << 8);
+            }
+            if self.draw_magic_broom(mob, camera, alpha, packed, out) {
+                continue;
             }
             // GlowSquidRenderer.getBlockLightLevel: the body brightens as the
             // dark ticks run out (the block light is the second byte).
@@ -7699,7 +7718,8 @@ impl Game<'_> {
             // CustomHeadLayer (a pumpkin, skull or head item) included.
             if layers {
                 // Held items join the GPU path's draws, their silhouette too.
-                let skin = (skinning && silhouette_on_gpu && opacity == 1.0).then_some(&mut skinned);
+                let skin =
+                    (skinning && silhouette_on_gpu && opacity == 1.0).then_some(&mut skinned);
                 self.mob_block_geometry(mob, camera, alpha, packed, skin, out);
                 // `native_mob_layer`: a native mod's layer, over the vanilla ones.
                 self.mod_mob_layer_geometry(mob, who, alpha as f32, camera, packed, out);

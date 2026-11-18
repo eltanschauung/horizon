@@ -56,6 +56,7 @@ pub mod landing;
 pub mod leash;
 pub mod living;
 pub mod llama;
+pub mod magic_brooms;
 pub mod model_layers;
 pub mod monster_brain;
 pub mod nautilus;
@@ -607,15 +608,28 @@ impl MobTypes {
             }
             let category = t["category"].as_str().unwrap_or("creature").to_owned();
             let speed = attr("movement_speed").unwrap_or(0.25);
+            let broom = magic_brooms::Variant::of(&id).is_some();
             let flags = def.flags(t["fire_immune"].as_bool().unwrap_or(false));
             out.insert(
                 id.clone(),
                 MobType {
                     species: def.species,
                     item_stack_limits: item_stack_limits.clone(),
-                    width: t["width"].as_f64().unwrap_or(0.6),
-                    height: t["height"].as_f64().unwrap_or(1.8),
-                    eye_height: t["eye_height"].as_f64().unwrap_or(1.6),
+                    width: if broom {
+                        0.9
+                    } else {
+                        t["width"].as_f64().unwrap_or(0.6)
+                    },
+                    height: if broom {
+                        0.45
+                    } else {
+                        t["height"].as_f64().unwrap_or(1.8)
+                    },
+                    eye_height: if broom {
+                        0.25
+                    } else {
+                        t["eye_height"].as_f64().unwrap_or(1.6)
+                    },
                     max_health: attr("max_health").unwrap_or(10.0) as f32,
                     speed,
                     flying_speed: attr("flying_speed").unwrap_or(0.4),
@@ -3527,6 +3541,9 @@ impl Mob {
         armor_effectiveness: Option<&mut dyn FnMut(f32) -> f32>,
         player_uuid: Option<[i32; 4]>,
     ) -> bool {
+        if magic_brooms::Variant::of(&self.kind.id).is_some() {
+            return false;
+        }
         axolotl::before_damage(self, amount, &source);
         raider::note_hurt(self);
         // SulfurCube.hurtServer: the priming and a block's immune knockback
@@ -3960,6 +3977,9 @@ impl Mob {
         events: &mut Vec<MobEvent>,
     ) -> bool {
         self.track_section();
+        if let Some(variant) = magic_brooms::Variant::of(&self.kind.id) {
+            return magic_brooms::tick(self, w, events, variant);
+        }
         // LivingEntity.tick: CombatTracker.recheckStatus.
         let alive = self.alive();
         self.combat.recheck(alive, self.age);
