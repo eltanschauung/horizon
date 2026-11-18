@@ -4,7 +4,8 @@ use crate::collisions::SceneCollisions;
 use horizon_core::geometry::{Aabb, Vec3};
 
 pub const NAMESPACE: &str = "horizon_magic_brooms";
-pub const SEAT: f64 = 0.23;
+// The rider's feet anchor is below the broom entity origin and slightly behind it.
+pub const SEAT: [f64; 3] = [0.0, -0.15, -0.1];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Family {

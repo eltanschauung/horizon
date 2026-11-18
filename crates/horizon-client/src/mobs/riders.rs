@@ -31,7 +31,7 @@ fn avatar(m: &Mob) -> bool {
 /// scale (`getDimensions` scales the attachments with the box).
 pub fn passenger_attachment(v: &Mob) -> [f64; 3] {
     if super::magic_brooms::Variant::of(&v.kind.id).is_some() {
-        return [0.0, super::magic_brooms::SEAT, 0.0];
+        return super::magic_brooms::SEAT;
     }
     let [x, y, z] = base_attachment(v);
     let s = scale(v);

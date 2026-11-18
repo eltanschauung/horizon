@@ -576,12 +576,16 @@ impl Game<'_> {
             return;
         };
         let m = &self.mobs[i];
-        let height = if horizon_client::mobs::magic_brooms::Variant::of(&m.kind.id).is_some() {
-            horizon_client::mobs::magic_brooms::SEAT
+        let mut at = if horizon_client::mobs::magic_brooms::Variant::of(&m.kind.id).is_some() {
+            horizon_client::mobs::riders::seat(
+                horizon_client::mobs::riders::passenger_attachment(m),
+                0.0,
+                m.position,
+                m.yaw,
+            )
         } else {
-            seat(m.species())
+            Vec3::new(m.position.x, m.position.y + seat(m.species()), m.position.z)
         };
-        let mut at = Vec3::new(m.position.x, m.position.y + height, m.position.z);
         if horizon_client::mobs::camel::is_camel(m.species()) {
             // Camel.getPassengerAttachmentPoint: the driver half a block
             // forward, at the body anchor (lower while sitting), turned with
