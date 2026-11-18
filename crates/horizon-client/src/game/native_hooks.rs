@@ -3276,10 +3276,10 @@ impl Game<'_> {
     /// their labels when it is yours. Asked again each time the page opens
     /// and after each click.
     pub(super) fn native_settings(&mut self, mod_id: &str, buttons: &mut Vec<String>) {
-        if mod_id == "biomesoplenty" {
+        if let Some(menu) = horizon_world::worldgen::placement_config_menu::PlacementMenu::for_mod(mod_id) {
             match Self::native_config_dir() {
                 Ok(root) => buttons.extend(
-                    horizon_world::worldgen::placement_config_menu::buttons(&root),
+                    horizon_world::worldgen::placement_config_menu::buttons(&root, menu),
                 ),
                 Err(e) => buttons.push("Cannot open configuration: ".to_owned() + &e.to_string()),
             }
@@ -3288,9 +3288,9 @@ impl Game<'_> {
     }
     /// Button `button` of mod `mod_id`'s settings page was clicked.
     pub(super) fn native_settings_click(&mut self, mod_id: &str, button: usize) {
-        if mod_id == "biomesoplenty" {
+        if let Some(menu) = horizon_world::worldgen::placement_config_menu::PlacementMenu::for_mod(mod_id) {
             if let Ok(root) = Self::native_config_dir() {
-                horizon_world::worldgen::placement_config_menu::click(&root, button);
+                horizon_world::worldgen::placement_config_menu::click(&root, menu, button);
             }
         }
         mod_api::dispatch_settings_click(self, mod_api::mods(), mod_id, button);

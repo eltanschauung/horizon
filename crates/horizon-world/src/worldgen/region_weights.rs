@@ -41,6 +41,7 @@ impl Random {
 pub struct RegionWeights {
     tiered: Option<(i64, u32)>,
     weights: Vec<u32>,
+    scaled: Vec<(usize, f64)>,
     total: i32,
     seeds: Vec<i64>,
     cache: Vec<HashMap<[i32; 2], usize>>,
@@ -59,6 +60,7 @@ impl RegionWeights {
         Ok(Self {
             tiered: None,
             weights,
+            scaled: Vec::new(),
             total: total as i32,
             seeds,
             cache,
@@ -71,6 +73,16 @@ impl RegionWeights {
         }
         self
     }
+    pub(super) fn with_scales(mut self, scales: &[f64]) -> Self {
+        self.scaled = scales
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|&(index, scale)| scale > 1.0 && self.weights[index] != 0)
+            .collect();
+        self
+    }
+
     pub fn sample(&mut self, x: i32, z: i32) -> usize {
         if let Some((seed, minimum)) = self.tiered {
             return self.tiered_sample(seed, minimum, x, z);
@@ -99,7 +111,15 @@ impl RegionWeights {
             i64::from(z) + warp(0x57415251),
         );
         let mut remaining = self.total as u64;
-        for (index, &weight) in self.weights.iter().enumerate() {
+        // Scaled pools roll first so they form contiguous regions even if they
+        // would otherwise be the fallback. Conditional weights preserve their odds.
+        let order = self.scaled.iter().copied().chain(
+            (0..self.weights.len())
+                .filter(|index| !self.scaled.iter().any(|&(scaled, _)| scaled == *index))
+                .map(|index| (index, 1.0)),
+        );
+        for (index, scale) in order {
+            let weight = self.weights[index];
             if weight == 0 {
                 continue;
             }
@@ -114,6 +134,7 @@ impl RegionWeights {
                 2 => i64::from(minimum) * 8 / 3,
                 _ => i64::from(minimum) * 2,
             };
+            let size = (size as f64 * scale).round() as i64;
             let hash = coordinate_hash(
                 seed,
                 index as u64 + 0x54494552,
@@ -268,6 +289,43 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn scaling_a_fallback_pool_broadens_it_without_changing_its_weight() {
+        let weights = vec![40, 32, 8, 4, 1, 16];
+        let mut original = RegionWeights::new(456, weights.clone(), 3)
+            .unwrap()
+            .with_min_quarts(456, 192);
+        let mut defaults = RegionWeights::new(456, weights.clone(), 3)
+            .unwrap()
+            .with_min_quarts(456, 192)
+            .with_scales(&[1.0; 6]);
+        let mut larger = RegionWeights::new(456, weights, 3)
+            .unwrap()
+            .with_min_quarts(456, 192)
+            .with_scales(&[1.0, 1.0, 1.0, 1.0, 1.0, 2.0]);
+        let mut coverage = [0; 2];
+        let mut edges = [0; 2];
+        for z in -128..128 {
+            let mut previous = [false; 2];
+            for x in -1024..1024 {
+                let (xq, zq) = (x * 64, z * 379);
+                let id = original.sample(xq, zq);
+                assert_eq!(id, defaults.sample(xq, zq));
+                let present = [id == 5, larger.sample(xq, zq) == 5];
+                for i in 0..2 {
+                    coverage[i] += usize::from(present[i]);
+                    edges[i] += usize::from(present[i] != previous[i]);
+                }
+                previous = present;
+            }
+        }
+        let expected = 16.0 / 101.0;
+        for count in coverage {
+            assert!((count as f64 / (256.0 * 2048.0) - expected).abs() < 0.02);
+        }
+        assert!(edges[1] < edges[0] * 3 / 4, "{edges:?}");
+    }
+
     #[test]
     fn java_layer_oracle_vectors() {
         let mut previous = None;

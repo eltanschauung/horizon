@@ -9,7 +9,7 @@ use std::{
 fn error(message: impl Into<String>) -> DecodeError {
     DecodeError::Registry(message.into())
 }
-fn set(table: &mut toml::Table, key: &str, value: i64) -> Result<(), DecodeError> {
+fn set(table: &mut toml::Table, key: &str, value: toml::Value) -> Result<(), DecodeError> {
     let mut parts = key.split('.').peekable();
     let mut at = table;
     while let Some(part) = parts.next() {
@@ -17,7 +17,7 @@ fn set(table: &mut toml::Table, key: &str, value: i64) -> Result<(), DecodeError
             return Err(error("invalid configuration key"));
         }
         if parts.peek().is_none() {
-            at.insert(part.into(), toml::Value::Integer(value));
+            at.insert(part.into(), value);
             break;
         }
         at = at
@@ -28,6 +28,31 @@ fn set(table: &mut toml::Table, key: &str, value: i64) -> Result<(), DecodeError
     }
     Ok(())
 }
+pub(super) fn parse_scale(value: &toml::Value) -> Option<f64> {
+    value
+        .as_float()
+        .or_else(|| value.as_integer().map(|n| n as f64))
+        .filter(|scale| (1.0..=2.0).contains(scale))
+}
+
+fn get<'a>(
+    doc: &'a toml::Value,
+    file: &str,
+    key: &str,
+) -> Result<Option<&'a toml::Value>, DecodeError> {
+    let mut value = doc;
+    for part in key.split('.') {
+        let table = value
+            .as_table()
+            .ok_or_else(|| error(format!("{file}: invalid table in {key}")))?;
+        let Some(next) = table.get(part) else {
+            return Ok(None);
+        };
+        value = next;
+    }
+    Ok(Some(value))
+}
+
 pub fn configured(
     declarations: &BTreeMap<String, String>,
     root: Option<&Path>,
@@ -58,7 +83,11 @@ pub fn configured(
                 .as_i64()
                 .filter(|v| (0..=i32::MAX as i64).contains(v))
                 .ok_or_else(|| error("integer default weight"))?;
-            set(defaults.entry(file.into()).or_default(), key, default)?;
+            let table = defaults.entry(file.into()).or_default();
+            set(table, key, toml::Value::Integer(default))?;
+            if let Some(scale_key) = config["scale_key"].as_str() {
+                set(table, scale_key, toml::Value::Float(1.0))?;
+            }
         }
         docs.insert(id.clone(), doc);
     }
@@ -91,26 +120,37 @@ pub fn configured(
         if let Some(config) = doc.get("configuration") {
             let file = config["file"].as_str().unwrap();
             let key = config["key"].as_str().unwrap();
-            let mut value = Some(&files[file]);
-            for part in key.split('.') {
-                if let Some(parent) = value {
-                    if !parent.is_table() {
-                        return Err(error(format!("{file}: invalid table in {key}")));
-                    }
-                }
-                value = value.and_then(|v| v.get(part));
-            }
-            if let Some(value) = value {
-                let weight = value
-                    .as_integer()
-                    .filter(|v| (0..=i32::MAX as i64).contains(v))
-                    .ok_or_else(|| {
-                        error(format!(
-                            "{file}: {key} must be an integer from 0 to {}",
-                            i32::MAX
-                        ))
-                    })?;
+            let weight = get(&files[file], file, key)?
+                .map(|value| {
+                    value
+                        .as_integer()
+                        .filter(|v| (0..=i32::MAX as i64).contains(v))
+                        .ok_or_else(|| {
+                            error(format!(
+                                "{file}: {key} must be an integer from 0 to {}",
+                                i32::MAX
+                            ))
+                        })
+                })
+                .transpose()?;
+            let scale = config["scale_key"]
+                .as_str()
+                .map(|key| {
+                    get(&files[file], file, key)?
+                        .map(|value| {
+                            parse_scale(value).ok_or_else(|| {
+                                error(format!("{file}: {key} must be a number from 1.0 to 2.0"))
+                            })
+                        })
+                        .transpose()
+                })
+                .transpose()?
+                .flatten();
+            if let Some(weight) = weight {
                 doc["weight"] = Value::from(weight);
+            }
+            if let Some(scale) = scale {
+                doc["region_scale"] = Value::from(scale);
             }
         }
     }

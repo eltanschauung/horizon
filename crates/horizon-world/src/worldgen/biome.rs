@@ -50,6 +50,14 @@ impl From<SampleError> for BiomeError {
     }
 }
 
+#[derive(Debug, Clone)]
+struct RegionOptions {
+    weights: Vec<u32>,
+    zooms: u8,
+    minimum: u32,
+    scales: Vec<f64>,
+}
+
 #[derive(Debug)]
 pub struct MultiNoiseBiomeSource {
     parameters: ClimateIndex<String>,
@@ -60,7 +68,7 @@ pub struct MultiNoiseBiomeSource {
     groups: Vec<(f64, ClimateIndex<String>)>,
     group_guards: Vec<bool>,
     selector_axis: usize,
-    regions: Option<(Vec<u32>, u8, u32)>,
+    regions: Option<RegionOptions>,
     landforms: BTreeMap<String, Habitat>,
 }
 impl MultiNoiseBiomeSource {
@@ -110,6 +118,7 @@ impl MultiNoiseBiomeSource {
         let mut baseline = Vec::new();
         let mut selector_axis = None;
         let mut region_options = None;
+        let mut scales = std::collections::BTreeMap::new();
         let mut orders = std::collections::BTreeMap::new();
         let mut guards = std::collections::BTreeMap::new();
         let mut groups =
@@ -166,6 +175,14 @@ impl MultiNoiseBiomeSource {
                         .filter(|v| *v <= i32::MAX as u64)
                         .ok_or(DecodeError::Field("vanilla region weight"))?
                         as u32;
+                    let scale = entry["horizon:region_scale"].as_f64().unwrap_or(1.0);
+                    if !(1.0..=2.0).contains(&scale)
+                        || scales
+                            .insert(group.to_owned(), scale)
+                            .is_some_and(|old| old != scale)
+                    {
+                        return Err(DecodeError::Field("inconsistent biome region scale").into());
+                    }
                     let minimum = entry["horizon:region_min_quarts"].as_u64().unwrap_or(0);
                     if minimum > 4096 {
                         return Err(DecodeError::Field("region minimum size").into());
@@ -236,7 +253,15 @@ impl MultiNoiseBiomeSource {
                 .collect();
             super::region_weights::RegionWeights::new(0, weights.clone(), zooms)
                 .map_err(DecodeError::Field)?;
-            source.regions = Some((weights, zooms, minimum));
+            let scales = std::iter::once(1.0)
+                .chain(groups.iter().map(|(id, _)| scales[id]))
+                .collect();
+            source.regions = Some(RegionOptions {
+                weights,
+                zooms,
+                minimum,
+                scales,
+            });
         }
         for (name, (weight, points)) in groups {
             source.group_guards.push(guards[&name]);
@@ -271,8 +296,10 @@ impl MultiNoiseBiomeSource {
             surface: self
                 .regions
                 .as_ref()
-                .filter(|(weights, _, min)| *min > 0 && weights.iter().skip(1).any(|&w| w > 0))
-                .map(|(_, _, minimum)| SurfaceRegions::new(climate.region_seed, *minimum)),
+                .filter(|region| {
+                    region.minimum > 0 && region.weights.iter().skip(1).any(|&w| w > 0)
+                })
+                .map(|region| SurfaceRegions::new(climate.region_seed, region.minimum)),
             landforms: &self.landforms,
             climate,
             search: self
@@ -281,14 +308,15 @@ impl MultiNoiseBiomeSource {
                 .unwrap_or(&self.parameters)
                 .searcher(),
             additions: self.additions.as_ref().map(ClimateIndex::searcher),
-            regions: self.regions.as_ref().map(|(weights, zooms, minimum)| {
+            regions: self.regions.as_ref().map(|region| {
                 super::region_weights::RegionWeights::new(
                     climate.region_seed,
-                    weights.clone(),
-                    *zooms,
+                    region.weights.clone(),
+                    region.zooms,
                 )
                 .expect("validated region weights")
-                .with_min_quarts(climate.region_seed, *minimum)
+                .with_min_quarts(climate.region_seed, region.minimum)
+                .with_scales(&region.scales)
             }),
             selector_axis: self.selector_axis,
             group_guards: self.group_guards.clone(),

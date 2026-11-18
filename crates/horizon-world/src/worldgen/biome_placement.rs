@@ -91,6 +91,8 @@ pub fn extend_presets(
                 let divisor = doc["weight_divisor"].as_u64().unwrap_or(1);
                 candidate["horizon:weight"] = json!(weight * scale as f64 / divisor as f64);
                 if !doc["region_order"].is_null() {
+                    candidate["horizon:region_scale"] =
+                        doc.get("region_scale").cloned().unwrap_or(json!(1.0));
                     candidate["horizon:region_min_quarts"] =
                         doc.get("region_min_quarts").cloned().unwrap_or(json!(0));
                     for key in ["region_order", "region_zooms", "vanilla_weight"] {
