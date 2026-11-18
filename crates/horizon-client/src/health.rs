@@ -26,12 +26,18 @@ use std::{cell::Cell, fs, io, path::Path, sync::OnceLock};
 thread_local! { static PROJECTILE_COOLDOWN_BYPASS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
 pub struct ProjectileCooldownGuard(bool);
 impl ProjectileCooldownGuard {
-    pub fn new(enabled: bool) -> Self { Self(PROJECTILE_COOLDOWN_BYPASS.with(|v| v.replace(enabled))) }
+    pub fn new(enabled: bool) -> Self {
+        Self(PROJECTILE_COOLDOWN_BYPASS.with(|v| v.replace(enabled)))
+    }
 }
 impl Drop for ProjectileCooldownGuard {
-    fn drop(&mut self) { PROJECTILE_COOLDOWN_BYPASS.with(|v| v.set(self.0)); }
+    fn drop(&mut self) {
+        PROJECTILE_COOLDOWN_BYPASS.with(|v| v.set(self.0));
+    }
 }
-pub fn projectile_bypasses_cooldown() -> bool { PROJECTILE_COOLDOWN_BYPASS.with(|v|v.get()) }
+pub fn projectile_bypasses_cooldown() -> bool {
+    PROJECTILE_COOLDOWN_BYPASS.with(|v| v.get())
+}
 pub(crate) type Attributes = LiveAttributes<Box<dyn horizon_world::attributes::live::Identities>>;
 pub(crate) type State = HurtState<DamageTypeId>;
 
@@ -829,6 +835,11 @@ impl ServerDamageEnvironment<Attributes> for Environment<'_> {
         self.phase("entity-damage")
     }
     fn damage_pre(&mut self, damage: &mut f32) -> io::Result<()> {
+        if let Some(amp) = self.status.miasma
+            && !self.source.bypasses(Bypass::Effects)
+        {
+            *damage *= crate::effects::miasma_damage_multiplier(amp);
+        }
         damage_pre(Hurting::Player(self.entity, self.hurt_source()), damage);
         Ok(())
     }
@@ -905,8 +916,10 @@ impl HurtWorld for Environment<'_> {
         Err(io::Error::other("combat binding supplies health predicate"))
     }
     fn tag(&mut self, _: &mut State, tag: HurtTag) -> io::Result<bool> {
-        Ok(self.source.hurt_tag(tag) || (tag == HurtTag::BypassesCooldown
-            && self.source.is_type("minecraft:thrown") && projectile_bypasses_cooldown()))
+        Ok(self.source.hurt_tag(tag)
+            || (tag == HurtTag::BypassesCooldown
+                && self.source.is_type("minecraft:thrown")
+                && projectile_bypasses_cooldown()))
     }
     fn fire_resistance(&mut self, _: &mut State) -> io::Result<bool> {
         Ok(self.status.fire_resistance)

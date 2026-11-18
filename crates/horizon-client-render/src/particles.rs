@@ -2147,7 +2147,9 @@ impl ParticleEngine {
             );
             if let Some(behaviour) = behaviour {
                 behaviour.apply(&mut q, v, &mut r);
-                if behaviour.animation == Some(ModAnimation::First) {
+                if behaviour.animation == Some(ModAnimation::First)
+                    || behaviour.rising_spore.is_some()
+                {
                     q.sprite = Sprite::Index(sprites[0]);
                 }
             }

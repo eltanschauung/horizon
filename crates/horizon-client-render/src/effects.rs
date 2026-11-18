@@ -6,6 +6,11 @@ use horizon_client_core::potions;
 
 pub const MIASMA: &str = "horizon_gensokyo_legacy:miasma";
 
+/// The original JAR uses L2DamageTracker's final damage multiplier (base 1.0).
+pub fn miasma_damage_multiplier(amplifier: i32) -> f32 {
+    1.0 + 0.5 * (amplifier + 1) as f32
+}
+
 /// Gensokyo Legacy's secondary debuff when a Miasma-afflicted entity takes damage.
 pub fn miasma_on_hurt(amplifier: i32, roll: f64) -> Option<(&'static str, i32)> {
     if roll < 0.4 {
@@ -433,6 +438,7 @@ impl PlayerEffects {
             slow_falling: self.get("slow_falling").is_some(),
             levitation: self.amplifier("levitation"),
             resistance: self.amplifier("resistance"),
+            miasma: self.amplifier(MIASMA),
             fire_resistance: self.get("fire_resistance").is_some(),
             dolphins_grace: self.get("dolphins_grace").is_some(),
             weaving: self.get("weaving").is_some(),
@@ -472,6 +478,7 @@ pub struct StatusFlags {
     pub slow_falling: bool,
     pub levitation: Option<i32>,
     pub resistance: Option<i32>,
+    pub miasma: Option<i32>,
     pub fire_resistance: bool,
     pub dolphins_grace: bool,
     /// Weaving: cobwebs hold half as much (`WebBlock.entityInside`).

@@ -4078,6 +4078,15 @@ impl Mob {
     /// off the health. What came off.
     fn hurt_health(&mut self, through: f32, source: &Damage) -> f32 {
         let mut through = through;
+        if !source.kind.bypasses_effects()
+            && let Some((_, _, amp)) = self
+                .extra
+                .effects
+                .iter()
+                .find(|e| e.0 == crate::effects::MIASMA)
+        {
+            through *= crate::effects::miasma_damage_multiplier(*amp);
+        }
         crate::health::damage_pre(crate::health::Hurting::Mob(self, source), &mut through);
         self.health -= through;
         if through > 0.0

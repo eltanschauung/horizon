@@ -488,7 +488,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 } else {
                     2
                 }]
-                .to_owned()
+                .into()
             } else if let Some(feature) = self.b.data(state).feature.clone() {
                 feature
             } else {
