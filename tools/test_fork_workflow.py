@@ -1,11 +1,15 @@
 """Workflow failure/safety checks; no real services, worlds or launcher homes."""
+import fcntl
 import hashlib
 import json
+import os
 from pathlib import Path
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 import zipfile
+import fork_cache
 import fork_remote as remote
 import fork_workflow as w
 
@@ -51,6 +55,45 @@ class WorkflowTests(unittest.TestCase):
         p=self.root/'fork-versions/current';p.mkdir(parents=True);(p/'.installed').touch();(p/'native-mods.json').write_text('{}')
         w.write(self.root/'settings.json',{'selected':'current'})
         with self.assertRaisesRegex(ValueError,'reference-aware'):w.prune_candidates(self.root,[p],[])
+
+    def test_release_cleanup_keeps_newest_and_build_bases(self):
+        versions = self.root/'fork-versions'
+        for name in ('v0.3.10', 'v0.3.9', 'v0.3.8', 'v0.3.7', 'v0.3.6'):
+            path = versions/name
+            path.mkdir(parents=True)
+            (path/'.installed').touch()
+        w.write(versions/'native-dead-beef/native-mods.json', {'base': 'v0.3.8'})
+        w.write(self.root/'settings.json', {'selected': 'v0.3.6'})
+        with patch.dict(os.environ, {'HORIZON_LAUNCHER_HOME': str(self.root)}):
+            result = fork_cache.purge_launcher_cache(self.root, apply=False, keep_versions=['v0.3.7'])
+        releases = result['families']['release-versions']
+        self.assertEqual(releases['candidates'], [str(versions/'v0.3.9')])
+        self.assertTrue((versions/'v0.3.9').exists())
+
+    def test_windows_scratch_cleanup_requires_old_outputs_and_both_cargo_locks(self):
+        cache = self.root/'fork-native/target-windows'
+        host = cache/'fast'
+        target = cache/'x86_64-pc-windows-gnu/fast'
+        for profile in (host, target):
+            profile.mkdir(parents=True)
+            (profile/'.cargo-lock').touch()
+        (cache/'CACHEDIR.TAG').write_text('Signature: 8a477f597d28d172789f06886806bc55\n')
+        artifact = target/'horizon-client.exe'
+        artifact.touch()
+        self.assertEqual(fork_cache._purge_retired_windows_output(cache, [], apply=True)['removed'], [])
+        stale = time.time() - 4 * 24 * 60 * 60
+        os.utime(artifact, (stale, stale))
+        with (host/'.cargo-lock').open('rb') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            self.assertEqual(fork_cache._purge_retired_windows_output(cache, [], apply=True)['removed'], [])
+        preview = fork_cache._purge_retired_windows_output(cache, [], apply=False)
+        self.assertEqual(preview['candidates'], [str(artifact)])
+        self.assertTrue(artifact.exists())
+        result = fork_cache._purge_retired_windows_output(cache, [], apply=True)
+        self.assertEqual(result['removed'], [str(artifact)])
+        self.assertFalse(artifact.exists())
+        self.assertTrue((host/'.cargo-lock').is_file())
+        self.assertTrue((target/'.cargo-lock').is_file())
 
     def test_player_count_must_be_known(self):
         for status in [{'phase':'starting'},{'phase':'running','sample':None}]:

@@ -215,8 +215,9 @@ def build(args):
     if args.command != 'preflight':
         from fork_cache import purge_resource_cache, purge_launcher_cache, purge_workflow_cache
         report['resource_cache'] = purge_resource_cache(homes()[1])
-        report['launcher_cache'] = purge_launcher_cache(h, workflow_locked=True)
         report['workflow_cache'] = purge_workflow_cache(ROOT, active_plan=p, workflow_locked=True)
+        report['launcher_cache'] = purge_launcher_cache(
+            h, workflow_locked=True, keep_versions=report['workflow_cache'].get('base_versions', ()))
     return report
 
 
@@ -330,10 +331,10 @@ def deploy(args):
     if 'local' in targets:
         from fork_cache import purge_resource_cache
         result['resource_cache'] = purge_resource_cache(game, apply=args.apply)
-    from fork_cache import purge_launcher_cache
-    result['launcher_cache'] = purge_launcher_cache(h, apply=args.apply, workflow_locked=True)
-    from fork_cache import purge_workflow_cache
+    from fork_cache import purge_launcher_cache, purge_workflow_cache
     result['workflow_cache'] = purge_workflow_cache(ROOT, active_plan=p, apply=args.apply, workflow_locked=True)
+    result['launcher_cache'] = purge_launcher_cache(
+        h, apply=args.apply, workflow_locked=True, keep_versions=result['workflow_cache'].get('base_versions', ()))
     write(p.parent/'deployment.json',result)
     return result
 
@@ -352,13 +353,17 @@ def running_paths():
 
 
 def prune_candidates(home, exports, running):
+    from fork_cache import _NATIVE_VERSION, _PLAYER_DATA, _RELEASE_VERSION
     keep={read(home/'settings.json').get('selected')}
     keep.update(v.get('version')for v in read(home/'instances.json').get('instances',{}).values())
     candidates=[];retained=[]
-    for p in (home/'fork-versions').iterdir():
+    versions=home/'fork-versions'
+    for p in versions.iterdir() if versions.is_dir() and not versions.is_symlink() else ():
+        # The shared launcher policy also runs automatically and owns these builds.
+        if re.fullmatch(f'{_RELEASE_VERSION}|{_NATIVE_VERSION}',p.name):continue
         if p.is_symlink()or not p.is_dir()or not(p/'.installed').is_file():continue
         if p.name in keep or any(q.is_relative_to(p.resolve())for q in running):retained.append(p.name);continue
-        if any((p/n).exists()for n in ['saves','world','playerdata','options.txt']):retained.append(p.name);continue
+        if any((p/n).exists()or(p/n).is_symlink()for n in _PLAYER_DATA):retained.append(p.name);continue
         candidates.append(p)
     # Explicit export roots: remove executable copies only, never data/source/cache trees.
     for root in exports:
@@ -375,6 +380,7 @@ def prune_candidates(home, exports, running):
 
 def prune(args):
     h,_=homes();items,kept=prune_candidates(h,args.exports,running_paths())
+    removed=[]
     if args.apply:
         # Recalculate after preview, so a newly selected or launched build stays protected.
         for p in items:
@@ -382,11 +388,14 @@ def prune(args):
             if p not in now:continue
             if p.is_dir():shutil.rmtree(p)
             else:p.unlink()
+            removed.append(p)
     from fork_cache import purge_resource_cache, purge_launcher_cache, purge_workflow_cache
-    return {'apply':args.apply,'removed'if args.apply else'candidates':[str(p)for p in items],'kept':kept,'caches_preserved':True,
+    workflow=purge_workflow_cache(ROOT, apply=args.apply, workflow_locked=True)
+    return {'apply':args.apply,'removed'if args.apply else'candidates':[str(p)for p in (removed if args.apply else items)],'kept':kept,
             'resource_cache':purge_resource_cache(homes()[1], apply=args.apply),
-            'launcher_cache':purge_launcher_cache(h, apply=args.apply, workflow_locked=True),
-            'workflow_cache':purge_workflow_cache(ROOT, apply=args.apply, workflow_locked=True)}
+            'launcher_cache':purge_launcher_cache(
+                h, apply=args.apply, workflow_locked=True, keep_versions=workflow.get('base_versions', ())),
+            'workflow_cache':workflow}
 
 
 def main(argv=None):

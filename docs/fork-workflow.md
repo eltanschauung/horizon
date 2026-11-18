@@ -97,11 +97,17 @@ or engine is running. Preflight never purges; deployment previews report candida
 
 Successful builds and applied deployments also retain the newest snapshot per
 launcher family: `fork-native/server-builds`, `fork-native/source` (downloaded
-revision copies), `fork-native/patched`, and managed native `fork-versions`.
-Selected/instance-referenced/running builds and the cached build's source revision
-remain protected beyond the newest. Compiler activity defers launcher cleanup.
-Cargo targets, dependencies, SDKs, staging, user source checkouts and player data
-are excluded. Preview deployments report candidates without deleting them.
+revision copies), `fork-native/patched`, and native and release installations
+under `fork-versions`. Selected, instance-referenced and running builds,
+retained workflow bases and the cached build's source revision remain protected.
+Compiler activity defers launcher cleanup.
+
+The old `fork-native/target-windows` portable-build scratch directory can also
+accumulate several GiB. Cleanup removes recognized outputs from its two
+`fast` profiles after three days without writes. Both profiles must be idle
+and their Cargo lock files stay in place. Managed compiler targets,
+dependencies, SDKs, staging, user source checkouts and player data stay.
+Preview deployments report candidates without deleting them.
 
 
 Workflow cleanup also retires obsolete frozen `inputs/`, `native-input/`,
@@ -116,9 +122,8 @@ it for recovery. Logs, manifests, handoffs, package backups and test worlds stay
 Successful builds and applied deployments run this policy automatically.
 `prune-builds --dry-run` previews all cleanup families; `--apply` applies them.
 Preflight and deployment previews never delete files. Cleanup shares the workflow
-lock and defers during native compilation. Source/Git worktrees, symlinks,
-running artifacts, player data, Cargo targets, dependencies and shared SDKs are
-excluded. Small builds use the same policy without recompiling any game code.
+lock and defers during native compilation. Small builds use the same policy
+without recompiling any game code.
 
 Abandoned `.native-*.partial` client/server installations are also removed when
 no native compiler is active; running or data-bearing partials remain protected.

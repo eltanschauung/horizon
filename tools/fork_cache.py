@@ -1,8 +1,15 @@
-"""Bound generated game resource snapshots, never compiler caches or player data."""
+"""Bound generated resource snapshots and known disposable workflow outputs."""
+from contextlib import ExitStack
 import os
 from pathlib import Path
 import re
 import shutil
+import time
+
+
+_RELEASE_VERSION = r'v[0-9]+(?:\.[0-9]+){2}'
+_NATIVE_VERSION = r'native-[0-9a-f]+-[0-9a-f]+'
+_PLAYER_DATA = ('saves', 'world', 'playerdata', 'options.txt', 'server.toml', 'server.properties', '.git')
 
 
 def game_home():
@@ -65,8 +72,8 @@ def purge_resource_cache(home=None, *, apply=True):
 def cleanup_after_build():
     import json
     report = purge_resource_cache()
-    launcher = purge_launcher_cache()
     workflow = purge_workflow_cache()
+    launcher = purge_launcher_cache(keep_versions=workflow.get('base_versions', ()))
     if workflow['removed'] or workflow.get('deferred'):
         print(json.dumps({'workflow_cache': workflow}), flush=True)
     if launcher['removed'] or launcher.get('deferred'):
@@ -75,10 +82,9 @@ def cleanup_after_build():
         print(json.dumps({'resource_cache': report}), flush=True)
 
 
-def purge_launcher_cache(home=None, *, apply=True, workflow_locked=False):
+def purge_launcher_cache(home=None, *, apply=True, workflow_locked=False, keep_versions=()):
     """Retain the newest snapshot per family, plus live/referenced builds."""
-    import json
-    from fork_workflow import homes, read, running_paths
+    from fork_workflow import build_home, homes, read, running_paths
     root = Path(home) if home is not None else homes()[0]
     if apply and not workflow_locked:
         import fcntl
@@ -88,33 +94,49 @@ def purge_launcher_cache(home=None, *, apply=True, workflow_locked=False):
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 return {'deferred': 'Build/deployment workflow is running', 'removed': []}
-            return purge_launcher_cache(root, apply=True, workflow_locked=True)
-    native = root/'fork-native'
+            return purge_launcher_cache(root, apply=True, workflow_locked=True, keep_versions=keep_versions)
+    native = build_home(root)/'fork-native'
+    if native.is_symlink():
+        return {'deferred': 'Native build directory is a symlink', 'removed': []}
     # Avoid racing a direct native build as well as workflow-managed builds.
     if apply:
         if _native_compiler_running(native):
             return {'deferred': 'Native compiler is running', 'removed': []}
-    refs = {read(root/'settings.json').get('selected')}
+    refs = {read(root/'settings.json').get('selected'), *keep_versions}
     refs.update(v.get('version') for v in read(root/'instances.json').get('instances', {}).values())
+    versions = root/'fork-versions'
+    server_builds = native/'server-builds'
+    # A native build can still use its original installed release as a build base.
+    for parent in (versions, server_builds):
+        if parent.is_dir() and not parent.is_symlink():
+            for p in parent.iterdir():
+                metadata = p/'native-mods.json'
+                if re.fullmatch(_NATIVE_VERSION, p.name) and not p.is_symlink() and not metadata.is_symlink():
+                    refs.add(read(metadata).get('base'))
     revisions = {v.get('horizon') for v in read(native/'built.json').values() if isinstance(v, dict)}
     active = set(running_paths())
-    families = [('server-builds', native/'server-builds', r'native-[0-9a-f]+-[0-9a-f]+'),
+    families = [('server-builds', server_builds, _NATIVE_VERSION),
                 ('source', native/'source', r'[0-9a-f]{40}'),
                 ('patched', native/'patched', r'[0-9a-f]{64}'),
-                ('fork-versions', root/'fork-versions', r'native-[0-9a-f]+-[0-9a-f]+'),
-                ('server-partial', native/'server-builds', r'\.native-[0-9a-f]+-[0-9a-f]+\.partial'),
-                ('client-partial', root/'fork-versions', r'\.native-[0-9a-f]+-[0-9a-f]+\.partial')]
+                ('fork-versions', versions, _NATIVE_VERSION),
+                ('release-versions', versions, _RELEASE_VERSION),
+                ('server-partial', server_builds, rf'\.{_NATIVE_VERSION}\.partial'),
+                ('client-partial', versions, rf'\.{_NATIVE_VERSION}\.partial')]
     report = {'families': {}, 'removed': []}
     for name, parent, pattern in families:
         if parent.is_symlink() or not parent.is_dir():
             continue
-        entries = sorted((p for p in parent.iterdir() if not p.is_symlink() and p.is_dir()
-                          and re.fullmatch(pattern, p.name)),
-                         key=lambda p: (p.stat().st_mtime_ns, p.name), reverse=True)
+        entries = [p for p in parent.iterdir() if not p.is_symlink() and p.is_dir()
+                   and re.fullmatch(pattern, p.name)]
+        if name == 'release-versions':
+            entries = [p for p in entries if (p/'.installed').is_file() and not (p/'.installed').is_symlink()]
+            entries.sort(key=lambda p: tuple(map(int, p.name[1:].split('.'))), reverse=True)
+        else:
+            entries.sort(key=lambda p: (p.stat().st_mtime_ns, p.name), reverse=True)
         kept, candidates = [], []
         for i, p in enumerate(entries):
             resolved = p.resolve()
-            protected = ((name == 'fork-versions' and p.name in refs) or (name == 'source' and p.name in revisions)
+            protected = ((parent == versions and p.name in refs) or (name == 'source' and p.name in revisions)
                          or any(a.is_relative_to(resolved) for a in active)
                          or any((p/n).exists() or (p/n).is_symlink() for n in _PLAYER_DATA))
             (kept if (i == 0 and not name.endswith('-partial')) or protected else candidates).append(p)
@@ -124,13 +146,72 @@ def purge_launcher_cache(home=None, *, apply=True, workflow_locked=False):
             for p in candidates:
                 shutil.rmtree(p)
                 report['removed'].append(str(p))
+    windows = _purge_retired_windows_output(native/'target-windows', active, apply=apply)
+    report['families']['windows-cross-build'] = windows
+    report['removed'].extend(windows['removed'])
+    return report
+
+
+def _purge_retired_windows_output(cache, active, *, apply):
+    """Clear the old portable-build scratch profiles when idle for three days."""
+    import fcntl
+
+    report = {'kept': [], 'candidates': [], 'removed': []}
+    tag = cache/'CACHEDIR.TAG'
+    if cache.is_symlink() or tag.is_symlink() or not tag.is_file():
+        return report
+    with tag.open('rb') as stream:
+        if stream.readline(100).strip() != b'Signature: 8a477f597d28d172789f06886806bc55':
+            return report
+    platform = cache/'x86_64-pc-windows-gnu'
+    if platform.is_symlink() or not platform.is_dir():
+        return report
+    profiles = (cache/'fast', platform/'fast')
+    report['kept'] = [str(cache)]
+    if any(a.is_relative_to(cache.resolve()) for a in active):
+        return report
+    lock_names = {'.cargo-lock', '.cargo-build-lock', '.cargo-artifact-lock'}
+    cutoff = time.time() - 3 * 24 * 60 * 60
+    with ExitStack() as locks:
+        for profile in profiles:
+            if profile.is_symlink() or not profile.is_dir():
+                return report
+            lock_paths = [p for p in profile.iterdir() if p.name in lock_names]
+            if not lock_paths or any(p.is_symlink() or not p.is_file() for p in lock_paths):
+                return report
+            for path in lock_paths:
+                try:
+                    lock = locks.enter_context(path.open('rb'))
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except (BlockingIOError, FileNotFoundError):
+                    return report
+        outputs = [p for profile in profiles for p in sorted(profile.iterdir()) if p.name not in lock_names]
+        for path in outputs:
+            if path.is_symlink() or any((path/n).exists() or (path/n).is_symlink() for n in _PLAYER_DATA):
+                return report
+            if path.name in {'.fingerprint', 'build', 'deps', 'examples', 'incremental'} and path.is_dir():
+                entries = path.rglob('*')
+            elif re.fullmatch(r'horizon-[\w-]+\.(?:exe|d)', path.name) and path.is_file():
+                entries = ()
+            else:
+                return report
+            if path.lstat().st_mtime >= cutoff or any(p.lstat().st_mtime >= cutoff for p in entries):
+                return report
+        report['candidates'] = [str(p) for p in outputs]
+        if apply:
+            # The old helper and Cargo can reuse these exact lock inodes on a later build.
+            for path in outputs:
+                if path.is_dir():
+                    shutil.rmtree(path)
+                else:
+                    path.unlink()
+                report['removed'].append(str(path))
     return report
 
 
 # Only generated children of validated frozen plans are owned by this cleaner.
 # Metadata, handoffs, package backups, source trees and test worlds stay.
 _WORKFLOW_OUTPUTS = ('inputs', 'native-input', 'server-export', 'server-export.previous', 'upload')
-_PLAYER_DATA = ('saves', 'world', 'playerdata', 'options.txt', 'server.toml', 'server.properties', '.git')
 
 
 def purge_workflow_cache(repo=None, *, active_plan=None, apply=True, workflow_locked=False):
@@ -252,7 +333,9 @@ def purge_workflow_cache(repo=None, *, active_plan=None, apply=True, workflow_lo
                     verified = False
                 if verified:
                     consider(path/'server-export.previous')
+    bases = (read_json(path/'manifest.json').get('base') for path in kept)
     report = {'kept': sorted(str(p) for p in kept), 'protected': protected,
+              'base_versions': sorted({b for b in bases if isinstance(b, str)}),
               'candidates': [str(p) for p in candidates], 'removed': []}
     if apply:
         for path in candidates:
