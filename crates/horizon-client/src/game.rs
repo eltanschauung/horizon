@@ -8600,6 +8600,13 @@ impl Game<'_> {
                             }
                         }
                     }
+                    if g.magic_is_bat() {
+                        let offhand_left = if inputs.offhand && inputs.right_handed { 29 } else { 0 };
+                        let offhand_width = if inputs.offhand { 29 } else { 0 };
+                        batch.fill(&g.gui.atlas, (wi / 2 - 92 - offhand_left) as f32,
+                            (hi - 23) as f32, (184 + offhand_width) as f32, 23.0,
+                            rgba(55, 55, 55, 175));
+                    }
                 }
             });
             // Persistent corner panels claim space before transient effect rows.
@@ -14397,7 +14404,7 @@ impl Game<'_> {
         let mut runs = Vec::new();
         // F1 hides both; a native HUD mode may keep the hands visible. A
         // studio replay never draws them.
-        if self.studio_replay.is_some()
+        if self.studio_replay.is_some() || self.magic_is_bat()
             || !self.ui.hands_drawn(
                 self.spectator(),
                 self.sleeping.is_some(),

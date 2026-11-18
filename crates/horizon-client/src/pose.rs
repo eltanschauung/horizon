@@ -102,11 +102,14 @@ impl PlayerMotion {
         }
     }
     pub fn dimensions_for_pose(&mut self, pose: Pose) -> Result<Dimensions> {
+        if let Some(dimensions) = self.form_dimensions {
+            return Ok(dimensions);
+        }
         Ok(pose.dimensions(self.attribute("minecraft:scale")? as f32))
     }
     pub fn refresh_dimensions(&mut self) -> Result<()> {
         self.scale = self.attribute("minecraft:scale")? as f32;
-        self.dimensions = self.pose.dimensions(self.scale);
+        self.dimensions = self.form_dimensions.unwrap_or_else(|| self.pose.dimensions(self.scale));
         Ok(())
     }
     pub fn set_pose(&mut self, pose: Pose) -> Result<()> {

@@ -23,6 +23,8 @@ pub enum Kind {
     Giant,
     Tiny,
     Effect,
+    Bat,
+    BatCancel,
 }
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -38,6 +40,10 @@ pub struct Spell {
     pub scale: f64,
     pub transition_ticks: u32,
     pub duration_ticks: u32,
+    #[serde(default)]
+    pub min_duration_ticks: Option<u32>,
+    #[serde(default)]
+    pub bat_tint: Option<[u8; 3]>,
     pub ending_ticks: u32,
     /// Transition, active, and returning markers, in that order.
     pub effects: [String; 3],
@@ -95,7 +101,13 @@ impl Spell {
             && self.scale.is_finite()
             && (0.125..=8.0).contains(&self.scale)
             && (1..=200).contains(&self.transition_ticks)
-            && (1..=1200).contains(&self.duration_ticks)
+            && match self.kind {
+                Kind::Bat => self.bat_tint.is_some()
+                    && (1200..=3600).contains(&self.duration_ticks)
+                    && self.min_duration_ticks.is_some_and(|min| (1200..=self.duration_ticks).contains(&min)),
+                _ => (1..=1200).contains(&self.duration_ticks)
+                    && self.min_duration_ticks.is_none() && self.bat_tint.is_none(),
+            }
             && (1..=200).contains(&self.ending_ticks)
             && self
                 .effects

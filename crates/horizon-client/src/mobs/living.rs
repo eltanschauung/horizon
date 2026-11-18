@@ -479,7 +479,8 @@ impl Mob {
         // `minecraft:scale` (`getScale`), width, height and eye height alike.
         let scale = self.model_scale();
         if matches!(&*k.id, "minecraft:player" | "minecraft:mannequin") {
-            let d = self.extra.avatar_pose.dimensions(scale);
+            let d = self.extra.form_dimensions
+                .unwrap_or_else(|| self.extra.avatar_pose.dimensions(scale));
             return (
                 f64::from(d.width),
                 f64::from(d.height),

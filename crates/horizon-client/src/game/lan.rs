@@ -2820,6 +2820,7 @@ impl Game<'_> {
         host.hub.anticheat_ping();
         drop(holding);
         self.flush_attachment_sync(&mut host);
+        self.magic_sync_bats(&host);
         self.flush_native_net(&mut host);
         self.flush_native_player_fx(&mut host);
         self.flush_far_terrain(&mut host);

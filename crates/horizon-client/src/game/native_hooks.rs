@@ -8406,6 +8406,7 @@ impl Game<'_> {
     /// is the sender's own bytes. The window's game only. API 40.
     pub(super) fn native_net_from_server(&mut self, channel: &str, data: &[u8]) {
         if channel == horizon_client::magic::CHANNEL { self.magic_from_server(data); return; }
+        if channel == super::magic::bat::CHANNEL { self.magic_receive_bats(data); return; }
         mod_api::dispatch_net_from_server(self, mod_api::mods(), channel, data);
     }
     /// A play packet from the server reached the window's game, decoded,
@@ -8502,6 +8503,7 @@ impl Game<'_> {
     /// death that ends in a respawn, on a server; not for the End-exit one.
     /// 115.
     pub(super) fn native_player_respawned(&mut self, player: u128, name: &str) {
+        self.magic_discard_bat_save();
         mod_api::dispatch_player_respawned(self, mod_api::mods(), player, name);
     }
     /// A player was saved to the world's store (NeoForge's

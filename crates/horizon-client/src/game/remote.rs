@@ -3049,6 +3049,11 @@ impl Game<'_> {
         if let Some(t) = mob_type {
             let mut mob = Mob::new(id as u32, t, at, head);
             super::remote_mob_data::client_defaults(&mut mob);
+            if let Some(uuid) = self.remote_player_uuid(id as u32)
+                && self.magic_bat_tint(uuid).is_some()
+            {
+                mob.extra.form_dimensions = self.bat_dimensions();
+            }
             (mob.yaw, mob.previous_yaw) = (yaw, yaw);
             (mob.head_pitch, mob.previous_head_pitch) = (pitch, pitch);
             mob.persistent = true;
@@ -4524,7 +4529,11 @@ impl Game<'_> {
                         pl.health.animate_hurt();
                     }
                     if let Some(at) = at {
-                        let sound = self.remote_hurt_sound(p.source_type);
+                        let sound = if self.magic_is_bat() {
+                            "minecraft:entity.bat.hurt"
+                        } else {
+                            self.remote_hurt_sound(p.source_type)
+                        };
                         let pitch = player_voice_pitch();
                         self.audio.play_on(
                             horizon_client::settings::sound_source(sound),
@@ -4664,7 +4673,11 @@ impl Game<'_> {
                     && let Some(pl) = self.player.as_ref()
                 {
                     let at = [pl.position.x, pl.position.y, pl.position.z];
-                    let sound = "minecraft:entity.player.death";
+                    let sound = if self.magic_is_bat() {
+                        "minecraft:entity.bat.death"
+                    } else {
+                        "minecraft:entity.player.death"
+                    };
                     let pitch = player_voice_pitch();
                     self.audio.play_on(
                         horizon_client::settings::sound_source(sound),
@@ -6373,6 +6386,7 @@ impl Game<'_> {
                 player.spectator = self.spectator();
                 player.velocity = delta;
                 self.player = Some(player);
+                self.magic_refresh_remote_bat();
                 self.pad.player_replaced();
                 self.sway = Default::default();
                 self.eye = 1.62;
@@ -8169,6 +8183,7 @@ impl Game<'_> {
     }
     /// Minecraft.startUseItem: use one crosshair target, then the item itself.
     fn remote_use(&mut self) {
+        if self.magic_is_bat() { return; }
         // Minecraft.startUseItem returns before resetting rightClickDelay
         // while a survival block break is active.
         if self.remote.as_ref().is_some_and(|r| r.is_destroying) {
@@ -9298,6 +9313,7 @@ impl Game<'_> {
     /// the main hand's item, then the off hand's turn (its block, its item).
     /// The server does each packet's part with that packet's hand only.
     fn remote_use_hands(&mut self) {
+        if self.magic_is_bat() { return; }
         // A successful Item.use always drops the hand (LocalPlayer.itemUsed).
         if self.remote_use_item(Hand::Main) {
             self.heights.item_used(Hand::Main);
@@ -9597,6 +9613,7 @@ impl Game<'_> {
     }
 
     fn remote_start_attack(&mut self) -> bool {
+        if self.magic_is_bat() { return false; }
         if self.clicks.miss_time > 0 {
             return false;
         }
@@ -9763,6 +9780,7 @@ impl Game<'_> {
     }
 
     fn remote_continue_attack(&mut self, down: bool) {
+        if self.magic_is_bat() { return; }
         if !down {
             self.clicks.miss_time = 0;
         }
@@ -11388,6 +11406,7 @@ impl horizon_client::interaction_input::InteractionWorld for RemoteInputWorld<'_
         self.0.remote_use();
     }
     fn pick(&mut self) {
+        if self.0.magic_is_bat() { return; }
         // Minecraft.pickBlockOrEntity: an entity before the block is asked
         // for (`handlePickItemFromEntity`), else the block.
         if let Some(entity) = self.0.pick_entity_hit() {

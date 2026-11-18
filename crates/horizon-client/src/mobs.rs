@@ -1075,6 +1075,8 @@ pub struct Extra {
     /// the local player's own, and on a server every living entity's from its
     /// attribute updates; 0 is the default, 1 (`Mob::model_scale`).
     pub model_scale: f32,
+    /// Dimensions advertised for a transformed remote player.
+    pub form_dimensions: Option<crate::pose::Dimensions>,
     /// Players: crouching and riding (HumanoidModel's poses).
     pub crouching: bool,
     /// A player's or mannequin's synced pose (`Entity.DATA_POSE`), which

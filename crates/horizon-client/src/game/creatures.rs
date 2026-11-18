@@ -7569,7 +7569,14 @@ impl Game<'_> {
                 .then(|| self.remote_player_name(mob.id))
                 .flatten()
                 .map(|name| NativePlayerRender { name, local: false });
-            let modded = if layers_only {
+            let bat_tint = is_player.then(|| self.remote_player_uuid(mob.id)).flatten()
+                .and_then(|uuid| self.magic_bat_tint(uuid));
+            let modded = if let Some(tint) = bat_tint {
+                if !layers_only {
+                    self.magic_draw_bat(mob, tint, camera, alpha as f32, packed, out);
+                }
+                true
+            } else if layers_only {
                 false
             } else if let Some(who) = who {
                 self.mod_player_geometry(mob, who, alpha as f32, camera, packed, out)

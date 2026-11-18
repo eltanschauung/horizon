@@ -10,6 +10,8 @@ use horizon_client::{
 use horizon_world::nbt::Tag;
 use std::collections::{HashMap, VecDeque};
 
+pub(super) mod bat;
+
 const SAVE_KEY: &str = "horizon:magic";
 #[derive(Default)]
 pub(super) struct State {
@@ -17,6 +19,7 @@ pub(super) struct State {
     actors: HashMap<u128, Actor>,
     requests: HashMap<u128, VecDeque<Request>>,
     impacts: Vec<Impact>,
+    bat_visuals: bat::BatVisuals,
 }
 #[derive(Default)]
 pub(super) struct Ui {
@@ -32,6 +35,7 @@ struct Actor {
     writable: bool,
     character: Option<String>,
     active: Option<Cast>,
+    bat: Option<bat::BatForm>,
     effect_spells: std::collections::BTreeMap<String, Spell>,
 }
 struct Cast {
@@ -75,6 +79,7 @@ impl Actor {
             writable,
             character: None,
             active: None,
+            bat: bat::BatForm::load(extra),
             effect_spells: Default::default(),
         }
     }
@@ -249,6 +254,15 @@ impl Game<'_> {
                 .flatten()
         });
         let id = character.map(|c| c.id.clone());
+        if let Some(form) = actor.bat.take() {
+            if form.character == id && self.bat_effect_active(&form) && !self.spectator() {
+                self.bat_apply_body(player);
+                self.bat_ambient_sound();
+                actor.bat = Some(form);
+            } else {
+                self.bat_finish(player, form);
+            }
+        }
         if actor.character != id {
             let spells = character.map(|c| c.starting_spells.clone()).unwrap_or_default();
             let switched = actor.ledger.character.as_ref().is_some_and(|previous| Some(previous) != id.as_ref())
@@ -308,17 +322,30 @@ impl Game<'_> {
                             error = Some("That spell has not been unlocked.".into());
                         } else {
                             let spell = spell.unwrap();
-                            let body = self.player.as_mut().unwrap();
-                            if body.health.food.food < spell.hunger {
+                            if actor.bat.is_some() && spell.kind != Kind::BatCancel {
+                                error = Some("Finish your current spell first.".into());
+                            } else if actor.bat.is_none() && spell.kind == Kind::BatCancel {
+                                error = Some("You are already in your normal form.".into());
+                            } else if self.player.as_ref().unwrap().health.food.food < spell.hunger {
                                 error = Some(format!("Requires {} hunger points.", spell.hunger));
+                            } else if spell.kind == Kind::Bat {
+                                actor.bat = self.bat_start(player, actor.character.clone(), &spell);
+                                started = actor.bat.is_some();
+                                if !started {
+                                    error = Some("Bat Transformation is unavailable.".into());
+                                }
                             } else {
+                                let body = self.player.as_mut().unwrap();
                                 body.health.food.food -= spell.hunger;
                                 body.health.food.saturation = body
                                     .health
                                     .food
                                     .saturation
                                     .min(body.health.food.food as f32);
-                                if spell.kind == Kind::Effect {
+                                if let Some(form) = actor.bat.take() {
+                                    self.bat_finish(player, form);
+                                    started = true;
+                                } else if spell.kind == Kind::Effect {
                                     if let Some(id) = super::potions::mob_effect_id(&spell.effects[1]) {
                                         let mut effect = EffectInstance::new(id, spell.duration_ticks as i32, 0);
                                         effect.visible = false;
@@ -452,7 +479,7 @@ impl Game<'_> {
             !catalog
                 .spells
                 .values()
-                .filter(|s| s.kind != Kind::Effect)
+                .filter(|s| matches!(s.kind, Kind::Giant | Kind::Tiny))
                 .any(|s| s.effects.iter().any(|id| id == effect.id))
         });
         self.apply_effect_status();

@@ -760,6 +760,12 @@ impl Game<'_> {
         let lookup = |name: &str| atlas.sprites.get(name).map(|r| [r.u0, r.v0, r.u1, r.v1]);
         let start = out.len();
         let body = self.own_body_visible();
+        if let Some(tint) = self.magic_bat_tint(self.command_actor_uuid()) {
+            if body {
+                self.magic_draw_bat(m, tint, camera, alpha as f32, packed, out);
+            }
+            return;
+        }
         // `native_player_submit`: a native mod's own model for this player,
         // in place of the vanilla one and its layers (an invisible player is
         // not asked, as for the others).

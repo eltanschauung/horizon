@@ -1225,6 +1225,10 @@ impl Game<'_> {
         let Some(g) = host.hub.guest(conn) else {
             return;
         };
+        let sound = if g.motion.as_ref().is_some_and(|p| p.form_dimensions.is_some()) {
+            if sound == "minecraft:entity.player.death" { "minecraft:entity.bat.death" }
+            else { "minecraft:entity.bat.hurt" }
+        } else { sound };
         let at = g.position;
         let dimension = g.dimension.clone();
         let source = horizon_client::settings::sound_source(sound) as i32;
@@ -2110,7 +2114,12 @@ impl Game<'_> {
             return;
         };
         let spectator = host.hub.guests[gi].spectator();
+        let bat = self.magic_bat_tint(host.hub.guests[gi].uuid).is_some();
         match packet {
+            S::UseItemOn(p) if bat => host.hub.ack(conn, p.sequence),
+            S::UseItem(p) if bat => host.hub.ack(conn, p.sequence),
+            S::PlayerAction(p) if bat && (0..=4).contains(&p.action) => host.hub.ack(conn, p.sequence),
+            S::Attack(_) | S::Interact(_) | S::PickItemFromEntity(_) | S::PickItemFromBlock(_) if bat => {}
             S::PlayerAction(a) => match a.action {
                 0 => {
                     host.hub.ack(conn, a.sequence);

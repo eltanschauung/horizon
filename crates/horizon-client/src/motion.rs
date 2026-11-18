@@ -315,6 +315,8 @@ pub struct PlayerMotion {
     /// Spectator mode: no physics, always flying (`Player.tick`).
     pub spectator: bool,
     pub flying: bool,
+    /// A temporary form sizes every pose independently of the avatar's scale.
+    pub form_dimensions: Option<crate::pose::Dimensions>,
     /// Client-side `Abilities.flyingSpeed`, adjusted by the spectator scroll wheel.
     pub flying_speed: f32,
     /// The jump key last tick (LocalPlayer.aiStep's wasJumping).
@@ -575,6 +577,7 @@ impl PlayerMotion {
             no_jump_delay: 0,
             jump_trigger_time: 0,
             may_fly: false,
+            form_dimensions: None,
             mobility_restricted: false,
             invulnerable: false,
             spectator: false,

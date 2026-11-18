@@ -335,6 +335,9 @@ impl Game<'_> {
     pub(super) fn tick_local_hand(&mut self) -> Result<()> {
         let attack_clicks = std::mem::take(&mut self.attack_clicks);
         let use_clicks = std::mem::take(&mut self.use_clicks);
+        if self.magic_is_bat() {
+            return Ok(());
+        }
         if self.screen == Screen::Playing && self.title.is_none() && self.sleeping.is_none() {
             let mut clicks = std::mem::take(&mut self.clicks);
             // keyAttack.isDown(); playing implies the grabbed mouse here
@@ -486,7 +489,7 @@ impl Game<'_> {
     /// swung and spent (or, with infinite materials, kept) the item, or that
     /// started using it.
     pub(super) fn use_with_hand(&mut self) -> Result<()> {
-        if self.clicks.destroying.active || self.hands_busy() {
+        if self.magic_is_bat() || self.clicks.destroying.active || self.hands_busy() {
             return Ok(());
         }
         let before = [self.stack_in(self.selected).cloned(), self.offhand.clone()];

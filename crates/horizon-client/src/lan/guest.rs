@@ -779,7 +779,7 @@ impl Guest {
         let pose = self.pose();
         match &self.motion {
             Some(m) if m.pose == pose => m.dimensions,
-            Some(m) => pose.dimensions(m.scale),
+            Some(m) => m.form_dimensions.unwrap_or_else(|| pose.dimensions(m.scale)),
             None => pose.dimensions(1.0),
         }
     }
