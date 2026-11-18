@@ -603,7 +603,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             }
             Class::Leaves => {
                 self.waterlogged_tick(state, pos);
-                let distance = self.leaf_distance_at(nstate) + 1;
+                let distance = self.leaf_distance_at(state, nstate) + 1;
                 if distance != 1 || table.int(state, p.distance) != distance {
                     self.schedule_tick(pos, block, 1);
                 }
@@ -1077,11 +1077,17 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         }
     }
     /// `LeavesBlock.getDistanceAt`.
-    pub(crate) fn leaf_distance_at(&self, state: BlockStateId) -> i32 {
+    pub(crate) fn leaf_distance_at(&self, leaf: BlockStateId, state: BlockStateId) -> i32 {
         let b = self.b;
-        if b.in_set(state, &b.tags.prevents_nearby_leaf_decay) {
+        let bamboo_leaves = b.table.name(leaf) == "lunatic:bamboo_leaves";
+        let neighbor = b.table.name(state);
+        if b.in_set(state, &b.tags.prevents_nearby_leaf_decay)
+            || (bamboo_leaves && matches!(neighbor, "minecraft:bamboo" | "lunatic:bushy_bamboo"))
+        {
             0
-        } else if b.table.has(state, b.props.distance) {
+        } else if (bamboo_leaves || neighbor != "lunatic:bamboo_leaves")
+            && b.table.has(state, b.props.distance)
+        {
             b.table.int(state, b.props.distance)
         } else {
             7

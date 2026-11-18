@@ -703,7 +703,8 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     fn leaves_update_distance(&self, state: BlockStateId, pos: BlockPos) -> BlockStateId {
         let mut distance = 7;
         for direction in Direction::ALL {
-            distance = distance.min(self.leaf_distance_at(self.rel_state(pos, direction)) + 1);
+            let neighbor = self.rel_state(pos, direction);
+            distance = distance.min(self.leaf_distance_at(state, neighbor) + 1);
             if distance == 1 {
                 break;
             }

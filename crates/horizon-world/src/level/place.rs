@@ -1059,11 +1059,12 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 None
             }
             Class::Leaves => {
-                let state = wl(table.set_bool(default, p.persistent, true));
+                let persistent = table.name(default) != "lunatic:bamboo_leaves";
+                let state = wl(table.set_bool(default, p.persistent, persistent));
                 let mut distance = 7;
                 for direction in Direction::ALL {
-                    distance =
-                        distance.min(self.leaf_distance_at(self.rel_state(pos, direction)) + 1);
+                    let neighbor = self.rel_state(pos, direction);
+                    distance = distance.min(self.leaf_distance_at(state, neighbor) + 1);
                     if distance == 1 {
                         break;
                     }
