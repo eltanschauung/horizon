@@ -491,7 +491,7 @@ impl GameLevel<'_> {
                 &mut self.world.random,
             ),
         };
-        for mut stack in drops {
+        for mut stack in drops.into_iter().chain(super::magic_brooms::scribing_contents(self.registry, state)) {
             if &*stack.item == "minecraft:air" || stack.count == 0 {
                 continue;
             }

@@ -10,12 +10,14 @@ use horizon_client::{
         magic_brooms::{Family, NAMESPACE, Variant},
     },
     particles::{ParticleOptions, ParticleType},
+    text::Text,
 };
 use horizon_core::{
     geometry::{Aabb, Vec3},
     position::BlockPos,
 };
-use std::sync::Arc;
+use horizon_world::registry::{BlockRegistry, BlockStateId};
+use std::{borrow::Cow, sync::Arc};
 
 const FAMILY_NAMES: [&str; 6] = ["fire", "ice", "lightning", "ender", "grove", "tide"];
 const CATALYSTS: [&str; 6] = [
@@ -35,6 +37,24 @@ const UPGRADES: [&str; 6] = [
     "minecraft:heart_of_the_sea",
 ];
 
+pub(super) fn scribing_contents(
+    registry: &BlockRegistry,
+    state: BlockStateId,
+) -> Option<ItemStack> {
+    let state = registry.state(state)?;
+    if state.name != "horizon_magic_brooms:scroll_table" {
+        return None;
+    }
+    let stage = state.properties.get("stage")?.as_str();
+    match stage {
+        "paper" => Some(ItemStack::new("minecraft:paper", 1)),
+        family if FAMILY_NAMES.contains(&family) => {
+            Some(ItemStack::new(&format!("{NAMESPACE}:{family}_scroll"), 1))
+        }
+        _ => None,
+    }
+}
+
 fn family_name(family: Family) -> &'static str {
     match family {
         Family::Magic => "magic",
@@ -44,6 +64,44 @@ fn family_name(family: Family) -> &'static str {
         Family::Ender => "ender",
         Family::Grove => "grove",
         Family::Tide => "tide",
+    }
+}
+
+#[derive(Clone, Copy)]
+enum StationCue {
+    Paper,
+    Wood,
+    Bristles,
+    Infuse,
+    Upgrade,
+    Collect,
+}
+
+impl StationCue {
+    fn sound(self) -> (&'static str, f32, i32) {
+        match self {
+            Self::Paper => ("minecraft:item.book.page_turn", 1.08, 5),
+            Self::Wood => ("minecraft:block.wood.place", 0.82, 7),
+            Self::Bristles => ("minecraft:block.grass.place", 0.72, 7),
+            Self::Infuse => ("minecraft:block.enchantment_table.use", 1.15, 14),
+            Self::Upgrade => ("minecraft:block.amethyst_block.chime", 1.3, 14),
+            Self::Collect => ("minecraft:entity.experience_orb.pickup", 1.28, 10),
+        }
+    }
+
+    fn particle(self, family: &str) -> ParticleType {
+        match self {
+            Self::Paper | Self::Wood | Self::Bristles => ParticleType::Smoke,
+            _ => match family {
+                "fire" => ParticleType::Flame,
+                "ice" => ParticleType::Snowflake,
+                "lightning" => ParticleType::ElectricSpark,
+                "ender" => ParticleType::DragonBreath,
+                "grove" => ParticleType::HappyVillager,
+                "tide" => ParticleType::Splash,
+                _ => ParticleType::Enchant,
+            },
+        }
     }
 }
 
@@ -211,62 +269,165 @@ impl Game<'_> {
             .iter()
             .position(|id| *id == item)
             .map(|i| FAMILY_NAMES[i]);
-        let (next, result) = match (station, stage, item) {
-            ("scroll_table", "empty", "minecraft:paper") => ("paper", None),
-            ("scroll_table", "paper", _) if catalyst.is_some() => (catalyst.unwrap(), None),
-            ("scroll_table", family, "") if FAMILY_NAMES.contains(&family) => {
-                ("empty", Some(format!("{NAMESPACE}:{family}_scroll")))
-            }
+        let (next, result, notice, cue) = match (station, stage, item) {
+            ("scroll_table", "empty", "minecraft:paper") => (
+                Cow::Borrowed("paper"),
+                None,
+                "Paper placed. Add a magical catalyst.",
+                StationCue::Paper,
+            ),
+            ("scroll_table", "paper", _) if catalyst.is_some() => (
+                Cow::Borrowed(catalyst.unwrap()),
+                None,
+                "The scroll is inscribed. Use an empty hand to collect it.",
+                StationCue::Infuse,
+            ),
+            ("scroll_table", family, "") if FAMILY_NAMES.contains(&family) => (
+                Cow::Borrowed("empty"),
+                Some(format!("{NAMESPACE}:{family}_scroll")),
+                "Scroll collected.",
+                StationCue::Collect,
+            ),
             ("broom_workbench", "empty", wood)
-                if ["_log", "_stem", "_wood", "_hyphae", "_planks"]
-                    .iter()
-                    .any(|suffix| wood.ends_with(suffix))
-                    || wood == "minecraft:stick" =>
+                if wood == "minecraft:stick"
+                    || self.items().item_in_tag("minecraft:logs", wood)
+                    || self.items().item_in_tag("minecraft:planks", wood) =>
             {
-                ("handle", None)
+                (
+                    Cow::Borrowed("handle"),
+                    None,
+                    "Handle mounted. Add a Hay Bale.",
+                    StationCue::Wood,
+                )
             }
-            ("broom_workbench", "handle", "minecraft:hay_block") => ("bristles", None),
-            ("broom_workbench", "bristles", "minecraft:diamond") => ("magic_upgraded", None),
-            ("broom_workbench", "bristles", _) if catalyst.is_some() => (catalyst.unwrap(), None),
-            ("broom_workbench", "bristles", "") => {
-                ("empty", Some(format!("{NAMESPACE}:broom_magic")))
-            }
+            ("broom_workbench", "handle", "minecraft:hay_block") => (
+                Cow::Borrowed("bristles"),
+                None,
+                "Bristles mounted. Empty hand: finish | Catalyst: infuse.",
+                StationCue::Bristles,
+            ),
+            ("broom_workbench", "bristles", _) if catalyst.is_some() => (
+                Cow::Borrowed(catalyst.unwrap()),
+                None,
+                "Infusion complete. Empty hand: finish | Upgrade material: improve.",
+                StationCue::Infuse,
+            ),
             ("broom_workbench", family, "") if family != "empty" && family != "handle" => {
-                ("empty", Some(format!("{NAMESPACE}:broom_{family}")))
+                let variant = if family == "bristles" {
+                    "magic"
+                } else {
+                    family
+                };
+                (
+                    Cow::Borrowed("empty"),
+                    Some(format!("{NAMESPACE}:broom_{variant}")),
+                    "Broom assembled!",
+                    StationCue::Collect,
+                )
             }
             ("broom_workbench", family, _)
-                if FAMILY_NAMES
-                    .iter()
-                    .position(|v| *v == family)
-                    .is_some_and(|i| UPGRADES[i] == item) =>
+                if (family == "bristles" && item == "minecraft:diamond")
+                    || FAMILY_NAMES
+                        .iter()
+                        .zip(UPGRADES)
+                        .any(|(&name, upgrade)| name == family && upgrade == item) =>
             {
-                let next = format!("{family}_upgraded");
-                if self.set_broom_stage(hit, &next) {
-                    self.consume_held();
-                    self.swing_arm();
-                }
+                let variant = if family == "bristles" {
+                    "magic"
+                } else {
+                    family
+                };
+                (
+                    Cow::Owned(format!("{variant}_upgraded")),
+                    None,
+                    "Upgrade installed. Use an empty hand to finish.",
+                    StationCue::Upgrade,
+                )
+            }
+            ("scroll_table", stage, _) => {
+                self.broom_notice(match stage {
+                    "empty" => "Place Paper on the table first.",
+                    "paper" => "Use Blaze Powder, Packed Ice, Redstone, Chorus Fruit, Vines, or Prismarine.",
+                    _ => "Use an empty hand to collect the finished scroll.",
+                });
                 return true;
             }
-            ("broom_workbench" | "scroll_table", _, _) => return true,
+            ("broom_workbench", stage, _) => {
+                self.broom_notice(match stage {
+                    "empty" => "Use any wood block to shape the broom handle.",
+                    "handle" => "Add a Hay Bale to form the bristles.",
+                    stage if stage.ends_with("_upgraded") => {
+                        "Use an empty hand to collect the finished broom."
+                    }
+                    _ => "Empty hand: finish | Valid catalyst: infuse or upgrade.",
+                });
+                return true;
+            }
             _ => return false,
         };
-        if self.set_broom_stage(hit, next) {
+        let family = if next.as_ref() == "empty" {
+            stage
+        } else {
+            next.as_ref()
+        }
+        .trim_end_matches("_upgraded");
+        let particle = cue.particle(family);
+        let float_height = if station == "scroll_table" { 0.55 } else { 0.9 };
+        let at = [
+            f64::from(x) + 0.5,
+            f64::from(y) + float_height,
+            f64::from(z) + 0.5,
+        ];
+        if self.set_broom_stage(hit, &next) {
             if let Some(result) = result {
                 let stack = ItemStack::new(&result, 1);
                 if let Some(left) = self.give(stack) {
-                    self.spawn_item(
-                        left,
-                        [f64::from(x) + 0.5, f64::from(y) + 1.2, f64::from(z) + 0.5],
-                        [0.0, 0.15, 0.0],
-                        10,
-                    );
+                    self.spawn_item(left, at, [0.0, 0.15, 0.0], 10);
                 }
             } else {
                 self.consume_held();
             }
+            let (sound, pitch, count) = cue.sound();
+            self.broom_station_effect(at, particle, count, sound, pitch);
+            self.broom_notice(notice);
             self.swing_arm();
         }
         true
+    }
+
+    fn broom_notice(&mut self, message: &str) {
+        self.send_overlay_message(Text::literal(message));
+    }
+
+    fn broom_station_effect(
+        &mut self,
+        at: [f64; 3],
+        particle: ParticleType,
+        count: i32,
+        sound: &str,
+        pitch: f32,
+    ) {
+        self.lan_send_particles(super::lan_particles::QueuedParticle {
+            dimension: self.dim.id(),
+            options: ParticleOptions::simple(particle),
+            state: None,
+            at,
+            spread: [0.23, 0.18, 0.23],
+            speed: [0.025; 3],
+            count,
+            randomization: 0,
+        });
+        self.audio.play(sound, Some(at), 0.85, pitch);
+        self.creatures
+            .lan_sounds
+            .push(super::creatures::NativeSound {
+                dimension: self.dim.id(),
+                sound: sound.into(),
+                at,
+                source: 4,
+                volume: 0.85,
+                pitch,
+            });
     }
 
     pub(super) fn magic_broom_passives(&mut self, index: usize) {

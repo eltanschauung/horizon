@@ -4456,6 +4456,7 @@ impl Game<'_> {
                 }
             });
         let player = self.native_acting_id();
+        drops.extend(magic_brooms::scribing_contents(registry, state));
         self.native_block_drops(pos, state, Some(player), held, None, &mut drops);
         drops
     }
