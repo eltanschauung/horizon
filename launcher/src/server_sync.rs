@@ -344,7 +344,7 @@ fn apply(
     m: &Manifest,
     files: &Path,
     runtime: &Path,
-    build: impl FnOnce() -> Result<String, String>,
+    build: impl FnOnce(bool) -> Result<String, String>,
 ) -> Result<String, String> {
     m.validate()?;
     recover(home, runtime)?;
@@ -396,8 +396,10 @@ fn apply(
         Ok(())
     };
     let result = (|| {
+        let mut mods_changed = false;
         remember(&home.join("horizon-mods.txt"))?;
         remember(&home.join(RECORD))?;
+        let previous = read_record(home);
         // Replace duplicate filenames for a managed id, but preserve the originals
         // in the rollback transaction until the replacement compiled successfully.
         for (folder, kind, ext) in [
@@ -412,7 +414,7 @@ fn apply(
                     }
                     if let Ok((id, _)) = package_identity(&path, &kind) {
                         let wanted = m.packages.iter().find(|p| p.id == id && p.kind == kind);
-                        let obsolete = read_record(home).is_some_and(|old| {
+                        let obsolete = previous.as_ref().is_some_and(|old| {
                             old.packages.iter().any(|p| p.id == id && p.kind == kind)
                         });
                         if wanted.is_some_and(|p| home.join(p.relative()) != path)
@@ -420,6 +422,7 @@ fn apply(
                         {
                             remember(&path)?;
                             fs::remove_file(path).map_err(err)?;
+                            mods_changed = true;
                         }
                     }
                 }
@@ -434,6 +437,7 @@ fn apply(
             if hash(&dest).as_deref() != Ok(p.sha256.as_str()) {
                 remember(&dest)?;
                 atomic_copy(&files.join(&p.sha256), &dest)?;
+                mods_changed |= p.kind != Kind::Runtime;
             }
         }
         // Preserve explicit choices for optional client mods. Required mods are
@@ -451,7 +455,7 @@ fn apply(
                 browser::java::set_enabled(home, &p.id, true)?;
             }
         }
-        let version = build()?;
+        let version = build(mods_changed)?;
         let bytes = serde_json::to_vec_pretty(m).map_err(err)?;
         let tmp = backup.join("manifest-new");
         fs::write(&tmp, bytes).map_err(err)?;
@@ -526,6 +530,7 @@ pub fn sync(
     if !manages_instance(instance) {
         return Err("This instance is not server-managed".into());
     }
+    let prune_old = backend::Settings::load().auto_prune();
     progress(
         Phase::Downloading,
         "Checking the dedicated server's updates".into(),
@@ -544,17 +549,6 @@ pub fn sync(
     let _lock = browser::lock_home(&instance.home);
     let files = cache.join("files");
     fs::create_dir_all(&files).map_err(err)?;
-    let keep: BTreeSet<_> = m.packages.iter().map(|p| p.sha256.as_str()).collect();
-    for entry in fs::read_dir(&files).map_err(err)? {
-        let entry = entry.map_err(err)?;
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if entry.file_type().map_err(err)?.is_file()
-            && hex(&name, 64)
-            && !keep.contains(name.as_str())
-        {
-            fs::remove_file(entry.path()).map_err(err)?;
-        }
-    }
     for p in m.packages.iter().filter(|p| p.applies()) {
         let dest = files.join(&p.sha256);
         if hash(&dest).as_deref() == Ok(p.sha256.as_str()) {
@@ -580,10 +574,11 @@ pub fn sync(
         }
     };
     let runtime = backend::version_dir(&base);
-    let version = apply(&instance.home, &m, &files, &runtime, || {
+    let version = apply(&instance.home, &m, &files, &runtime, |mods_changed| {
         if let Some(current) = current.filter(|v| {
-            native_mods::about(v)
-                .is_some_and(|a| a.horizon == m.game_revision && a.left_out.is_empty())
+            !(prune_old && mods_changed)
+                && native_mods::about(v)
+                    .is_some_and(|a| a.horizon == m.game_revision && a.left_out.is_empty())
         }) {
             let enabled = crate::native_status::enabled(&instance.home);
             let built = crate::native_status::built(current);
@@ -610,8 +605,27 @@ pub fn sync(
     })?;
     // The executable is selected only AFTER both package and build verification.
     instances::edit(&instance.id, |meta| meta.version = Some(version.clone()))?;
+    if prune_old {
+        if let Err(error) = prune_downloads(&files, &m) {
+            eprintln!("Couldn't delete old server update downloads: {error}");
+        }
+    }
     native_mods::prune(&version);
     Ok(Outcome::Ready(version))
+}
+
+fn prune_downloads(files: &Path, m: &Manifest) -> Result<(), String> {
+    let keep: BTreeSet<_> = m.packages.iter().map(|p| p.sha256.as_str()).collect();
+    for entry in fs::read_dir(files).map_err(err)? {
+        let entry = entry.map_err(err)?;
+        let name = entry.file_name();
+        if let Some(name) = name.to_str() {
+            if entry.file_type().map_err(err)?.is_file() && hex(name, 64) && !keep.contains(name) {
+                fs::remove_file(entry.path()).map_err(err)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -698,7 +712,7 @@ mod tests {
         let (m, files, home) = fixture(&t.0, true);
         fs::write(files.join(&m.packages[0].sha256), b"corrupt").unwrap();
         fs::write(home.join("horizon-mods.txt"), "mod.test_mod:false\n").unwrap();
-        assert!(apply(&home, &m, &files, &t.0.join("runtime"), || panic!(
+        assert!(apply(&home, &m, &files, &t.0.join("runtime"), |_| panic!(
             "must not build"
         ))
         .is_err());
@@ -723,7 +737,7 @@ mod tests {
             "mod.test_mod:false\nmod.custom:true\n",
         )
         .unwrap();
-        assert!(apply(&home, &m, &files, &t.0.join("runtime"), || Err(
+        assert!(apply(&home, &m, &files, &t.0.join("runtime"), |_| Err(
             "compiler failed".into()
         ))
         .is_err());
@@ -748,7 +762,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            apply(&home, &m, &files, &t.0.join("runtime"), || Ok(
+            apply(&home, &m, &files, &t.0.join("runtime"), |_| Ok(
                 "built".into()
             ))
             .unwrap(),
@@ -760,11 +774,42 @@ mod tests {
         assert!(!browser::java::is_enabled(&home, "custom"));
     }
     #[test]
+    fn replaced_packages_request_one_build_and_old_downloads_can_be_pruned() {
+        let t = Temp::new();
+        let (m, files, home) = fixture(&t.0, true);
+        let runtime = t.0.join("runtime");
+        let active = home.join(m.packages[0].relative());
+        fs::create_dir_all(active.parent().unwrap()).unwrap();
+        fs::write(&active, b"outdated package").unwrap();
+        let stale = files.join("c".repeat(64));
+        fs::write(&stale, b"outdated package").unwrap();
+        let partial = files.join("partial");
+        fs::write(&partial, b"unrelated").unwrap();
+
+        apply(&home, &m, &files, &runtime, |changed| {
+            assert!(changed);
+            assert_eq!(hash(&active).unwrap(), m.packages[0].sha256);
+            Ok("built".into())
+        })
+        .unwrap();
+        assert!(stale.is_file());
+        prune_downloads(&files, &m).unwrap();
+        assert!(!stale.exists());
+        assert!(files.join(&m.packages[0].sha256).is_file());
+        assert!(partial.is_file());
+        apply(&home, &m, &files, &runtime, |changed| {
+            assert!(!changed);
+            Ok("built".into())
+        })
+        .unwrap();
+    }
+
+    #[test]
     fn optional_disabled_mod_stays_disabled() {
         let t = Temp::new();
         let (m, files, home) = fixture(&t.0, false);
         fs::write(home.join("horizon-mods.txt"), "mod.test_mod:false\n").unwrap();
-        apply(&home, &m, &files, &t.0.join("runtime"), || {
+        apply(&home, &m, &files, &t.0.join("runtime"), |_| {
             Ok("built".into())
         })
         .unwrap();
@@ -776,7 +821,7 @@ mod tests {
     fn later_player_edits_are_backed_up_even_at_the_same_channel_generation() {
         let t = Temp::new();
         let (m, files, home) = fixture(&t.0, true);
-        apply(&home, &m, &files, &t.0.join("runtime"), || {
+        apply(&home, &m, &files, &t.0.join("runtime"), |_| {
             Ok("built".into())
         })
         .unwrap();
@@ -785,7 +830,7 @@ mod tests {
             b"player edited package",
         )
         .unwrap();
-        apply(&home, &m, &files, &t.0.join("runtime"), || {
+        apply(&home, &m, &files, &t.0.join("runtime"), |_| {
             Ok("built".into())
         })
         .unwrap();

@@ -66,6 +66,7 @@ const PLAY: Context = Context {
     in_pack: false,
     level: 100,
     natives: true,
+    prune_old: false,
     fit: None,
 };
 
@@ -109,7 +110,7 @@ fn updates_forward_on_the_same_game_only() {
         ("1.1.0", GAME, &b),
         ("1.0.0", GAME, &a),
     ]);
-    let to = |e: &installed::Entry, ctx: &Context| version_of(decide(&index, e, ctx));
+    let to = |e: &installed::Entry, ctx: &Context| version_of(decide(&index, e, ctx, &dir));
     assert_eq!(to(&entry("1.0.0"), &PLAY), Some("1.2.0".into()));
     assert_eq!(to(&entry("1.2.0"), &PLAY), None, "already the newest");
     assert_eq!(
@@ -162,7 +163,7 @@ fn updates_forward_on_the_same_game_only() {
     newer.projects[ruby_at].versions[0].api_level = Some(7);
     let low = Context { level: 6, ..PLAY };
     assert_eq!(
-        version_of(decide(&newer, &entry("1.0.0"), &low)),
+        version_of(decide(&newer, &entry("1.0.0"), &low, &dir)),
         Some("1.1.0".into())
     );
     // Never backwards: the newest was taken down while it is installed.
@@ -173,10 +174,16 @@ fn updates_forward_on_the_same_game_only() {
         reason: "Test.".into(),
         date: String::new(),
     });
-    assert_eq!(version_of(decide(&down, &entry("1.2.0"), &PLAY)), None);
+    assert_eq!(
+        version_of(decide(&down, &entry("1.2.0"), &PLAY, &dir)),
+        None
+    );
     // Never across Minecraft versions: what is installed was for another game.
     let other = index_of(&[("1.2.0", GAME, &c), ("1.0.0", "26.2", &a)]);
-    assert_eq!(version_of(decide(&other, &entry("1.0.0"), &PLAY)), None);
+    assert_eq!(
+        version_of(decide(&other, &entry("1.0.0"), &PLAY, &dir)),
+        None
+    );
     fs::remove_dir_all(&dir).unwrap();
 }
 
@@ -186,9 +193,9 @@ fn a_new_version_that_drops_content_is_named() {
     let old = ruby(&dir, "1.0.0", &["lamp", "ore"], &["gem"]);
     let more = ruby(&dir, "1.1.0", &["lamp", "ore", "brick"], &["gem"]);
     let less = ruby(&dir, "1.2.0", &["lamp"], &[]);
-    assert!(dropped(&old, &more).unwrap().is_empty());
+    assert!(dropped(&old, &more, false).unwrap().is_empty());
     assert_eq!(
-        dropped(&old, &less).unwrap(),
+        dropped(&old, &less, false).unwrap(),
         ["block ruby:ore", "item ruby:gem"]
     );
     fs::remove_dir_all(&dir).unwrap();
@@ -278,6 +285,49 @@ fn updates_holds_and_keeps_the_replaced_file_until_the_next_start() {
 }
 
 #[test]
+fn pruning_refreshes_and_purges_stale_copies_of_the_same_release() {
+    let dir = scratch("auto-refresh");
+    let home = dir.join("home");
+    let original = ruby(&dir, "1.0.0", &["lamp"], &[]);
+    let first = index_of(&[("1.0.0", GAME, &original)]);
+    let p = first.project("ruby").unwrap();
+    let installed = install_version_guarded(
+        &first,
+        true,
+        p,
+        &p.versions[0],
+        &home,
+        &|_| Ok(()),
+        &|_, _| {},
+    )
+    .unwrap();
+    let active = installed.path(&home).unwrap();
+    let original_bytes = fs::read(&active).unwrap();
+    let replacement = ruby(&dir, "1.0.0", &["lamp", "ore"], &[]);
+    let index = index_of(&[("1.0.0", GAME, &replacement)]);
+    let run = |ctx: &Context| run_with(&index, true, &home, ctx, &|_, _| {});
+    assert_eq!(run(&PLAY), Report::default());
+    assert_eq!(fs::read(&active).unwrap(), original_bytes);
+
+    let prune = Context {
+        prune_old: true,
+        ..PLAY
+    };
+    assert_eq!(run(&prune).updated, ["Ruby 1.0.0"]);
+    assert_eq!(fs::read(&active).unwrap(), fs::read(&replacement).unwrap());
+    assert!(kept_list(&home).is_empty());
+    assert!(fs::read_dir(home.join(KEPT_DIR)).unwrap().next().is_none());
+    assert_eq!(run(&prune), Report::default());
+
+    fs::write(&active, b"damaged package").unwrap();
+    assert_eq!(run(&prune).updated, ["Ruby 1.0.0"]);
+    fs::remove_file(&active).unwrap();
+    assert_eq!(run(&prune).updated, ["Ruby 1.0.0"]);
+    assert_eq!(fs::read(&active).unwrap(), fs::read(&replacement).unwrap());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn an_update_cut_short_is_rolled_back_at_the_next_start() {
     let dir = scratch("auto-rollback");
     let home = dir.join("home");
@@ -298,7 +348,7 @@ fn an_update_cut_short_is_rolled_back_at_the_next_start() {
     let old = before.find(SourceId::Horizon, "ruby").unwrap().clone();
     // An earlier launcher kept 1.0.0, then stopped with a half-written file and the list still
     // naming 1.0.0.
-    let mut k = keep(&home, &old).unwrap();
+    let mut k = keep(&home, &old, None).unwrap();
     k.pid = 0;
     save_kept(&home, &[k]).unwrap();
     fs::write(home.join(&old.file), b"half").unwrap();
@@ -572,7 +622,8 @@ fn a_native_mod_updates_only_to_a_version_that_builds_on_the_horizon_played() {
         fit: Some((plays, Vec::new())),
         ..PLAY
     };
-    let to = |e: &installed::Entry, ctx: &Context| version_of(decide(&index, e, ctx));
+    let to =
+        |e: &installed::Entry, ctx: &Context| version_of(decide(&index, e, ctx, Path::new(".")));
     assert_eq!(to(&entry("1.0.0"), &fits), Some("1.1.0".into()));
     assert_eq!(
         to(&entry("1.1.0"), &fits),

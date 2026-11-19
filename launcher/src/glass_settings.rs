@@ -413,7 +413,7 @@ impl Launcher {
                 Some(
                     div()
                         .child(trf(
-                            "Keeps the {count} newest, the one in use and the ones your instances use. Deleted versions install again from the Versions page.",
+                            "Keeps the {count} newest, the one in use and the ones your instances use. Deleted versions install again from the Versions page. Replaces outdated mods and rebuilds when needed.",
                             &[("count", &self.settings.keep_newest().to_string())],
                         ))
                         .into_any_element(),

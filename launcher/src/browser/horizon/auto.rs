@@ -15,8 +15,8 @@
 //! A content mod (`.hmod`) whose new version drops a block, item, entity, effect, menu or
 //! creative tab the installed one has waits for the player (its blocks would vanish from their
 //! worlds): the notice says which. The file an update replaces is kept in
-//! `mod-browser/replaced/` until the next start: an update cut short (a crash between moving the
-//! file and saving the list) is rolled back from it then.
+//! `mod-browser/replaced/` for crash recovery. With automatic pruning, the backup is removed
+//! after the verified replacement commits and stale copies of the same release are refreshed.
 use super::{install_version_guarded, needs_port, Index};
 use crate::browser::{installed, Kind, SourceId, GAME};
 use crate::i18n::trf;
@@ -47,6 +47,7 @@ pub struct Context {
     pub in_pack: bool,
     pub level: u32,
     pub natives: bool,
+    pub prune_old: bool,
     pub fit: Option<(crate::native_fit::Plays, Vec<(String, String)>)>,
 }
 
@@ -83,7 +84,12 @@ pub fn in_pack(home: &Path) -> bool {
 }
 
 /// Whether `entry` updates automatically, and to what.
-pub fn decide<'a>(index: &'a Index, entry: &installed::Entry, ctx: &Context) -> Decision<'a> {
+fn decide<'a>(
+    index: &'a Index,
+    entry: &installed::Entry,
+    ctx: &Context,
+    home: &Path,
+) -> Decision<'a> {
     let native = crate::native_status::is_native_file(&entry.file);
     let skip_native = native && !ctx.natives;
     if entry.source != SourceId::Horizon
@@ -117,8 +123,20 @@ pub fn decide<'a>(index: &'a Index, entry: &installed::Entry, ctx: &Context) -> 
     };
     let same_game = p.versions[now].game == target.game;
     let native_next = p.kind == index::Kind::NativeMod;
-    if next >= now || !same_game || needs_port(target) || (native_next && !ctx.natives) {
+    if next > now || !same_game || needs_port(target) || (native_next && !ctx.natives) {
         return Decision::Skip;
+    }
+    if next == now {
+        let stale = ctx.prune_old
+            && entry.kind == Kind::Mod
+            && (entry.checksum != format!("SHA-256:{}", target.file.sha256)
+                || entry
+                    .path(home)
+                    .and_then(|path| index::sha256_file(&path).ok())
+                    .is_none_or(|hash| !hash.eq_ignore_ascii_case(&target.file.sha256)));
+        if !stale {
+            return Decision::Skip;
+        }
     }
     Decision::Update(target)
 }
@@ -142,9 +160,13 @@ pub fn content_ids(path: &Path) -> Result<BTreeSet<String>, String> {
 }
 
 /// What the content mod at `old` has that the one at `new` lacks.
-pub fn dropped(old: &Path, new: &Path) -> Result<Vec<String>, String> {
+fn dropped(old: &Path, new: &Path, replace_unreadable: bool) -> Result<Vec<String>, String> {
     let new = content_ids(new)?;
-    Ok(content_ids(old)?.difference(&new).cloned().collect())
+    match content_ids(old) {
+        Ok(old) => Ok(old.difference(&new).cloned().collect()),
+        Err(_) if replace_unreadable => Ok(Vec::new()),
+        Err(error) => Err(error),
+    }
 }
 
 /// A replaced file kept until the next start, with the entry it had.
@@ -155,6 +177,9 @@ struct Kept {
     copy: String,
     /// The launcher process that replaced it: its own updates aren't cleared before it ends.
     pid: u32,
+    /// The verified package expected to take its place, including same-version replacements.
+    #[serde(default)]
+    replacement: Option<String>,
 }
 
 fn kept_list(home: &Path) -> Vec<Kept> {
@@ -167,8 +192,11 @@ fn kept_list(home: &Path) -> Vec<Kept> {
 fn save_kept(home: &Path, list: &[Kept]) -> Result<(), String> {
     let path = home.join(KEPT);
     if list.is_empty() {
-        let _ = fs::remove_file(&path);
-        return Ok(());
+        return match fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(format!("{}: {e}", path.display())),
+        };
     }
     static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let id = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -185,14 +213,19 @@ fn save_kept(home: &Path, list: &[Kept]) -> Result<(), String> {
     Ok(())
 }
 
-/// Whether the browser's list has `kept`'s project at a newer version whose file is in place.
+/// Whether the browser's list and the package on disk both match the replacement.
 fn finished(home: &Path, kept: &Kept) -> bool {
     let list = installed::Installed::load(home);
     let Some(now) = list.find(SourceId::Horizon, &kept.entry.project) else {
         return false;
     };
     let hash = now.checksum.strip_prefix("SHA-256:").unwrap_or_default();
-    now.version != kept.entry.version
+    let replaced = now.version != kept.entry.version
+        || kept
+            .replacement
+            .as_deref()
+            .is_some_and(|replacement| hash.eq_ignore_ascii_case(replacement));
+    replaced
         && now
             .path(home)
             .and_then(|p| index::sha256_file(&p).ok())
@@ -225,12 +258,13 @@ fn restore(home: &Path, kept: &Kept) -> Result<(), String> {
 pub fn recover(home: &Path) {
     let _lock = crate::browser::lock_home(home);
     let me = std::process::id();
-    let (mine, earlier): (Vec<Kept>, Vec<Kept>) =
+    let (mut mine, earlier): (Vec<Kept>, Vec<Kept>) =
         kept_list(home).into_iter().partition(|k| k.pid == me);
-    for k in &earlier {
-        if !finished(home, k) {
-            if let Err(e) = restore(home, k) {
+    for k in earlier {
+        if !finished(home, &k) {
+            if let Err(e) = restore(home, &k) {
                 eprintln!("Couldn't put {} back: {e}", k.entry.title);
+                mine.push(k);
                 continue;
             }
         }
@@ -240,7 +274,7 @@ pub fn recover(home: &Path) {
 }
 
 /// Keeps the file `entry` installed before it is replaced.
-fn keep(home: &Path, entry: &installed::Entry) -> Result<Kept, String> {
+fn keep(home: &Path, entry: &installed::Entry, replacement: Option<&str>) -> Result<Kept, String> {
     let from = entry
         .path(home)
         .ok_or_else(|| format!("{} is outside the game folder", entry.file))?;
@@ -253,6 +287,7 @@ fn keep(home: &Path, entry: &installed::Entry) -> Result<Kept, String> {
         entry: entry.clone(),
         copy,
         pid: std::process::id(),
+        replacement: replacement.map(str::to_owned),
     };
     let mut list = kept_list(home);
     list.retain(|k| k.entry.project != entry.project);
@@ -290,11 +325,11 @@ pub(super) fn run_with(
         if picked.contains_key(&entry.project) {
             continue;
         }
-        let Decision::Update(v) = decide(index, &entry, ctx) else {
+        let Decision::Update(v) = decide(index, &entry, ctx, home) else {
             continue;
         };
         let p = index.project(&entry.project).expect("decide found it");
-        match update(index, local, p, v, &entry, home, progress) {
+        match update(index, local, p, v, &entry, home, ctx.prune_old, progress) {
             Ok(None) => {
                 report.rebuild |= p.kind == index::Kind::NativeMod;
                 report.updated.push(format!("{} {}", p.name, v.version));
@@ -317,6 +352,7 @@ fn update(
     v: &index::Version,
     entry: &installed::Entry,
     home: &Path,
+    prune_old: bool,
     progress: &dyn Fn(&str, f32),
 ) -> Result<Option<String>, String> {
     let _lock = crate::browser::lock_home(home);
@@ -335,7 +371,9 @@ fn update(
         let (Some(old), true) = (&old, content) else {
             return Ok(());
         };
-        let gone = dropped(old, new)?;
+        // A verified copy of the original release can repair an unreadable file.
+        let replace_unreadable = entry.checksum == format!("SHA-256:{}", v.file.sha256);
+        let gone = dropped(old, new, replace_unreadable)?;
         if gone.is_empty() {
             return Ok(());
         }
@@ -351,27 +389,37 @@ fn update(
         Err(why)
     };
     let kept = match &old {
-        Some(_) => Some(keep(home, entry)?),
+        Some(_) => Some(keep(home, entry, Some(&v.file.sha256))?),
         None => None,
     };
     match install_version_guarded(index, local, p, v, home, &guard, progress) {
-        Ok(_) => Ok(None),
+        Ok(_) => {
+            if let Some(kept) = kept.as_ref().filter(|_| prune_old) {
+                forget(home, kept);
+            }
+            Ok(None)
+        }
         Err(e) => {
             if let Some(kept) = &kept {
                 // Nothing moved when the check refused it; else the old file goes back now.
                 if !finished(home, kept) {
-                    let _ = restore(home, kept);
+                    restore(home, kept)?;
                 }
-                let _ = fs::remove_file(home.join(&kept.copy));
-                let mut list = kept_list(home);
-                list.retain(|k| k.entry.project != kept.entry.project);
-                let _ = save_kept(home, &list);
+                forget(home, kept);
             }
             match held.into_inner() {
                 Some(why) => Ok(Some(why)),
                 None => Err(e),
             }
         }
+    }
+}
+
+fn forget(home: &Path, kept: &Kept) {
+    let mut list = kept_list(home);
+    list.retain(|k| k.entry.project != kept.entry.project);
+    if save_kept(home, &list).is_ok() {
+        let _ = fs::remove_file(home.join(&kept.copy));
     }
 }
 
