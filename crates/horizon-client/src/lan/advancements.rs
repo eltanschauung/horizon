@@ -352,6 +352,10 @@ impl ServerAdvancements {
         (!entries.is_empty()).then(|| book_add(entries, false))
     }
 
+    pub fn recipe_display_order(&self) -> Vec<&str> {
+        self.displays.display_order()
+    }
+
     /// `ServerRecipeBook.sendInitialRecipeBook`: every known recipe, without
     /// notifications, highlighted while not yet displayed, replacing the
     /// client's book.

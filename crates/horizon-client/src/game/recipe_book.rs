@@ -84,6 +84,7 @@ pub(super) struct RecipeUi {
     client: ClientBook,
     client_known: Option<BTreeSet<String>>,
     client_version: u64,
+    remote_displays: Option<Vec<String>>,
     /// The display a click last placed (`lastRecipe`), which Enter and Space
     /// place again; slot clicks keep it.
     last_clicked: Option<i32>,
@@ -388,7 +389,17 @@ impl Game<'_> {
     fn ensure_book(&mut self) {
         if self.recipe_ui.book.is_none() {
             let mut book = Book::build(self.recipes(), self.items());
-            book.set_display_ids(&self.stations().recipe_index);
+            if let Some(displays) = self.recipe_ui.remote_displays.as_ref() {
+                let mut by_recipe = std::collections::HashMap::new();
+                for (index, recipe) in displays.iter().enumerate() {
+                    by_recipe.entry(recipe.as_str()).or_insert(index as i32);
+                }
+                for entry in &mut book.entries {
+                    entry.display_id = by_recipe.get(entry.id.as_str()).copied().unwrap_or(-1);
+                }
+            } else {
+                book.set_display_ids(&self.stations().recipe_index);
+            }
             self.recipe_ui.book = Some(book);
         }
         if self.recipe_ui.search.is_none() {
@@ -1245,6 +1256,21 @@ impl Game<'_> {
 
     // ---- a server's recipe book ----
 
+    pub(super) fn remote_book_displays(&mut self, bytes: &[u8]) {
+        if bytes.len() <= 1_000_000
+            && let Ok(displays) = serde_json::from_slice(bytes)
+        {
+            self.recipe_ui.remote_displays = Some(displays);
+            self.recipe_ui.client_version += 1;
+            self.forget_book();
+        }
+    }
+
+    pub(super) fn clear_remote_book_displays(&mut self) {
+        self.recipe_ui.remote_displays = None;
+        self.forget_book();
+    }
+
     /// ClientboundRecipeBookAddPacket (`ClientRecipeBook.add`): the
     /// displays join the book, highlighted when new, and the recipes whose
     /// entries ask for it show the toast.
@@ -1262,8 +1288,12 @@ impl Game<'_> {
             if e.flags & 2 != 0 {
                 ui.client.highlight.insert(e.id);
             }
+            let recipe = match &ui.remote_displays {
+                Some(displays) => displays.get(e.id as usize).map(String::as_str),
+                None => world_stations!(self).recipe_index.recipe_of_display(e.id),
+            };
             if e.flags & 1 != 0
-                && let Some(id) = world_stations!(self).recipe_index.recipe_of_display(e.id)
+                && let Some(id) = recipe
                 && !toast.iter().any(|t| t == id)
             {
                 toast.push(id.to_owned());

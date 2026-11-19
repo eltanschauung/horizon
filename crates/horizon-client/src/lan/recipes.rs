@@ -70,6 +70,9 @@ fn recipes(dir: &Path, namespace: &str, out: &mut BTreeMap<String, Value>) {
 /// advertises support. Requests carry a menu id and resource location.
 pub const TRANSFER_CHANNEL: &str = "horizon:recipe_transfer";
 
+/// The server's display IDs, in wire order, sent before a book snapshot.
+pub const BOOK_DISPLAYS_CHANNEL: &str = "horizon:recipe_book_displays";
+
 /// The recipes by id in vanilla's registration order (path, then namespace),
 /// the order `RecipeManager` numbers groups and lists the stonecutter's
 /// recipes in, and so the order the host's own tables keep.

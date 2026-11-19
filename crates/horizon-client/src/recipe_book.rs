@@ -865,6 +865,15 @@ impl RecipeIndex {
             })
             .map(|(id, _)| id.as_str())
     }
+    pub fn display_order(&self) -> Vec<&str> {
+        let mut ordered = vec![""; self.recipes.values().map(|recipe| recipe.displays).sum()];
+        for (id, recipe) in &self.recipes {
+            let start = recipe.first_display as usize;
+            ordered[start..start + recipe.displays].fill(id);
+        }
+        ordered
+    }
+
     pub fn first_display(&self, id: &str) -> Option<i32> {
         self.recipes
             .get(id)

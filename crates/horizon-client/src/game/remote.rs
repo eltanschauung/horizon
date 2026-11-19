@@ -3591,6 +3591,9 @@ impl Game<'_> {
             C::CustomPayload(p) if p.channel == horizon_client::lan::recipes::TRANSFER_CHANNEL => {
                 self.remote_recipe_transfer(&p.data);
             }
+            C::CustomPayload(p) if p.channel == horizon_client::lan::recipes::BOOK_DISPLAYS_CHANNEL => {
+                self.remote_book_displays(&p.data);
+            }
             // The server's recipes its native mods asked to send.
             C::CustomPayload(p) if p.channel == horizon_client::lan::recipes::CONTENT_CHANNEL => {
                 self.remote_recipe_content(&p.data);
@@ -3603,6 +3606,7 @@ impl Game<'_> {
             C::Login(p) => {
                 self.test_highlights.clear();
                 self.forget_synced_recipes();
+                self.clear_remote_book_displays();
                 self.level.hardcore = p.hardcore;
                 // handleLogin: startWaitingForNewLevel with Reason.OTHER, which
                 // replaces ServerReconfigScreen.
@@ -6045,14 +6049,19 @@ impl Game<'_> {
                 (i, textures)
             })
             .collect();
-        let mut resolved: Vec<(usize, Option<String>, bool)> = Vec::new();
+        let mut resolved = Vec::new();
         for (id, textures) in mannequins {
             let corpse_character = self.mobs[id].profile.as_ref()
                 .and_then(|profile| profile.properties.iter().find(|p| p.name == super::native_entities::CORPSE_CHARACTER))
                 .and_then(|property| self.pack.character_catalog.index(&property.value))
                 .and_then(|index| self.pack.character_catalog.get(index));
             if let Some(character) = corpse_character {
-                resolved.push((id, Some(character.skin(&self.gui.atlas).to_owned()), character.is_slim(&self.gui.atlas)));
+                resolved.push((
+                    id,
+                    Some(character.skin(&self.gui.atlas).to_owned()),
+                    character.is_slim(&self.gui.atlas),
+                    Some((character.chest, character.size)),
+                ));
                 continue;
             }
             let skin = {
@@ -6062,14 +6071,18 @@ impl Game<'_> {
                 })
             };
             let slim = skin.is_some() && textures.slim;
-            resolved.push((id, skin, slim));
+            resolved.push((id, skin, slim, None));
         }
-        for (i, skin, slim) in resolved {
+        for (i, skin, slim, character) in resolved {
             let skin = skin.filter(|s| !s.starts_with("skins/") || self.again_skin(s));
             // Resolution and atlas uploads do not insert or remove mobs.
             let mob = &mut self.mobs[i];
             mob.slim = slim && skin.is_some();
             mob.skin = skin;
+            if let Some((chest, size)) = character {
+                mob.character_chest = if mob.slim { chest } else { 1.0 };
+                mob.extra.model_scale = size;
+            }
         }
     }
     /// Puts a downloaded skin in an atlas skin slot (`SkinSlots::place`),
