@@ -82,7 +82,7 @@ def cleanup_after_build():
         print(json.dumps({'resource_cache': report}), flush=True)
 
 
-def purge_launcher_cache(home=None, *, apply=True, workflow_locked=False, keep_versions=()):
+def purge_launcher_cache(home=None, *, apply=True, workflow_locked=False, keep_versions=(), interrupted_only=False):
     """Retain the newest snapshot per family, plus live/referenced builds."""
     from fork_workflow import build_home, homes, read, running_paths
     root = Path(home) if home is not None else homes()[0]
@@ -94,7 +94,7 @@ def purge_launcher_cache(home=None, *, apply=True, workflow_locked=False, keep_v
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 return {'deferred': 'Build/deployment workflow is running', 'removed': []}
-            return purge_launcher_cache(root, apply=True, workflow_locked=True, keep_versions=keep_versions)
+            return purge_launcher_cache(root, apply=True, workflow_locked=True, keep_versions=keep_versions, interrupted_only=interrupted_only)
     native = build_home(root)/'fork-native'
     if native.is_symlink():
         return {'deferred': 'Native build directory is a symlink', 'removed': []}
@@ -121,10 +121,15 @@ def purge_launcher_cache(home=None, *, apply=True, workflow_locked=False, keep_v
                 ('fork-versions', versions, _NATIVE_VERSION),
                 ('release-versions', versions, _RELEASE_VERSION),
                 ('server-partial', server_builds, rf'\.{_NATIVE_VERSION}\.partial'),
-                ('client-partial', versions, rf'\.{_NATIVE_VERSION}\.partial')]
+                ('client-partial', versions, rf'\.{_NATIVE_VERSION}\.partial'),
+                ('source-partial', native/'source', r'\.[0-9a-f]{40}\.partial'),
+                ('patched-partial', native/'patched', r'\.[0-9a-f]{64}\.partial'),
+                ('staging-partial', native, r'stage\.new|(?:installed|mods|mixins)\.incoming')]
+    cutoff = time.time() - 300
     report = {'families': {}, 'removed': []}
     for name, parent, pattern in families:
-        if parent.is_symlink() or not parent.is_dir():
+        partial = name.endswith('-partial')
+        if (interrupted_only and not partial) or parent.is_symlink() or not parent.is_dir():
             continue
         entries = [p for p in parent.iterdir() if not p.is_symlink() and p.is_dir()
                    and re.fullmatch(pattern, p.name)]
@@ -136,16 +141,19 @@ def purge_launcher_cache(home=None, *, apply=True, workflow_locked=False, keep_v
         kept, candidates = [], []
         for i, p in enumerate(entries):
             resolved = p.resolve()
-            protected = ((parent == versions and p.name in refs) or (name == 'source' and p.name in revisions)
+            protected = ((partial and p.stat().st_mtime >= cutoff)
+                         or (parent == versions and p.name in refs) or (name == 'source' and p.name in revisions)
                          or any(a.is_relative_to(resolved) for a in active)
                          or any((p/n).exists() or (p/n).is_symlink() for n in _PLAYER_DATA))
-            (kept if (i == 0 and not name.endswith('-partial')) or protected else candidates).append(p)
+            (kept if (i == 0 and not partial) or protected else candidates).append(p)
         report['families'][name] = {'kept': [str(p) for p in kept],
                                     'candidates': [str(p) for p in candidates]}
         if apply:
             for p in candidates:
                 shutil.rmtree(p)
                 report['removed'].append(str(p))
+    if interrupted_only:
+        return report
     windows = _purge_retired_windows_output(native/'target-windows', active, apply=apply)
     report['families']['windows-cross-build'] = windows
     report['removed'].extend(windows['removed'])
@@ -349,7 +357,7 @@ def _native_compiler_running(native):
         try:
             name = (proc/'comm').read_text().strip()
             args = (proc/'cmdline').read_bytes().replace(b'\0', b' ').decode(errors='replace')
-            if (name in {'cargo', 'rustc'} and str(native) in args
+            if (name in {'cargo', 'rustc', 'horizon-mixins'} and str(native) in args
                     or name.startswith('horizon-launch') and 'native-build' in args):
                 return True
         except OSError:

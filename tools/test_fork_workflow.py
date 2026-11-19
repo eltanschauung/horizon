@@ -70,6 +70,23 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(releases['candidates'], [str(versions/'v0.3.9')])
         self.assertTrue((versions/'v0.3.9').exists())
 
+    def test_interrupted_cleanup_removes_only_idle_partial_outputs(self):
+        native = self.root/'fork-native'
+        partial = native/'source'/('.'+'a'*40+'.partial')
+        abandoned = native/'stage.new'
+        fresh = native/'mods.incoming'
+        working = native/'stage'
+        protected = native/'mixins.incoming'
+        for path in (partial, abandoned, fresh, working, protected/'saves'):
+            path.mkdir(parents=True)
+        for path in (partial, abandoned, protected):
+            os.utime(path, (1, 1))
+        with patch.object(w, 'build_home', return_value=self.root), patch.object(
+                fork_cache, '_native_compiler_running', return_value=False):
+            result = fork_cache.purge_launcher_cache(self.root, interrupted_only=True)
+        self.assertEqual(set(result['removed']), {str(partial), str(abandoned)})
+        self.assertTrue(all(p.exists() for p in (fresh, working, protected)))
+
     def test_windows_scratch_cleanup_requires_old_outputs_and_both_cargo_locks(self):
         cache = self.root/'fork-native/target-windows'
         host = cache/'fast'
