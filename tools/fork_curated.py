@@ -10,7 +10,7 @@ import tomllib
 import urllib.request
 import zipfile
 REMOVED={'lambdynamiclights_horizon','lambdynamiclights','sleep_threshold','corpse_native'}
-ADDED=('betterdynamiclights','horizon_multiplayer_sleep','horizonmatica','gravestone-core','minimap')
+ADDED=('betterdynamiclights','horizon_multiplayer_sleep','horizonmatica','gravestone-core','minimap','yukari_gap_native')
 def published_main(checkout):
     remote = subprocess.check_output(
         ['git', '-C', checkout, 'ls-remote', 'origin', 'refs/heads/main'], text=True,
@@ -193,7 +193,14 @@ def install_defaults(root):
     content_folder = game/'horizon-mods'
     content_folder.mkdir(parents=True, exist_ok=True)
     for src in content:
-        shutil.copy2(src, content_folder/src.name)
+        info = package(src, False)
+        destination = content_folder / (info['id'] + '.hmod') if info['id'] == 'yukari_gap' else content_folder / src.name
+        if info['id'] == 'yukari_gap':
+            temp = destination.with_suffix('.hmod.new')
+            patch_content(root, src, temp, info['id'])
+            temp.replace(destination)
+        else:
+            shutil.copy2(src, destination)
     for src in native:
         info=package(src,True);shutil.copy2(src,folder/(info['id']+'.hnmod'))
     for p in list(folder.glob('*.hnmod')):
