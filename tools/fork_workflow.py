@@ -314,7 +314,7 @@ def deploy(args):
     if 'server'in targets:
         if 'server'not in a:raise ValueError('Build server artifacts first')
         if not re.fullmatch(r'[A-Za-z0-9_.@-]+',args.host)or args.host.startswith('-'):raise ValueError('Invalid SSH host')
-        payload={'schema':1,'root':args.server_dir,'service':args.service,'apply':args.apply,'files':{}}
+        payload={'schema':1,'root':args.server_dir,'service':args.service,'apply':args.apply,'restart_occupied':args.restart_occupied,'files':{}}
         staging=p.parent/'upload';staging.mkdir(exist_ok=True)
         for name in ['horizon-engine','horizon-server','native-mods.json']:
             dest=('bin/'if name!='native-mods.json'else'')+name;src=Path(a['server']['directory'])/name
@@ -431,10 +431,11 @@ def main(argv=None):
     p=commands.add_parser('manifest');p.add_argument('--output',type=Path);p.add_argument('--revision');p.add_argument('--mods');p.add_argument('--base');p.add_argument('--instance',default='horizon');p.add_argument('--profile',choices=['performance','release'],default='performance')
     for name in ['build-plan','preflight']:
         p=commands.add_parser(name);p.add_argument('manifest',type=Path);p.add_argument('--target',choices=['client','server','both'],default='both')
-    p=commands.add_parser('deploy');p.add_argument('manifest',type=Path);p.add_argument('--target',choices=['local','server','both'],default='local');p.add_argument('--host',default='telemazer@74.91.116.171');p.add_argument('--server-dir',default='/home/telemazer/lunatic-server');p.add_argument('--service',default='lunatic-horizon.service');p.add_argument('--apply',action='store_true')
+    p=commands.add_parser('deploy');p.add_argument('manifest',type=Path);p.add_argument('--target',choices=['local','server','both'],default='local');p.add_argument('--host',default='telemazer@74.91.116.171');p.add_argument('--server-dir',default='/home/telemazer/lunatic-server');p.add_argument('--service',default='lunatic-horizon.service');p.add_argument('--apply',action='store_true');p.add_argument('--restart-occupied',action='store_true',help='Restart the dedicated server even if players are online')
     p=commands.add_parser('prune-builds');p.add_argument('--exports',type=Path,action='append',default=[]);p.add_argument('--apply',action='store_true');p.add_argument('--dry-run',action='store_true');p.add_argument('--interrupted-only',action='store_true')
     args=parser.parse_args(argv)
     if args.command=='prune-builds'and args.apply and args.dry_run:parser.error('Choose --apply or --dry-run')
+    if args.command=='deploy' and args.restart_occupied and args.target=='local':parser.error('--restart-occupied requires a server target')
     home,_=homes();home.mkdir(parents=True,exist_ok=True)
     with open(home/'.fork-workflow.lock','a')as lock:
         fcntl.flock(lock,fcntl.LOCK_EX)

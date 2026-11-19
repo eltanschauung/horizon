@@ -72,11 +72,12 @@ def execute(payload):
     if not root.is_absolute()or not stage.is_relative_to(root/'.workflow-stage')or not re.fullmatch(r'[a-zA-Z0-9_.@-]+\.service',service):raise ValueError('Invalid deployment destination')
     if not all(allowed(n)for n in payload['files']):raise ValueError('Invalid deployment file')
     def status():return json.loads(subprocess.check_output([root/'bin/server','--dir',root,'status','--json']))
+    restart_occupied = payload.get('restart_occupied') is True
     before=status();online=players(before)
     matches={n:(root/n).is_file()and sha(root/n)==value for n,value in payload['files'].items()}
     report={'apply':payload['apply'],'players':len(online),'artifacts_match':all(matches.values()),'packages_match':all(v for n,v in matches.items()if n.startswith(('horizon-mods/','horizon-native-mods/'))),'changed':[n for n,same in matches.items()if not same],'phase':before['phase']}
     if not payload['apply']:return report
-    if online:return dict(report,skipped='players_online')
+    if online and not restart_occupied:return dict(report,skipped='players_online')
     for name,value in payload['files'].items():
         if (stage/name).is_symlink()or sha(stage/name)!=value:raise ValueError('Uploaded artifact mismatch: '+name)
         if (root/name).is_symlink():raise ValueError('Refusing symlink destination: '+name)
@@ -100,7 +101,7 @@ def execute(payload):
         if existed[name]:
             dest=backup/name;dest.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(root/name,dest)
     # Recheck immediately before stopping: someone may have joined during the upload/probes.
-    if players(status()):return dict(report,skipped='players_online')
+    if players(status()) and not restart_occupied:return dict(report,skipped='players_online')
     def control(verb):subprocess.run(['sudo','-n','systemctl',verb,service],check=True,stdout=subprocess.DEVNULL)
     control('stop')
     try:

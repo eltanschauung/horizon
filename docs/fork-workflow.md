@@ -58,7 +58,7 @@ Server defaults are `telemazer@74.91.116.171`, `/home/telemazer/lunatic-server`,
 The server step verifies uploaded hashes and runtime libraries, checks player count
 again immediately before stopping, backs up replaced files, installs the complete
 package set, restarts, and waits for running status, zero crashes and at least 18 TPS.
-It skips an occupied server; unknown player count fails. A failed restart rolls back
+It skips an occupied server unless `--restart-occupied` is passed explicitly. Unknown player count fails. A failed restart rolls back
 binaries/packages and restarts the previous service. World/config/account files are
 not deployment inputs. The JSON report records package agreement, selection, health,
 backup and log locations. Preview does not restart or upload server artifacts.
