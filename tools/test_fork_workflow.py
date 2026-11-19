@@ -112,6 +112,21 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue((host/'.cargo-lock').is_file())
         self.assertTrue((target/'.cargo-lock').is_file())
 
+    def test_new_server_content_defaults_preserve_explicit_switches(self):
+        config = self.root/'horizon-mods.txt'
+        config.write_bytes(b'mod.disabled:false')
+        packages = []
+        for name, side in [('disabled', 'both'), ('temples', 'both'), ('emoji', 'client')]:
+            package = self.root/(name+'.hmod')
+            with zipfile.ZipFile(package, 'w') as bundle:
+                bundle.writestr('horizon-mod.toml', f'id = "{name}"\nside = "{side}"\n')
+            packages.append(package)
+        settings, enabled = remote.content_defaults(config, packages)
+        self.assertEqual(settings, b'mod.disabled:false\nmod.temples:true\n')
+        self.assertEqual(enabled, ['temples'])
+        remote.install_mod_settings(config, settings)
+        self.assertEqual(remote.content_defaults(config, packages), (settings, []))
+
     def test_player_count_must_be_known(self):
         for status in [{'phase':'starting'},{'phase':'running','sample':None}]:
             with self.assertRaises(RuntimeError):remote.players(status)

@@ -10,6 +10,8 @@ import shutil
 import subprocess
 import sys
 import time
+import tomllib
+import zipfile
 
 
 def sha(path):
@@ -25,6 +27,44 @@ def players(status):
     if status.get('phase')!='running' or not isinstance(game,dict) or not isinstance(game.get('players'),list):
         raise RuntimeError('Cannot safely determine online players')
     return game['players']
+
+
+def content_defaults(settings, packages):
+    """Enable newly installed server content while honoring explicit switches."""
+    current = settings.read_bytes() if settings.exists() else b''
+    configured = {line.partition(b':')[0].strip() for line in current.splitlines() if b':' in line}
+    additions = []
+    for package in sorted(packages):
+        with zipfile.ZipFile(package) as archive:
+            info = tomllib.loads(archive.read('horizon-mod.toml').decode())
+        if info.get('side') == 'client':
+            continue
+        mod_id = info['id']
+        if not re.fullmatch(r'[a-z0-9_]+', mod_id):
+            raise ValueError('Invalid content mod ID: '+mod_id)
+        key = ('mod.'+mod_id).encode()
+        if key not in configured:
+            configured.add(key)
+            additions.append(key+b':true\n')
+    if not additions:
+        return current, []
+    return current + (b'\n' if current and not current.endswith(b'\n') else b'') + b''.join(additions), [
+        row.removeprefix(b'mod.').split(b':',1)[0].decode() for row in additions
+    ]
+
+def install_mod_settings(path, contents):
+    import tempfile
+    with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as stream:
+        temp = Path(stream.name)
+        try:
+            stream.write(contents)
+            stream.flush()
+            os.fsync(stream.fileno())
+            if path.exists():
+                shutil.copymode(path, temp)
+            os.replace(temp, path)
+        finally:
+            temp.unlink(missing_ok=True)
 
 
 def execute(payload):
@@ -51,7 +91,10 @@ def execute(payload):
     extras=[]
     for folder,suffix in [('horizon-native-mods','*.hnmod'),('horizon-mods','*.hmod')]:
         extras.extend(str(p.relative_to(root))for p in(root/folder).glob(suffix)if str(p.relative_to(root))not in payload['files'])
-    names=list(payload['files'])+extras
+    config=root/'horizon-mods.txt'
+    if config.is_symlink():raise ValueError('Refusing symlink mod settings')
+    settings, enabled = content_defaults(config, (stage/n for n in payload['files'] if n.startswith('horizon-mods/')))
+    names=list(payload['files'])+extras+([config.name] if enabled else [])
     existed={name:(root/name).exists()for name in names}
     for name in names:
         if existed[name]:
@@ -64,6 +107,7 @@ def execute(payload):
         for name in payload['files']:
             dest=root/name;dest.parent.mkdir(parents=True,exist_ok=True);os.replace(stage/name,dest)
         for name in extras:(root/name).unlink()
+        if enabled:install_mod_settings(config, settings)
         control('start')
         deadline=time.monotonic()+120
         while time.monotonic()<deadline:
@@ -72,7 +116,7 @@ def execute(payload):
             game=(current.get('sample')or{}).get('game')or{}
             if current.get('phase')=='running'and game.get('tps',0)>=18:
                 if any(sha(root/n)!=v for n,v in payload['files'].items()):raise RuntimeError('Post-deploy package mismatch')
-                return dict(report,phase='running',packages_match=True,artifacts_match=True,tps=game['tps'],crashes=current['crashes'],backup=str(backup))
+                return dict(report,phase='running',packages_match=True,artifacts_match=True,tps=game['tps'],crashes=current['crashes'],backup=str(backup),enabled_content=enabled)
             time.sleep(2)
         raise RuntimeError('Updated server did not become healthy within 120 seconds')
     except Exception as error:
