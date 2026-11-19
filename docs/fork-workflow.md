@@ -78,6 +78,9 @@ chatheads, classic_music, eatinganimation, justenoughitems, lunatic, minimap, no
 tectonic_horizon, worldedit and zoom. JEI 1.1.0 and Classic Music 0.1.0 are client features;
 include their bundles in both deployment snapshots so clients keep the same defaults.
 Content packages include Arcadian Dream, Biomes O’ Plenty and Lunatic.
+The frozen distribution also includes Gravestone's content pack and native core,
+with private grave markers in the Minimap. Corpse is excluded from new builds.
+Legacy Corpse inventory files stay in existing world backups for recovery.
 
 ## Local modded shortcut
 

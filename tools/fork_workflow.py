@@ -90,14 +90,14 @@ def snapshot(args):
     entries = []
     seen = set()
     wanted = set(args.mods.split(',')) if args.mods else None
-    from fork_curated import native_packages, patch_content, REMOVED
-    curated = native_packages(ROOT)
-    curated_ids = {package(p, True)["id"] for p in curated}
+    from fork_curated import content_packages, native_packages, patch_content, REMOVED
     for folder, suffix, native in [('horizon-native-mods','hnmod',True),('horizon-mods','hmod',False)]:
-        sources = list((game/folder).glob('*.'+suffix)) + (curated if native else [])
+        curated = native_packages(ROOT) if native else content_packages(ROOT)
+        curated_ids = {package(p, native)['id'] for p in curated}
+        sources = list((game/folder).glob('*.'+suffix)) + curated
         for src in sorted(sources):
             info = package(src, native)
-            if native and (info['id'] in REMOVED or (info['id'] in curated_ids and src not in curated)): continue
+            if (native and info['id'] in REMOVED) or (info['id'] in curated_ids and src not in curated): continue
             if native and wanted is not None and info['id'] not in wanted:
                 continue
             key = (native, info['id'])
@@ -274,11 +274,15 @@ def deploy(args):
             for e in m['packages']:
                 folder='horizon-native-mods'if e['kind']=='native'else'horizon-mods'
                 save(game/folder/Path(e['path']).name)
+            retired = game/'horizon-native-mods/corpse_native.hnmod'
+            replace_corpse = any(e['id']=='gravestone_core' for e in m['packages'])
+            if replace_corpse:save(retired)
             save(h/'instances.json');save(h/'settings.json')
             try:
                 for e in m['packages']:
                     src=p.parent/e['path'];folder='horizon-native-mods'if e['kind']=='native'else'horizon-mods'
                     atomic_copy(src,game/folder/src.name)
+                if replace_corpse:retired.unlink(missing_ok=True)
                 instances=read(h/'instances.json');instances.setdefault('instances',{}).setdefault(m['instance'],{})['version']=a['client']['version'];write(h/'instances.json',instances)
                 settings=read(h/'settings.json');settings['selected']=a['client']['version'];write(h/'settings.json',settings)
             except Exception:
