@@ -127,6 +127,15 @@ class WorkflowTests(unittest.TestCase):
         remote.install_mod_settings(config, settings)
         self.assertEqual(remote.content_defaults(config, packages), (settings, []))
 
+    def test_server_rollout_requires_current_lunatic_source(self):
+        manifest = {'packages': [{'id': 'lunatic'}]}
+        with patch('fork_curated.published_main', return_value='current'):
+            with self.assertRaisesRegex(ValueError, 'Freeze a fresh manifest'):
+                w.require_current_lunatic(manifest, self.root)
+            with self.assertRaisesRegex(ValueError, 'stale differs'):
+                w.require_current_lunatic(dict(manifest, lunatic_revision='stale'), self.root)
+            w.require_current_lunatic(dict(manifest, lunatic_revision='current'), self.root)
+
     def test_player_count_must_be_known(self):
         for status in [{'phase':'starting'},{'phase':'running','sample':None}]:
             with self.assertRaises(RuntimeError):remote.players(status)

@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tomllib
 import zipfile
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -87,48 +88,55 @@ def snapshot(args):
     out = (args.output or ROOT/'.local/build-plans'/stamp/'manifest.json').resolve()
     if out.exists() or (out.parent/'inputs').exists():
         raise ValueError('Choose a fresh manifest directory')
-    entries = []
-    seen = set()
-    wanted = set(args.mods.split(',')) if args.mods else None
-    from fork_curated import content_packages, native_packages, patch_content, REMOVED
-    for folder, suffix, native in [('horizon-native-mods','hnmod',True),('horizon-mods','hmod',False)]:
-        curated = native_packages(ROOT) if native else content_packages(ROOT)
-        curated_ids = {package(p, native)['id'] for p in curated}
-        sources = list((game/folder).glob('*.'+suffix)) + curated
-        for src in sorted(sources):
-            info = package(src, native)
-            if (native and info['id'] in REMOVED) or (info['id'] in curated_ids and src not in curated): continue
-            if native and wanted is not None and info['id'] not in wanted:
-                continue
-            key = (native, info['id'])
-            if key in seen:raise ValueError('Duplicate package id: '+info['id'])
-            seen.add(key)
-            dest = out.parent/'inputs'/folder/(info['id']+'.'+suffix)
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src, dest)
-            if not native: patch_content(ROOT, src, dest, info['id'])
-            frozen = package(dest, native)
-            if frozen['id'] != info['id']:raise ValueError('Package identity changed during snapshot; retry')
-            entries.append(dict(frozen, kind='native' if native else 'content', path=str(dest.relative_to(out.parent))))
-    ids = {e['id'] for e in entries if e['kind']=='native'}
-    if not ids or (wanted is not None and wanted != ids):
-        raise ValueError('Native package selection is empty or contains missing ids')
-    # The compiler is shipped by the frozen launcher, which may be newer than the game.
-    src = git('show', provenance['revision']+':launcher/src/rust_toolchain.rs')
-    toolchain = re.search(r'pub const VERSION: &str = "([^"]+)"', src).group(1)
-    shutil.copy2(launcher, out.parent/'inputs/launcher')
-    if digest(out.parent/'inputs/launcher') != launcher_hash:
-        raise ValueError('Launcher changed during snapshot; retry')
-    manifest = {'schema':1, 'created_utc':stamp, 'game_revision':revision,
-                'launcher_revision':provenance['revision'], 'launcher_tree':provenance['launcher_tree'],
-                'launcher_sha256':launcher_hash, 'launcher_version':subprocess.check_output([out.parent/'inputs/launcher','--version'],text=True).strip(),
-                'mods_revision':subprocess.check_output(['git','-C',ROOT.parent/'horizon-mods','rev-parse','HEAD'],text=True).strip(),
-                'toolchain':toolchain, 'profile':args.profile, 'base':args.base or read(h/'instances.json').get('instances',{}).get(args.instance,{}).get('version') or read(h/'settings.json').get('selected'),
-                'instance':args.instance, 'packages':entries}
-    if not manifest['base']:
-        raise ValueError('No installed base version; supply --base')
-    write(out, manifest)
-    return {'manifest':str(out),'manifest_sha256':digest(out),'revision':revision,'native_mods':sorted(ids)}
+    from fork_curated import content_packages, lunatic_packages, native_packages, patch_content, published_main, REMOVED
+    mods_checkout = ROOT.parent/'horizon-mods'
+    mods_revision = subprocess.check_output(['git','-C',mods_checkout,'rev-parse','HEAD'],text=True).strip()
+    if mods_revision != published_main(mods_checkout):
+        raise ValueError('The horizon-mods checkout must match its published main before freezing')
+    subprocess.run(['git', '-C', mods_checkout, 'diff', '--quiet', 'HEAD'], check=True)
+    with tempfile.TemporaryDirectory(prefix='horizon-lunatic-bundles-') as directory:
+        lunatic_revision, lunatic_content, lunatic_native = lunatic_packages(ROOT, Path(directory))
+        entries = []
+        seen = set()
+        wanted = set(args.mods.split(',')) if args.mods else None
+        for folder, suffix, native in [('horizon-native-mods','hnmod',True),('horizon-mods','hmod',False)]:
+            curated = [*native_packages(ROOT), lunatic_native] if native else [*content_packages(ROOT), lunatic_content]
+            curated_ids = {package(p, native)['id'] for p in curated}
+            sources = list((game/folder).glob('*.'+suffix)) + curated
+            for src in sorted(sources):
+                info = package(src, native)
+                if (native and info['id'] in REMOVED) or (info['id'] in curated_ids and src not in curated): continue
+                if native and wanted is not None and info['id'] not in wanted:
+                    continue
+                key = (native, info['id'])
+                if key in seen:raise ValueError('Duplicate package id: '+info['id'])
+                seen.add(key)
+                dest = out.parent/'inputs'/folder/(info['id']+'.'+suffix)
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dest)
+                if not native: patch_content(ROOT, src, dest, info['id'])
+                frozen = package(dest, native)
+                if frozen['id'] != info['id']:raise ValueError('Package identity changed during snapshot; retry')
+                entries.append(dict(frozen, kind='native' if native else 'content', path=str(dest.relative_to(out.parent))))
+        ids = {e['id'] for e in entries if e['kind']=='native'}
+        if not ids or (wanted is not None and wanted != ids):
+            raise ValueError('Native package selection is empty or contains missing ids')
+        # The compiler is shipped by the frozen launcher, which may be newer than the game.
+        src = git('show', provenance['revision']+':launcher/src/rust_toolchain.rs')
+        toolchain = re.search(r'pub const VERSION: &str = "([^"]+)"', src).group(1)
+        shutil.copy2(launcher, out.parent/'inputs/launcher')
+        if digest(out.parent/'inputs/launcher') != launcher_hash:
+            raise ValueError('Launcher changed during snapshot; retry')
+        manifest = {'schema':1, 'created_utc':stamp, 'game_revision':revision,
+                    'launcher_revision':provenance['revision'], 'launcher_tree':provenance['launcher_tree'],
+                    'launcher_sha256':launcher_hash, 'launcher_version':subprocess.check_output([out.parent/'inputs/launcher','--version'],text=True).strip(),
+                    'mods_revision':mods_revision, 'lunatic_revision':lunatic_revision,
+                    'toolchain':toolchain, 'profile':args.profile, 'base':args.base or read(h/'instances.json').get('instances',{}).get(args.instance,{}).get('version') or read(h/'settings.json').get('selected'),
+                    'instance':args.instance, 'packages':entries}
+        if not manifest['base']:
+            raise ValueError('No installed base version; supply --base')
+        write(out, manifest)
+        return {'manifest':str(out),'manifest_sha256':digest(out),'revision':revision,'native_mods':sorted(ids)}
 
 
 def load(path):
@@ -252,12 +260,23 @@ def artifacts(path):
     return p,m,a
 
 
+def require_current_lunatic(manifest, checkout):
+    from fork_curated import published_main
+    if any(e['id'] == 'lunatic' for e in manifest['packages']):
+        revision = manifest.get('lunatic_revision')
+        current = published_main(checkout)
+        if revision != current:
+            raise ValueError(f'Frozen Lunatic revision {revision or "unknown"} differs from published {current}. Freeze a fresh manifest.')
+
+
 def deploy(args):
     from fork import atomic_copy
     p,m,a=artifacts(args.manifest);h,game=homes()
     targets=['local','server']if args.target=='both'else[args.target]
     if 'local' in targets and 'client' not in a:raise ValueError('Build client artifacts first')
     if 'server' in targets:
+        if args.apply:
+            require_current_lunatic(m, ROOT.parent/'Lunatic')
         if 'server' not in a:raise ValueError('Build server artifacts first')
         if not re.fullmatch(r'[A-Za-z0-9_.@-]+',args.host) or args.host.startswith('-'):raise ValueError('Invalid SSH host')
     result={'apply':args.apply,'revision':m['game_revision'],'native_mods':sorted(e['id']for e in m['packages']if e['kind']=='native')}

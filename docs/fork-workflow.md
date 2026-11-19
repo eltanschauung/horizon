@@ -27,8 +27,10 @@ launcher builds cannot create a plan. This is build provenance, not an account e
 Optional: `--revision SHA`, `--base INSTALLED_VERSION`, `--instance NAME`,
 `--profile performance|release`, `--mods id,id` to restrict the native set.
 All installed content packages are captured. Inspect the JSON before building;
-this snapshots installed packages, not unbuilt sibling-repository edits or runtime
-preferences. Do not commit the private snapshot/binaries.
+the freeze uses the packaged distribution defaults and the installed packages
+outside that set. It rebuilds both Lunatic packages from its published main
+commit and records that revision. Server deployment requires a fresh freeze
+if Lunatic main advances. Do not commit the private snapshot/binaries.
 
 `preflight` stages and checks the actual frozen mod set using the launcher's managed
 compiler, Cargo home, target directory, features and profile. It creates no installed

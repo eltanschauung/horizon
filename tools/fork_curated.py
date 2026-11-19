@@ -3,12 +3,52 @@ from pathlib import Path, PurePosixPath
 import json
 import shutil
 import subprocess
+import sys
+import tarfile
 import tempfile
 import tomllib
 import urllib.request
 import zipfile
 REMOVED={'lambdynamiclights_horizon','lambdynamiclights','sleep_threshold','corpse_native'}
 ADDED=('betterdynamiclights','horizon_multiplayer_sleep','horizonmatica','gravestone-core','minimap')
+def published_main(checkout):
+    remote = subprocess.check_output(
+        ['git', '-C', checkout, 'ls-remote', 'origin', 'refs/heads/main'], text=True,
+    ).split()
+    if len(remote) != 2 or remote[1] != 'refs/heads/main':
+        raise ValueError(f'Cannot resolve published main for {checkout.name}')
+    return remote[0]
+
+
+def lunatic_packages(root, destination):
+    from fork_workflow import package
+    checkout = root.parent / 'Lunatic'
+    revision = published_main(checkout)
+    if subprocess.run(['git', '-C', checkout, 'cat-file', '-e', revision], capture_output=True).returncode:
+        subprocess.run(['git', '-C', checkout, 'fetch', 'origin', 'main'], check=True)
+    tools = checkout / 'target/tools'
+    destination.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='horizon-lunatic-source-') as directory:
+        source = Path(directory)
+        with subprocess.Popen(['git', '-C', checkout, 'archive', revision], stdout=subprocess.PIPE) as archive:
+            with tarfile.open(fileobj=archive.stdout, mode='r|') as contents:
+                contents.extractall(source, filter='data')
+            if archive.wait():
+                raise ValueError(f'Cannot archive Lunatic {revision}')
+        command = [sys.executable, source/'tools/build.py', '--horizon', root, '--tools-target', tools]
+        if (tools/'debug/cargo-horizon-mod').is_file():
+            command.append('--skip-tool-build')
+        subprocess.check_output(command, text=True)
+        outputs = source/'target/horizon-mod'
+        paths = [destination/'lunatic.hmod', destination/'lunatic.hnmod']
+        content, native = (package(outputs/path.name, path.suffix=='.hnmod') for path in paths)
+        if content['id'] != 'lunatic' or native['id'] != 'lunatic' or content['version'] != native['version']:
+            raise ValueError('Lunatic content and native package identities must agree')
+        for path in paths:
+            shutil.copy2(outputs/path.name, path)
+    return revision, *paths
+
+
 def native_packages(root):
     native=root.parent/'horizon-mods/native'
     paths=[]
@@ -142,6 +182,12 @@ def install_defaults(root):
     import shutil
     from fork_workflow import homes, package
     _,game=homes();folder=game/'horizon-native-mods';folder.mkdir(parents=True,exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='horizon-lunatic-bundles-') as directory:
+        _, lunatic_content, lunatic_native = lunatic_packages(root, Path(directory))
+        content_home = game/'horizon-mods'
+        content_home.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(lunatic_content, content_home/lunatic_content.name)
+        shutil.copy2(lunatic_native, folder/lunatic_native.name)
     native = native_packages(root)
     content = content_packages(root)
     content_folder = game/'horizon-mods'
