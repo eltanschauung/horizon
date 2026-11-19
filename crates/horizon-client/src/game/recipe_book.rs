@@ -390,13 +390,7 @@ impl Game<'_> {
         if self.recipe_ui.book.is_none() {
             let mut book = Book::build(self.recipes(), self.items());
             if let Some(displays) = self.recipe_ui.remote_displays.as_ref() {
-                let mut by_recipe = std::collections::HashMap::new();
-                for (index, recipe) in displays.iter().enumerate() {
-                    by_recipe.entry(recipe.as_str()).or_insert(index as i32);
-                }
-                for entry in &mut book.entries {
-                    entry.display_id = by_recipe.get(entry.id.as_str()).copied().unwrap_or(-1);
-                }
+                book.set_remote_display_ids(displays);
             } else {
                 book.set_display_ids(&self.stations().recipe_index);
             }
