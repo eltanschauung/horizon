@@ -418,8 +418,7 @@ pub fn add_official_server(game_dir: &Path) -> std::io::Result<()> {
 
 /// Servers Horizon partners with, offered once below the official server: a name (with the
 /// players it is for) and an address like any entry.
-pub const PARTNER_SERVERS: &[(&str, &str)] =
-    &[("Afri-Network (South Africa)", "afri-network.co.za")];
+pub const PARTNER_SERVERS: &[(&str, &str)] = &[];
 /// Beside servers.dat: the partner addresses already offered, one per line, so a player who
 /// deletes one never gets it back.
 const PARTNER_MARKER: &str = "horizon_partner_servers.txt";
@@ -2557,49 +2556,19 @@ mod tests {
     }
 
     #[test]
-    fn partner_servers_are_offered_once_below_the_official_server() {
+    fn afri_network_is_only_listed_if_already_saved() {
         let dir = std::env::temp_dir().join(format!("horizon-mp-partner-{}", std::process::id()));
-        let official = OFFICIAL_SERVER.1;
-        let (name, partner) = PARTNER_SERVERS[0];
+        std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("servers.dat");
         let ips = || -> Vec<String> { servers::load(&file).into_iter().map(|s| s.ip).collect() };
-        let fresh = |list: &[ServerEntry]| {
-            let _ = std::fs::remove_dir_all(&dir);
-            std::fs::create_dir_all(&dir).unwrap();
-            if !list.is_empty() {
-                servers::save(&file, list).unwrap();
-            }
-        };
-        // A first start: the official server on top, the partner just below it.
-        fresh(&[ServerEntry::new("Mine", "127.0.0.1:2")]);
+
         add_official_server(&dir).unwrap();
         add_partner_servers(&dir).unwrap();
-        assert_eq!(ips(), [official, partner, "127.0.0.1:2"]);
-        assert_eq!(servers::load(&file)[1].name, name);
-        // Once only.
+        assert_eq!(ips(), [OFFICIAL_SERVER.1]);
+
+        servers::save(&file, &[ServerEntry::new("ZA", "afri-network.co.za")]).unwrap();
         add_partner_servers(&dir).unwrap();
-        assert_eq!(ips(), [official, partner, "127.0.0.1:2"]);
-        // A player who already had the official server moved it down: the partner follows it.
-        fresh(&[
-            ServerEntry::new("Mine", "127.0.0.1:2"),
-            ServerEntry::new("SMP", official),
-            ServerEntry::new("Last", "example.org"),
-        ]);
-        add_partner_servers(&dir).unwrap();
-        assert_eq!(ips(), ["127.0.0.1:2", official, partner, "example.org"]);
-        // No official server: last. Already listed in another spelling: not duplicated.
-        fresh(&[ServerEntry::new("Mine", "127.0.0.1:2")]);
-        add_partner_servers(&dir).unwrap();
-        assert_eq!(ips(), ["127.0.0.1:2", partner]);
-        fresh(&[ServerEntry::new("ZA", "Afri-Network.co.za:25565")]);
-        add_partner_servers(&dir).unwrap();
-        assert_eq!(ips(), ["Afri-Network.co.za:25565"]);
-        // Deleted by the player: never back.
-        fresh(&[]);
-        add_partner_servers(&dir).unwrap();
-        servers::save(&file, &[]).unwrap();
-        add_partner_servers(&dir).unwrap();
-        assert!(ips().is_empty());
+        assert_eq!(ips(), ["afri-network.co.za"]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
