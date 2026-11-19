@@ -13390,6 +13390,21 @@ impl Game<'_> {
             registry,
             pos,
         };
+        if id == "minecraft:axe" {
+            let mut state = around.state([0; 3]);
+            if let Some(wood) = state.name.strip_prefix("biomesoplenty:")
+                && !wood.starts_with("stripped_")
+                && wood.ends_with("_log")
+            {
+                state.name = format!("biomesoplenty:stripped_{wood}");
+                if let Some(target) = registry.id(&state) {
+                    return Some((
+                        target, "minecraft:item.axe.strip".into(), None, 1,
+                        "none".into(), "single_block".into(),
+                    ));
+                }
+            }
+        }
         let (_, t, state) =
             self.res
                 .transformers()

@@ -327,7 +327,9 @@ impl Game<'_> {
                                 error = Some("Finish your current spell first.".into());
                             } else if actor.bat.is_none() && spell.kind == Kind::BatCancel {
                                 error = Some("You are already in your normal form.".into());
-                            } else if self.player.as_ref().unwrap().health.food.food < spell.hunger {
+                            } else if spell.kind != Kind::BatCancel
+                                && self.player.as_ref().unwrap().health.food.food < spell.hunger
+                            {
                                 error = Some(format!("Requires {} hunger points.", spell.hunger));
                             } else if spell.kind == Kind::Bat {
                                 actor.bat = self.bat_start(player, actor.character.clone(), &spell);
@@ -337,7 +339,7 @@ impl Game<'_> {
                                 }
                             } else {
                                 let body = self.player.as_mut().unwrap();
-                                body.health.food.food -= spell.hunger;
+                                body.health.food.food = body.health.food.food.saturating_sub(spell.hunger).max(0);
                                 body.health.food.saturation = body
                                     .health
                                     .food

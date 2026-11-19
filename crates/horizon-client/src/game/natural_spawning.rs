@@ -356,6 +356,30 @@ impl MobBoxes {
     }
 }
 impl GameLevel<'_, '_> {
+    fn thmobs_torch_near(&self, [x, y, z]: [i32; 3]) -> bool {
+        for dx in -16i32..=16 {
+            for dz in -16i32..=16 {
+                let left = 256 - dx * dx - dz * dz;
+                if left < 0 {
+                    continue;
+                }
+                let height = left.isqrt();
+                for dy in -height..=height {
+                    let state = self.w.state(x + dx, y + dy, z + dz);
+                    if matches!(
+                        self.w.facts.get(state).name.as_ref(),
+                        "minecraft:torch" | "minecraft:wall_torch"
+                            | "minecraft:soul_torch" | "minecraft:soul_wall_torch"
+                            | "minecraft:copper_torch" | "minecraft:copper_wall_torch"
+                    ) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
     /// The mobs not removed whose boxes may meet `area` (callers test them).
     fn mobs_near(&self, area: Aabb) -> Box<dyn Iterator<Item = MobBox> + '_> {
         let asked = self.box_queries.get() + 1;
@@ -461,6 +485,10 @@ impl NaturalLevel for GameLevel<'_, '_> {
         );
         if canceled {
             entries.clear();
+        } else if entries.iter().any(|entry| entry.entity.starts_with("thmobs:"))
+            && self.thmobs_torch_near(pos)
+        {
+            entries.retain(|entry| !entry.entity.starts_with("thmobs:"));
         }
     }
     fn min_y(&self) -> i32 {

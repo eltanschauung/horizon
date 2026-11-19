@@ -45,7 +45,7 @@ def inputs_from_plan(path,manifest):
         entries.append(dict(p,file=file))
     return manifest['game_revision'],entries
 
-def prepare(revision,entries,output,runtime,base='v0.3.3'):
+def prepare(revision,entries,output,runtime,base='v0.3.5'):
     """Pure staging: no GitHub write, server change, Minecraft files or user data."""
     if len(revision)!=40 or any(c not in '0123456789abcdef' for c in revision):raise ValueError('Source must be an exact commit')
     output.mkdir(parents=True,exist_ok=True)

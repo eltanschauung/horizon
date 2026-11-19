@@ -6047,6 +6047,14 @@ impl Game<'_> {
             .collect();
         let mut resolved: Vec<(usize, Option<String>, bool)> = Vec::new();
         for (id, textures) in mannequins {
+            let corpse_character = self.mobs[id].profile.as_ref()
+                .and_then(|profile| profile.properties.iter().find(|p| p.name == super::native_entities::CORPSE_CHARACTER))
+                .and_then(|property| self.pack.character_catalog.index(&property.value))
+                .and_then(|index| self.pack.character_catalog.get(index));
+            if let Some(character) = corpse_character {
+                resolved.push((id, Some(character.skin(&self.gui.atlas).to_owned()), character.is_slim(&self.gui.atlas)));
+                continue;
+            }
             let skin = {
                 let mut downloads = self.skin_downloads.borrow_mut();
                 horizon_client::skins::lookup(&textures, false, |kind, url| {

@@ -12,6 +12,17 @@ use super::{
 use horizon_core::geometry::Vec3;
 use horizon_world::nbt::{Compound, Tag};
 
+pub(super) const CORPSE_CHARACTER: &str = "horizon:corpse_character";
+
+fn corpse_owner(tag: &Compound) -> Option<u128> {
+    let Some(Tag::List(tags)) = tag.get(&"Tags".into()) else { return None; };
+    if !tags.iter().any(|value| matches!(value, Tag::String(name) if name.to_string_lossy() == "corpse")) {
+        return None;
+    }
+    let Tag::IntArray(uuid) = tag.get(&"profile".into())?.get("id")? else { return None; };
+    (uuid.len() == 4).then(|| uuid.iter().fold(0, |id, &part| (id << 32) | u128::from(part as u32)))
+}
+
 /// The modeled four-part transformation of an item display; durations stay in their existing route.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct ItemDisplayTransformation {
@@ -232,6 +243,19 @@ impl Game<'_> {
             return None;
         }
         let mut tag = nbt;
+        if kind == "minecraft:mannequin"
+            && let Some(owner) = corpse_owner(&tag)
+            && let Some(character) = self.character_for(owner).or_else(|| {
+                (owner == self.command_actor_uuid()).then_some(self.character.as_ref()).flatten()
+            })
+            && let Some(Tag::Compound(profile)) = tag.get_mut(&"profile".into())
+        {
+            let property = Tag::compound([
+                ("name", Tag::String(CORPSE_CHARACTER.into())),
+                ("value", Tag::String(character.id.as_str().into())),
+            ]);
+            profile.insert("properties".into(), Tag::List(vec![property]));
+        }
         tag.insert("id".into(), Tag::String(kind.into()));
         // As `/summon` does: every entity of the stack, passengers included,
         // stands at `pos`.
