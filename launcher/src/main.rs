@@ -1995,13 +1995,14 @@ impl Launcher {
                 natives: false,
             });
         let mods_tx = self.mods.tx.clone();
+        let prune_old = self.settings.auto_prune();
         std::thread::spawn(move || {
             // One line per step: a terminal run shows where Play stops (#12179).
             backend::play_step("checking the game's assets");
             backend::complete_assets(&tag);
             if let Some(auto) = auto {
                 backend::play_step("updating registry mods");
-                let (lines, _) = mods_page::auto_update(&[auto]);
+                let (lines, _) = mods_page::auto_update(&[auto], prune_old);
                 if !lines.is_empty() {
                     let _ = mods_tx.send(mods_page::Event::AutoUpdated(lines, Vec::new()));
                 }
@@ -4137,7 +4138,7 @@ impl Launcher {
                         Some(
                             div()
                                 .child(trf(
-                                    "Keeps the {count} newest, the one in use and the ones your instances use. Deleted versions install again from the Versions page.",
+                                    "Keeps the {count} newest, the one in use and the ones your instances use. Deleted versions install again from the Versions page. Replaces outdated mods and rebuilds when needed.",
                                     &[("count", &self.settings.keep_newest().to_string())],
                                 ))
                                 .into_any_element(),

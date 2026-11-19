@@ -1292,7 +1292,13 @@ fn install_version_guarded(
     let mut list = installed::Installed::load(home);
     let ours = |e: &installed::Entry| e.source == SourceId::Horizon && e.project == p.id;
     let old = list.entries.iter().find(|e| ours(e)).cloned();
-    if old.as_ref().is_some_and(|o| o.version == v.version) {
+    if old.as_ref().is_some_and(|o| {
+        o.version == v.version
+            && o.checksum == format!("SHA-256:{}", v.file.sha256)
+            && o.path(home)
+                .and_then(|path| index::sha256_file(&path).ok())
+                .is_some_and(|hash| hash.eq_ignore_ascii_case(&v.file.sha256))
+    }) {
         return Ok(old.expect("checked"));
     }
     let target = home.join(&relative);

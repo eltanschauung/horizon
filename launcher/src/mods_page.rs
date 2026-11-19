@@ -450,11 +450,14 @@ impl Launcher {
                     m.results_list.reset();
                 }
                 Event::AutoUpdated(lines, rebuild) => {
-                    m.rebuild.extend(rebuild);
+                    m.rebuild.extend(rebuild.iter().cloned());
                     if !lines.is_empty() {
                         m.message = Some(Ok(lines.join("\n")));
                         m.reload_installed();
                         m.installed_list.reset();
+                    }
+                    if self.settings.auto_prune() {
+                        self.recheck_server_mods(&rebuild);
                     }
                 }
                 Event::TakenDown(lines) => {
@@ -608,8 +611,9 @@ impl Launcher {
             })
             .collect();
         let tx = self.mods.tx.clone();
+        let prune_old = self.settings.auto_prune();
         std::thread::spawn(move || {
-            let (lines, rebuild) = auto_update(&list);
+            let (lines, rebuild) = auto_update(&list, prune_old);
             if !lines.is_empty() || !rebuild.is_empty() {
                 let _ = tx.send(Event::AutoUpdated(lines, rebuild));
             }
@@ -2132,7 +2136,7 @@ pub(super) fn pinned_to_nightly(instance: &instances::Instance) -> bool {
 /// Updates the registry projects of `targets`: Horizon's own instances only, never a modpack's
 /// profile, whose pack pins its mods. What happened, for the page's notice, and the instances
 /// whose native mods were updated.
-pub(super) fn auto_update(targets: &[AutoTarget]) -> (Vec<String>, Vec<String>) {
+pub(super) fn auto_update(targets: &[AutoTarget], prune_old: bool) -> (Vec<String>, Vec<String>) {
     let (mut lines, mut rebuild) = (Vec::new(), Vec::new());
     for t in targets {
         let i = &t.instance;
@@ -2144,6 +2148,7 @@ pub(super) fn auto_update(targets: &[AutoTarget]) -> (Vec<String>, Vec<String>) 
             in_pack: horizon::auto::in_pack(&i.home),
             level,
             natives: t.natives,
+            prune_old,
             fit: horizon_launcher::native_fit::plays(i)
                 .map(|plays| (plays, horizon_launcher::native_fit::pins(&i.home))),
         };

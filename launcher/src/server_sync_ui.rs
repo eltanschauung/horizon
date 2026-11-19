@@ -152,6 +152,9 @@ impl Launcher {
         }
         self.server_sync.running = None;
         self.server_sync.checked.insert(id.clone(), Instant::now());
+        if matches!(&result, Ok(server_sync::Outcome::Ready(_))) {
+            self.mods.rebuild.retain(|instance| *instance != id);
+        }
         self.installed = backend::installed();
         self.reload_instances();
         self.instance_mods_changed();
@@ -177,6 +180,12 @@ impl Launcher {
                     "Server update failed: {error}. Press Play to retry."
                 ))
             }
+        }
+    }
+
+    pub(super) fn recheck_server_mods(&mut self, instances: &[String]) {
+        for id in instances {
+            self.server_sync.checked.remove(id);
         }
     }
 }
