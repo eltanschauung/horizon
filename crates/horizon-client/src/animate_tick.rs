@@ -39,7 +39,7 @@ enum Animate {
     /// the biome foliage colour unless a fixed colour is given (azalea); and
     /// whether they have the poplar ambient sound (`AmbientLeavesBlockSoundPlayer`).
     Leaves(Option<(T, f32)>, Option<u32>, bool),
-    SakuraLeaves(&'static str),
+    GensokyoLeaves(&'static str, i32),
     MiasmaMushroom {
         huge: bool,
     },
@@ -162,10 +162,22 @@ fn classify(name: &str, prop: &dyn Fn(&str) -> Option<String>) -> Animate {
         "oak_leaves" | "birch_leaves" | "jungle_leaves" | "acacia_leaves" | "dark_oak_leaves"
         | "mangrove_leaves" => Animate::Leaves(Some((T::TintedLeaves, 0.01)), None, false),
         "horizon_gensokyo_legacy:pink_cherry_leaves" => {
-            Animate::SakuraLeaves("horizon_gensokyo_legacy:pink_cherry_blossom")
+            Animate::GensokyoLeaves("horizon_gensokyo_legacy:pink_cherry_blossom", 10)
         }
         "horizon_gensokyo_legacy:purple_cherry_leaves" => {
-            Animate::SakuraLeaves("horizon_gensokyo_legacy:purple_cherry_blossom")
+            Animate::GensokyoLeaves("horizon_gensokyo_legacy:purple_cherry_blossom", 10)
+        }
+        "horizon_gensokyo_legacy:orange_maple_leaves" => {
+            Animate::GensokyoLeaves("horizon_gensokyo_legacy:orange_maple_leaf", 10)
+        }
+        "horizon_gensokyo_legacy:red_maple_leaves" => {
+            Animate::GensokyoLeaves("horizon_gensokyo_legacy:red_maple_leaf", 10)
+        }
+        "horizon_gensokyo_legacy:yellow_maple_leaves" => {
+            Animate::GensokyoLeaves("horizon_gensokyo_legacy:yellow_maple_leaf", 10)
+        }
+        "horizon_gensokyo_legacy:locust_leaves" => {
+            Animate::GensokyoLeaves("horizon_gensokyo_legacy:locust_leaf", 40)
         }
         "horizon_gensokyo_legacy:demonic_miasma_mushroom" => {
             Animate::MiasmaMushroom { huge: false }
@@ -994,7 +1006,7 @@ fn block_animate_tick(
                 }
             }
         }
-        leaves @ (Animate::Leaves(..) | Animate::SakuraLeaves(_)) => {
+        leaves @ (Animate::Leaves(..) | Animate::GensokyoLeaves(..)) => {
             let (falling, fixed_tint, poplar) = match leaves {
                 Animate::Leaves(falling, fixed_tint, poplar) => (falling, fixed_tint, poplar),
                 _ => (None, None, false),
@@ -1013,8 +1025,8 @@ fn block_animate_tick(
             if poplar {
                 leaves_ambient_sound(tables, engine, ctx, state, pos);
             }
-            if let Animate::SakuraLeaves(particle) = leaves
-                && next_int(engine.random(), 10) == 0
+            if let Animate::GensokyoLeaves(particle, rate) = leaves
+                && next_int(engine.random(), rate) == 0
                 && !ctx.sturdy(below)
             {
                 let r = engine.random();

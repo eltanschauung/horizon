@@ -48,6 +48,63 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         {
             return new;
         }
+        let b = self.b;
+        use super::place::{EVERGREEN_STEM, EVERGREEN_TIP};
+        if matches!(b.table.name(state), EVERGREEN_TIP | EVERGREEN_STEM) {
+            if direction == Direction::Up && !self.can_survive(state, pos) {
+                return b.air();
+            }
+            if direction == Direction::Down {
+                let target = if matches!(b.table.name(neighbour), EVERGREEN_TIP | EVERGREEN_STEM) {
+                    EVERGREEN_STEM
+                } else {
+                    EVERGREEN_TIP
+                };
+                if let Some(block) = b.table.block_by_name(target) {
+                    return b.table.with_properties_of(block, state);
+                }
+            }
+            return state;
+        }
+        if super::place::gensokyo_furniture(b.table.name(state)) {
+            let lower = b.table.text(state, b.props.half) == "bottom";
+            let partner = if lower {
+                Direction::Up
+            } else {
+                Direction::Down
+            };
+            let other_half = if lower { "top" } else { "bottom" };
+            if direction == partner
+                && (!b.is_block(neighbour, b.block(state))
+                    || b.table.text(neighbour, b.props.half) != other_half)
+            {
+                return b.air();
+            }
+        }
+        if b.table.name(state) == "horizon_gensokyo_legacy:golden_lotus" {
+            match b.table.text(state, b.props.part) {
+                "lower" if direction == Direction::Up => {
+                    return if b.is_block(neighbour, b.block(state))
+                        && b.table.text(neighbour, b.props.part) == "upper"
+                    {
+                        state
+                    } else {
+                        b.air()
+                    };
+                }
+                "upper" if direction == Direction::Down => {
+                    return if b.is_block(neighbour, b.block(state))
+                        && b.table.text(neighbour, b.props.part) == "lower"
+                    {
+                        state
+                    } else {
+                        b.air()
+                    };
+                }
+                "upper" => return state,
+                _ => {}
+            }
+        }
         self.update_shape_at(0, state, pos, direction, neighbour_pos, neighbour)
     }
 

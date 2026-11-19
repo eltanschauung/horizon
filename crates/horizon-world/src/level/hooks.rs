@@ -4,7 +4,7 @@ use super::{
     LevelAccess, LevelEvent, Sim,
     classes::Class,
     states::BlockId,
-    update::{below, rel},
+    update::{above, below, rel},
 };
 use crate::registry::BlockStateId;
 use horizon_core::{geometry::Direction, position::BlockPos, random::RandomSource};
@@ -437,6 +437,29 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             return false;
         }
         let data = b.data(state);
+        let pair = match b.table.name(state) {
+            name if super::place::gensokyo_furniture(name) => Some((p.half, "bottom", "top")),
+            "horizon_gensokyo_legacy:golden_lotus" => Some((p.part, "lower", "upper")),
+            _ => None,
+        };
+        if creative && let Some((key, lower, upper)) = pair {
+            let top = b.table.text(state, key) == upper;
+            let half = if top { upper } else { lower };
+            let partner = if top { below(pos) } else { above(pos) };
+            let partner_state = self.state(partner);
+            let other_half = if top { lower } else { upper };
+            if b.table.text(state, key) == half
+                && b.is_block(partner_state, b.block(state))
+                && b.table.text(partner_state, key) == other_half
+            {
+                self.set_block(
+                    partner,
+                    b.air(),
+                    super::flags::UPDATE_ALL | super::flags::UPDATE_KNOWN_SHAPE,
+                );
+                self.level_event(2001, partner, partner_state.0 as i32);
+            }
+        }
         // DoorBlock also clears the bottom half when the tool would not drop it.
         if ((creative && data.is(Class::DoublePlant))
             || (data.is(Class::Door) && (creative || !correct_tool)))

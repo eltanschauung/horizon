@@ -16,6 +16,23 @@ use horizon_core::{
     random::RandomSource,
 };
 
+pub(crate) fn gensokyo_furniture(name: &str) -> bool {
+    matches!(
+        name,
+        "horizon_gensokyo_legacy:gravestone"
+            | "horizon_gensokyo_legacy:jizo"
+            | "horizon_gensokyo_legacy:jizo_straw_hat"
+            | "horizon_gensokyo_legacy:stone_lantern"
+    )
+}
+
+pub(crate) fn gensokyo_leaf_litter(name: &str) -> bool {
+    name.starts_with("horizon_gensokyo_legacy:") && name.ends_with("_fallen_leaves")
+}
+
+pub(crate) const EVERGREEN_TIP: &str = "horizon_gensokyo_legacy:evergreen_vine";
+pub(crate) const EVERGREEN_STEM: &str = "horizon_gensokyo_legacy:evergreen_vine_plant";
+
 /// A player's use-item-on-block action (`UseOnContext` inputs).
 #[derive(Clone, Debug)]
 pub struct PlaceContext {
@@ -195,6 +212,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         let b = self.b;
         let p = b.props;
         let block = b.block(state);
+        if gensokyo_leaf_litter(b.table.name(state)) && self.item_is(ctx, block) {
+            return !ctx.sneaking && b.table.text(state, p.layers) == "2";
+        }
         let data = b.data(state);
         let default = |sim: &Self| {
             b.is_replaceable(state) && (ctx.item.is_empty() || !sim.item_is(ctx, block))
@@ -310,7 +330,33 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             Some(None) => return None,
             _ => {}
         }
-        self.placement_at(block, 0, ctx)
+        let state = self.placement_at(block, 0, ctx)?;
+        let b = self.b;
+        if gensokyo_furniture(b.table.name(state)) {
+            let upper_pos = above(ctx.pos);
+            let lower = b.table.set_text(state, b.props.half, "bottom");
+            let lower =
+                b.table
+                    .set_dir(lower, b.props.facing, ctx.horizontal_direction().opposite());
+            let upper = b.table.set_text(lower, b.props.half, "top");
+            return (upper_pos.y < self.level.max_y()
+                && self.can_be_replaced(self.state(upper_pos), ctx)
+                && self.level.is_unobstructed(upper_pos, upper))
+            .then_some(lower);
+        }
+        if gensokyo_leaf_litter(b.table.name(state)) {
+            let current = self.state(ctx.pos);
+            if b.is_block(current, block) {
+                return Some(b.table.set_text(current, b.props.layers, "1"));
+            }
+            let thin = b.table.set_text(state, b.props.layers, "2");
+            return Some(b.table.set_dir(
+                thin,
+                b.props.facing,
+                ctx.horizontal_direction().opposite(),
+            ));
+        }
+        Some(state)
     }
 
     fn placement_at(
@@ -1482,7 +1528,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         let p = b.props;
         let data = b.data(state);
         let block = b.block(state);
-        if data.is(Class::AbstractBed) {
+        if gensokyo_furniture(b.table.name(state)) {
+            self.set_block_and_update(above(pos), b.table.set_text(state, p.half, "top"));
+        } else if data.is(Class::AbstractBed) {
             let other = rel(pos, b.facing(state));
             self.set_block_and_update(other, b.table.set_text(state, p.part, "head"));
         } else if data.is(Class::Crafter) {

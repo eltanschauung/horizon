@@ -7,7 +7,7 @@ use super::{
     query::is_horizontal,
     update::{HORIZONTAL, above, below, rel},
 };
-use crate::registry::BlockStateId;
+use crate::{fluid::FluidKind, registry::BlockStateId};
 use horizon_core::{geometry::Direction, position::BlockPos};
 
 impl<L: LevelAccess + ?Sized> Sim<'_, L> {
@@ -15,6 +15,27 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     pub fn can_survive(&self, state: BlockStateId, pos: BlockPos) -> bool {
         let mut survives = None;
         self.level.before_can_survive(pos, state, &mut survives);
+        use super::place::{EVERGREEN_STEM, EVERGREEN_TIP};
+        if survives.is_none() && matches!(self.b.table.name(state), EVERGREEN_TIP | EVERGREEN_STEM)
+        {
+            let support = above(pos);
+            let attached = self.state(support);
+            survives = Some(
+                self.sturdy(support, Direction::Down)
+                    || self.b.instance_of(attached, Class::Leaves)
+                    || matches!(self.b.table.name(attached), EVERGREEN_TIP | EVERGREEN_STEM),
+            );
+        }
+        if survives.is_none() && super::place::gensokyo_leaf_litter(self.b.table.name(state)) {
+            let support = below(pos);
+            let fluid = self.fluid_at(support);
+            survives = Some(
+                self.sturdy(support, Direction::Up)
+                    || (self.b.is_water_fluid(fluid.kind())
+                        && fluid.is_source()
+                        && self.fluid_at(pos).kind() == FluidKind::Empty),
+            );
+        }
         survives.unwrap_or_else(|| self.can_survive_at(0, state, pos))
     }
     fn can_survive_at(&self, depth: usize, state: BlockStateId, pos: BlockPos) -> bool {

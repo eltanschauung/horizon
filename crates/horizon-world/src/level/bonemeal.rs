@@ -297,6 +297,18 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             Some(false) => return false,
             None => {}
         }
+        let b = self.b;
+        if b.table.name(state) == "horizon_gensokyo_legacy:golden_lotus" {
+            let chance = match b.table.text(state, b.props.size) {
+                "0" => 0.2,
+                "1" if self.golden_lotus_has_room(pos) => 0.03,
+                _ => return false,
+            };
+            if self.random().next_float() < chance {
+                self.grow_golden_lotus(pos, state);
+            }
+            return true;
+        }
         let Some(kind) = self.b.bonemeal_kind(state) else {
             return false;
         };
@@ -307,6 +319,26 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             self.perform_bonemeal(kind, pos, state);
         }
         true
+    }
+
+    fn golden_lotus_has_room(&self, pos: BlockPos) -> bool {
+        self.is_inside_build_height(above(pos).y) && self.b.is_replaceable(self.state(above(pos)))
+    }
+
+    pub(crate) fn grow_golden_lotus(&mut self, pos: BlockPos, state: BlockStateId) {
+        let b = self.b;
+        let p = b.props;
+        match b.table.text(state, p.size) {
+            "0" => {
+                self.set_block_and_update(pos, b.table.set_text(state, p.size, "1"));
+            }
+            "1" if self.golden_lotus_has_room(pos) => {
+                let mature = b.table.set_text(state, p.size, "2");
+                self.set_block_and_update(pos, b.table.set_text(mature, p.part, "lower"));
+                self.set_block_and_update(above(pos), b.table.set_text(mature, p.part, "upper"));
+            }
+            _ => {}
+        }
     }
 
     /// `BonemealableBlock.isValidBonemealTarget`.

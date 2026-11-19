@@ -7390,7 +7390,12 @@ impl Game<'_> {
         // or water source the SOURCE_ONLY ray meets and are placed on the
         // position above it.
         let water_hit;
-        let hit = if matches!(&*stack.item, "minecraft:lily_pad" | "minecraft:frogspawn") {
+        let hit = if self
+            .res
+            .behaviours()
+            .item_binding(&stack.item)
+            .is_some_and(|binding| binding.kind == horizon_world::level::ItemKind::PlaceOnWater)
+        {
             let Some(h) = self.pick_fluid() else {
                 return Ok(false);
             };
@@ -13390,6 +13395,36 @@ impl Game<'_> {
             registry,
             pos,
         };
+        if id == "minecraft:axe" {
+            let mut state = around.state([0; 3]);
+            let stripped = match state.name.as_str() {
+                "horizon_gensokyo_legacy:blue_fir_log" => Some("minecraft:stripped_spruce_log"),
+                "horizon_gensokyo_legacy:blue_fir_wood" => Some("minecraft:stripped_spruce_wood"),
+                "horizon_gensokyo_legacy:maple_log" => Some("minecraft:stripped_dark_oak_log"),
+                "horizon_gensokyo_legacy:maple_wood" => Some("minecraft:stripped_dark_oak_wood"),
+                "horizon_gensokyo_legacy:locust_log"
+                | "horizon_gensokyo_legacy:locust_hollow_log" => {
+                    Some("horizon_gensokyo_legacy:stripped_locust_log")
+                }
+                "horizon_gensokyo_legacy:locust_wood" => {
+                    Some("horizon_gensokyo_legacy:stripped_locust_wood")
+                }
+                _ => None,
+            };
+            if let Some(stripped) = stripped {
+                state.name = stripped.into();
+                if let Some(target) = registry.id(&state) {
+                    return Some((
+                        target,
+                        "minecraft:item.axe.strip".into(),
+                        None,
+                        1,
+                        "none".into(),
+                        "single_block".into(),
+                    ));
+                }
+            }
+        }
         let (_, t, state) =
             self.res
                 .transformers()

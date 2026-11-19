@@ -334,6 +334,51 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         let block = b.block(state);
         let data = b.data(state);
         match b.table.name(state) {
+            name if super::place::gensokyo_leaf_litter(name) => {
+                let mixed = match name {
+                    "horizon_gensokyo_legacy:orange_maple_fallen_leaves"
+                    | "horizon_gensokyo_legacy:red_maple_fallen_leaves"
+                    | "horizon_gensokyo_legacy:yellow_maple_fallen_leaves" => {
+                        "horizon_gensokyo_legacy:mixed_maple_fallen_leaves"
+                    }
+                    "horizon_gensokyo_legacy:locust_fallen_leaves" => {
+                        "horizon_gensokyo_legacy:mixed_fallen_leaves"
+                    }
+                    _ => return,
+                };
+                if self.random().next_float() < 0.05
+                    && let Some(target) = b.table.block_by_name(mixed)
+                {
+                    let dense = b.table.text(state, p.layers) == "1";
+                    self.set_block_and_update(pos, self.fallen_leaves_state(state, target, dense));
+                }
+                return;
+            }
+            "horizon_gensokyo_legacy:golden_lotus" => {
+                if b.table.text(state, p.part) == "single"
+                    && b.is_block(self.state(below(pos)), b.named.farmland)
+                {
+                    let chance = if b.table.text(state, p.size) == "0" {
+                        7
+                    } else {
+                        100
+                    };
+                    if self.rand_int(chance) == 0 {
+                        self.grow_golden_lotus(pos, state);
+                    }
+                }
+                return;
+            }
+            "horizon_gensokyo_legacy:evergreen_vine" => {
+                let tip = below(pos);
+                if self.is_inside_build_height(tip.y)
+                    && b.is_air(self.state(tip))
+                    && self.rand_int(10) == 0
+                {
+                    self.set_block_and_update(tip, state);
+                }
+                return;
+            }
             "horizon_gensokyo_legacy:demonic_miasma_mushroom" => self.emit_miasma(pos, 3),
             "horizon_gensokyo_legacy:demonic_miasma_mushroom_block" => self.emit_miasma(pos, 6),
             "horizon_gensokyo_legacy:miasma_air" => {
@@ -426,19 +471,20 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                         self.remove_block(pos, false);
                     }
                     if self.state(pos) == state {
-                        let carpet = match b.table.name(state) {
-                            "horizon_gensokyo_legacy:pink_cherry_leaves" => {
-                                "horizon_gensokyo_legacy:pink_cherry_fallen_leaves"
-                            }
-                            "horizon_gensokyo_legacy:purple_cherry_leaves" => {
-                                "horizon_gensokyo_legacy:purple_cherry_fallen_leaves"
-                            }
-                            _ => continue,
-                        };
-                        if let Some(carpet) = b.table.block_by_name(carpet)
-                            && self.random().next_float() < 0.1
+                        let name = b.table.name(state);
+                        if let Some(species) = name.strip_suffix("_leaves")
+                            && species.starts_with("horizon_gensokyo_legacy:")
+                            && let Some(carpet) =
+                                b.table.block_by_name(&format!("{species}_fallen_leaves"))
                         {
-                            self.accumulate_sakura_leaves(pos, carpet);
+                            let chance = if species.ends_with(":locust") {
+                                0.025
+                            } else {
+                                0.1
+                            };
+                            if self.random().next_float() < chance {
+                                self.accumulate_fallen_leaves(pos, carpet);
+                            }
                         }
                     }
                 }
@@ -645,8 +691,39 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         }
     }
 
+    fn fallen_leaves_state(
+        &self,
+        state: BlockStateId,
+        target: super::states::BlockId,
+        dense: bool,
+    ) -> BlockStateId {
+        let b = self.b;
+        let facing = b.table.text(state, b.props.facing);
+        let replacement = b
+            .table
+            .set_text(b.default_of(target), b.props.facing, facing);
+        b.table
+            .set_text(replacement, b.props.layers, if dense { "1" } else { "2" })
+    }
+
+    fn mixed_fallen_leaves(&self, first: &str, second: &str) -> Option<super::states::BlockId> {
+        let all = |name: &str| {
+            name.ends_with(":locust_fallen_leaves") || name.ends_with(":mixed_fallen_leaves")
+        };
+        let target = if all(first) || all(second) {
+            "horizon_gensokyo_legacy:mixed_fallen_leaves"
+        } else if first.ends_with("_maple_fallen_leaves")
+            && second.ends_with("_maple_fallen_leaves")
+        {
+            "horizon_gensokyo_legacy:mixed_maple_fallen_leaves"
+        } else {
+            return None;
+        };
+        self.b.table.block_by_name(target)
+    }
+
     // Gensokyo Legacy checks up to eight blocks beneath the canopy for a carpet or a surface.
-    fn accumulate_sakura_leaves(&mut self, mut pos: BlockPos, carpet: super::states::BlockId) {
+    fn accumulate_fallen_leaves(&mut self, mut pos: BlockPos, carpet: super::states::BlockId) {
         let b = self.b;
         let layers = b.props.layers;
         for _ in 0..8 {
@@ -655,21 +732,17 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             let name = b.table.name(state);
             if name.starts_with("horizon_gensokyo_legacy:") && name.ends_with("_fallen_leaves") {
                 let thin = b.table.text(state, layers) == "2";
-                if b.is_block(state, carpet) {
-                    if thin {
-                        self.set_block_and_update(support, b.table.set_text(state, layers, "1"));
-                    }
+                let incoming = b.table.info(carpet).name.as_ref();
+                let (target, dense) = if incoming == name {
+                    (carpet, true)
+                } else if let Some(mixed) = self.mixed_fallen_leaves(name, incoming) {
+                    (mixed, b.is_block(state, mixed) || !thin)
                 } else if thin || self.random().next_float() < 0.3 {
-                    let replacement = b.table.set_text(
-                        b.default_of(carpet),
-                        b.props.facing,
-                        b.table.text(state, b.props.facing),
-                    );
-                    let replacement =
-                        b.table
-                            .set_text(replacement, layers, if thin { "2" } else { "1" });
-                    self.set_block_and_update(support, replacement);
-                }
+                    (carpet, !thin)
+                } else {
+                    return;
+                };
+                self.set_block_and_update(support, self.fallen_leaves_state(state, target, dense));
                 return;
             }
             let fluid = b.fluid(state);

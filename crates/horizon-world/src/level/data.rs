@@ -526,6 +526,7 @@ props! {
     extended = "extended",
     kind = "type",
     part = "part",
+    size = "size",
     occupied = "occupied",
     hanging = "hanging",
     attached = "attached",

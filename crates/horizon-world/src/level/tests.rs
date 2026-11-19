@@ -980,6 +980,85 @@ fn torch_and_door_halves_break_with_support() {
 }
 
 #[test]
+fn gensokyo_furniture_places_and_removes_both_halves() {
+    use super::update::above;
+    use horizon_core::geometry::Vec3;
+    let mut w = world!();
+    let item = "horizon_gensokyo_legacy:jizo";
+    if w.f.registry.default_state(item).is_none() {
+        eprintln!("skipping Gensokyo furniture: prepared content is absent");
+        return;
+    }
+    let ground = BlockPos::new(0, 0, 0);
+    let lower = above(ground);
+    let upper = above(lower);
+    w.put(ground, w.id("stone", &[]));
+    let ctx = PlaceContext {
+        clicked_pos: ground,
+        face: Direction::Up,
+        hit: Vec3::new(0.5, 1.0, 0.5),
+        yaw: 90.0,
+        pitch: 0.0,
+        inside: false,
+        sneaking: false,
+        item: item.into(),
+        can_use_game_master_blocks: false,
+    };
+    for creative in [false, true] {
+        let b = w.b();
+        assert!(matches!(
+            b.place_block(&mut w.level, &mut w.ticks, &ctx),
+            PlaceOutcome::Placed { .. }
+        ));
+        assert_eq!(w.prop(lower, "half"), "bottom");
+        assert_eq!(w.prop(upper, "half"), "top");
+        assert_eq!(w.prop(lower, "facing"), w.prop(upper, "facing"));
+        w.level.events.clear();
+        assert!(b.player_destroy_block(&mut w.level, &mut w.ticks, upper, creative, true));
+        assert_eq!(w.get(lower), b.air());
+        assert_eq!(w.get(upper), b.air());
+        assert_eq!(
+            w.level
+                .events
+                .iter()
+                .filter(|e| matches!(e, LevelEvent::DropResources { pos, .. } if *pos == lower))
+                .count(),
+            usize::from(!creative)
+        );
+    }
+}
+
+#[test]
+fn gensokyo_vine_grows_a_new_tip_and_restores_it_after_trimming() {
+    use super::place::{EVERGREEN_STEM, EVERGREEN_TIP};
+    let mut w = world!();
+    let Some(tip) = w.f.registry.default_state(EVERGREEN_TIP) else {
+        return;
+    };
+    let stem = w.f.registry.default_state(EVERGREEN_STEM).unwrap();
+    let pos = BlockPos::new(0, 3, 0);
+    let above = BlockPos::new(0, 4, 0);
+    let below = BlockPos::new(0, 2, 0);
+    w.put(above, w.id("oak_leaves", &[("persistent", "true")]));
+    let b = w.b();
+    assert!(b.sim(&mut w.level, &mut w.ticks).can_survive(tip, pos));
+    w.set(pos, tip);
+    for _ in 0..100 {
+        b.sim(&mut w.level, &mut w.ticks)
+            .random_tick_block(tip, pos);
+        if w.get(below) == tip {
+            break;
+        }
+    }
+    assert_eq!(w.get(below), tip);
+    assert_eq!(w.get(pos), stem);
+    w.set(below, b.air());
+    assert_eq!(w.get(pos), tip);
+    w.set(above, b.air());
+    assert_eq!(w.get(pos), b.air());
+}
+
+#[test]
 fn snowy_grass_and_chests_pair() {
     let mut w = world!();
     let grass = w.id("grass_block", &[]);
