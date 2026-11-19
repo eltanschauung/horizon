@@ -1,0 +1,14 @@
+{
+  "hooks": [],
+  "helpers": [
+    {
+      "name": "open_ender_chest",
+      "target": "horizon_client::game::native_menus::Game<'_>::native_open_ender_chest"
+    }
+  ],
+  "rust_summary": "a player's own ender chest opened with no block, live, as the block opens it (`native_open_ender_chest`).",
+  "doc_summary": "`native_open_ender_chest(player)` opens the player's own ender chest as an ender chest block does (a three-row chest menu titled \"Ender Chest\" over their live ender chest), with no block behind it: their clicks move their own items by vanilla's rules, nothing is copied, and no reach check closes it. The mods hear it open (`native_container_opened`, no position) and may stop it. Only ever the player's own; another player's is an operator's `native_open_inventory_menu`. The window's id, or None for a player not here or dead, or when a mod stopped it. Bundles need \"hooks\": @API:ender_chest_menu@.",
+  "comments": [
+    "crates/horizon-client/src/game/native_menus.rs"
+  ]
+}

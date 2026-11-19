@@ -227,6 +227,35 @@ impl Game<'_> {
             host.hub.close_container(conn);
         }
     }
+    /// Opens the player's own ender chest as an ender chest block does
+    /// (`EnderChestBlock.useWithoutItem`: a three-row `ChestMenu` over their
+    /// `PlayerEnderChestContainer`, titled "Ender Chest"), with no block
+    /// behind it. Its slots are their live ender chest, so their clicks move
+    /// their own items by vanilla's rules and nothing is copied; with no block,
+    /// no reach check closes it. The mods hear it open
+    /// (`native_container_opened`, with no position) and may stop it, and it
+    /// replaces the menu they had open, as `ServerPlayer.openMenu` does. Only
+    /// ever the player's own (another player's is an operator's
+    /// `native_open_inventory_menu`). The window's id, or None for a player
+    /// not here or dead, or when a mod stopped it. @API:ender_chest_menu@.
+    pub(super) fn native_open_ender_chest(&mut self, uuid: u128) -> Option<i32> {
+        let conn = self.native_conn(uuid)?;
+        let mut host = self.lan.take()?;
+        let open = host.hub.guest(conn).is_some_and(|g| !g.dead)
+            && self.guest_may_open(&mut host, conn, "minecraft:generic_9x3", None);
+        let window = if open {
+            // ServerPlayer.openMenu closes the menu that was open.
+            self.guest_close_all(&mut host, conn);
+            host.hub.open_ender_menu(
+                conn,
+                horizon_protocol::text::translatable("container.enderchest", &[]),
+            )
+        } else {
+            None
+        };
+        self.lan = Some(host);
+        window
+    }
     /// The player's 36 inventory slots (0..9 the hotbar), to show or offer
     /// them; None for a player not here, dead, or whose state is swapped in.
     pub(super) fn native_player_stacks(&self, uuid: u128) -> Option<Vec<Option<ItemStack>>> {
