@@ -5354,6 +5354,61 @@ mod tests {
         hub_with_sync(sync)
     }
 
+    /// A mod's ender chest menu (`native_open_ender_chest`) is the guest's
+    /// own ender chest, live, with no block: it stays valid wherever they are.
+    #[test]
+    fn a_mods_ender_chest_menu_is_the_guests_own_and_needs_no_block() {
+        let mut sync = SyncData::empty();
+        sync.builtin.registries.insert(
+            "minecraft:menu".to_string(),
+            horizon_protocol::registry::Ids::from_names(vec![
+                "minecraft:generic_9x1".to_string(),
+                "minecraft:generic_9x3".to_string(),
+            ]),
+        );
+        let (mut hub, _rx) = hub_with_sync(sync);
+        let diamonds = ItemStack {
+            item: "minecraft:diamond".into(),
+            count: 6,
+            damage: 0,
+            extra: None,
+        };
+        hub.guests[0].ender_items[3] = Some(diamonds.clone());
+        assert_eq!(
+            hub.open_ender_menu(99, Tag::String("Ender Chest".into())),
+            None
+        );
+        let window = hub
+            .open_ender_menu(1, Tag::String("Ender Chest".into()))
+            .expect("the guest's ender chest opens");
+        let world = World::new(horizon_world::registry::BlockStateId(0), 0);
+        let g = &hub.guests[0];
+        let menu = g.menu.as_ref().expect("a menu is open");
+        assert_eq!(menu.window, window);
+        assert_eq!(menu.slots, crate::lan::menu::Slots::Ender);
+        assert_eq!(menu.pos, None);
+        assert_eq!(menu.size, 27);
+        assert!(menu.slots.still_valid(&world, g, menu.pos));
+        assert_eq!(menu.slots.get(&world, g, 3), Some(diamonds));
+        // What the menu writes is the guest's ender chest itself.
+        let mut items = menu.slots.read(&world, g).unwrap();
+        items[3] = None;
+        items[0] = Some(ItemStack {
+            item: "minecraft:stone".into(),
+            count: 1,
+            damage: 0,
+            extra: None,
+        });
+        let slots = menu.slots;
+        let mut world = world;
+        slots.write(&mut world, &mut hub.guests[0], items);
+        assert_eq!(hub.guests[0].ender_items[3], None);
+        assert_eq!(
+            hub.guests[0].ender_items[0].as_ref().map(|s| &*s.item),
+            Some("minecraft:stone")
+        );
+    }
+
     /// [`hub_with_a_guest`] over a sync the test built.
     fn hub_with_sync(sync: SyncData) -> (Hub, std::sync::mpsc::Receiver<crate::lan::Out>) {
         let config = crate::lan::NetConfig {

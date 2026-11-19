@@ -4358,6 +4358,8 @@ stock client shows as a chest (`generic_9x1` to `generic_9x6`); nothing is insta
   player's inventory below it: `native_menu_inventory_slot(size, slot)` gives the inventory slot (0..9 the hotbar).
 - `native_menu_closed(uuid, window)`: the player closed it, another menu opened, or the player left.
 - `native_player_stacks(uuid)`: the player's 36 inventory slots, to show copies or offer them.
+- `native_open_ender_chest(uuid)` (API @API:ender_chest_menu@): the player's own ender chest, opened as the block
+  opens it but with no block, live (their clicks move their own items; nothing is copied).
 - `native_exchange_items(a, a_offer, b, b_offer)`: each offer is inventory slots, each with the exact stack it must
   still hold. Both offers leave their slots and go to the other player where they fit whole (onto matching stacks,
   then empty slots), or nothing moves and the error says why (an offer that changed, no room, a player gone or

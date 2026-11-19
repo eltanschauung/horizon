@@ -372,6 +372,45 @@ impl Hub {
         self.send_menu_content(i, items);
     }
 
+    /// Opens the guest's own ender chest with no block behind it (a mod's
+    /// `native_open_ender_chest`): a `generic_9x3` over `ender_items`, as
+    /// [`Self::open_container`] opens it for an ender chest block, but with no
+    /// position, so no reach check closes it and no lid counts it. The
+    /// window's id, or None for an unknown guest or menu type.
+    pub fn open_ender_menu(&mut self, conn: u32, title: Tag) -> Option<i32> {
+        let kind = self
+            .sync
+            .builtin
+            .get("minecraft:menu")
+            .and_then(|m| m.id("minecraft:generic_9x3"))?;
+        let i = self.guests.iter().position(|g| g.conn == conn)?;
+        self.close_container_at(i);
+        let g = &mut self.guests[i];
+        g.next_window = g.next_window % 100 + 1;
+        let window = g.next_window;
+        g.send(&C::OpenScreen(play::OpenScreen {
+            container: window,
+            menu: kind,
+            title,
+        }));
+        let items = g.ender_items.clone();
+        g.menu = Some(Menu {
+            window,
+            kind,
+            pos: None,
+            slots: Slots::Ender,
+            size: items.len(),
+            state: 0,
+            sent: Vec::new(),
+            drag: None,
+            sent_data: Vec::new(),
+            hidden: Vec::new(),
+            mod_type: crate::containers::mod_menu_type("minecraft:generic_9x3"),
+        });
+        self.send_menu_content(i, items);
+        Some(window)
+    }
+
     /// The open menu of `conn` has no `hidden` container slots: a mod's screen
     /// does not show them, so a click or a shift-click never reaches them.
     pub fn hide_menu_slots(&mut self, conn: u32, hidden: Vec<usize>) {
