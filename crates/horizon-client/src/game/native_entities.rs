@@ -254,7 +254,12 @@ impl Game<'_> {
                 ("name", Tag::String(CORPSE_CHARACTER.into())),
                 ("value", Tag::String(character.id.as_str().into())),
             ]);
-            profile.insert("properties".into(), Tag::List(vec![property]));
+            let properties = profile.entry("properties".into()).or_insert_with(|| Tag::List(Vec::new()));
+            if let Tag::List(properties) = properties
+                && !properties.iter().any(|p| matches!(p.get("name"), Some(Tag::String(name)) if name.to_string_lossy() == CORPSE_CHARACTER))
+            {
+                properties.push(property);
+            }
         }
         tag.insert("id".into(), Tag::String(kind.into()));
         // As `/summon` does: every entity of the stack, passengers included,

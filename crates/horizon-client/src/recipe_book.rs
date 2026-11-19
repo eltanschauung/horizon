@@ -465,6 +465,19 @@ impl Book {
             previous = Some((e.id.clone(), next));
         }
     }
+    /// Multiplayer uses the server's ID for each display that the client can draw.
+    pub fn set_remote_display_ids(&mut self, displays: &[String]) {
+        use std::collections::{HashMap, VecDeque};
+        let mut by_recipe: HashMap<&str, VecDeque<i32>> = HashMap::new();
+        for (index, recipe) in displays.iter().enumerate() {
+            by_recipe.entry(recipe.as_str()).or_default().push_back(index as i32);
+        }
+        for entry in &mut self.entries {
+            entry.display_id = by_recipe.get_mut(entry.id.as_str())
+                .and_then(VecDeque::pop_front).unwrap_or(-1);
+        }
+    }
+
     /// The entry of a display id.
     pub fn entry_of_display(&self, display: i32) -> Option<usize> {
         self.entries.iter().position(|e| e.display_id == display)
@@ -865,6 +878,15 @@ impl RecipeIndex {
             })
             .map(|(id, _)| id.as_str())
     }
+    pub fn display_order(&self) -> Vec<&str> {
+        let mut ordered = vec![""; self.recipes.values().map(|recipe| recipe.displays).sum()];
+        for (id, recipe) in &self.recipes {
+            let start = recipe.first_display as usize;
+            ordered[start..start + recipe.displays].fill(id);
+        }
+        ordered
+    }
+
     pub fn first_display(&self, id: &str) -> Option<i32> {
         self.recipes
             .get(id)
@@ -1443,5 +1465,6 @@ mod tests {
             [Some(0), Some(1), Some(2), Some(3)]
         );
         assert_eq!(index.recipe_of_display(0), Some("parity:a_pick"));
+        assert_eq!(index.display_order(), ids);
     }
 }

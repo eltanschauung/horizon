@@ -1524,6 +1524,9 @@ impl Game<'_> {
                     .copied()
                     .unwrap_or_else(random_uuid);
                 let tag = self.other_to_nbt(o, uuid);
+                if matches!(tag.get("horizon:transient"), Some(Tag::Byte(1))) {
+                    continue;
+                }
                 out.entry(chunk_of(o.position)).or_default().push(tag);
             }
         }

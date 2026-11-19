@@ -3728,6 +3728,15 @@ impl Hub {
     fn send_initial_recipe_book(&self, i: usize) {
         let g = &self.guests[i];
         let book = &g.recipe_book;
+        if g.brand == "horizon"
+            && let Ok(data) = serde_json::to_vec(&self.sync.advancements.recipe_display_order())
+            && data.len() <= 1_000_000
+        {
+            g.send(&C::CustomPayload(horizon_protocol::packets::configuration::CustomPayload {
+                channel: super::recipes::BOOK_DISPLAYS_CHANNEL.into(),
+                data,
+            }));
+        }
         let settings = (0..4)
             .flat_map(|b| [u8::from(book.open[b]), u8::from(book.filtering[b])])
             .collect();
