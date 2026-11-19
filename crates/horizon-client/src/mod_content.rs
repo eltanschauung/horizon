@@ -2279,6 +2279,18 @@ fn merge_atlas(text: Option<&str>, more: &[J], what: &str) -> Result<String> {
     Ok(serde_json::to_string_pretty(&doc)?)
 }
 
+const DEFAULT_FONT: &str = "assets/minecraft/font/default.json";
+
+fn merge_default_font(mut vanilla: J, mut providers: Vec<J>) -> Result<J> {
+    let Some(J::Arr(base)) = vanilla.get_mut("providers") else {
+        return Err(format!("{DEFAULT_FONT}: no providers").into());
+    };
+    // The first provider with a glyph wins, as with a resource pack above vanilla.
+    providers.append(base);
+    *base = providers;
+    Ok(vanilla)
+}
+
 /// The block and item ids and tags a content root has, for tag entries.
 struct Known {
     blocks: std::collections::BTreeSet<String>,
@@ -2505,8 +2517,10 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
     let mut additions: BTreeMap<&str, Vec<Addition>> = BTreeMap::new();
     let mut modifiers = Vec::new();
     let mut atlases: BTreeMap<String, Vec<J>> = BTreeMap::new();
+    let mut font_providers = Vec::new();
     for m in mods {
         let declarations = format!("data/{}/horizon/", m.id);
+        let default_font = format!("assets/{}/font/horizon_default.json", m.id);
         let mut reader = m.content.reader()?;
         for file in &m.content.files {
             let bytes = reader.read(file)?;
@@ -2530,6 +2544,12 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
                     .entry(file.clone())
                     .or_default()
                     .extend(sources.iter().cloned());
+            } else if file == &default_font {
+                let doc: J = serde_json::from_slice(&bytes).map_err(|e| format!("{file}: {e}"))?;
+                let Some(J::Arr(providers)) = doc.get("providers") else {
+                    return Err(format!("{}: {file}: no providers", m.id).into());
+                };
+                font_providers.splice(..0, providers.iter().cloned());
             } else if !file.starts_with(&declarations) {
                 overlay.write(file, &bytes)?;
                 if biomes::is_modifier(file) {
@@ -2561,6 +2581,10 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
             file,
             merge_atlas(vanilla.as_deref(), sources, file)?.as_bytes(),
         )?;
+    }
+    if !font_providers.is_empty() {
+        let font = merge_default_font(read_json(&base.join(DEFAULT_FONT))?, font_providers)?;
+        overlay.write(DEFAULT_FONT, &serde_json::to_vec(&font)?)?;
     }
     // A tag naming an id nobody registers fails as a whole in vanilla, and
     // carried-over mods name blocks left out or other mods' ids: such

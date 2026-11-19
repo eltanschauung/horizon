@@ -1,26 +1,131 @@
-"""Source-controlled defaults, applied to frozen inputs only; never to a live installation."""
-from pathlib import Path
-import importlib.util,json,subprocess,zipfile
+"""Source-controlled defaults, used to freeze and install the fork distribution."""
+from pathlib import Path, PurePosixPath
+import json
+import shutil
+import subprocess
+import tempfile
+import tomllib
+import urllib.request
+import zipfile
 REMOVED={'lambdynamiclights_horizon','lambdynamiclights','sleep_threshold','corpse_native'}
 ADDED=('betterdynamiclights','horizon_multiplayer_sleep','horizonmatica','gravestone-core','minimap')
 def native_packages(root):
     native=root.parent/'horizon-mods/native'
     paths=[]
     for name in ADDED:
-        result=subprocess.check_output(['python3',native/'tools/native.py','package',name],text=True)
+        subprocess.check_output(['python3',native/'tools/native.py','package',name],text=True)
         # The packager has one deterministic destination; do not parse progress text.
-        import tomllib
         bundle=next(p for p in (native/name/'mixins').iterdir() if (p/'horizon-mixin.toml').is_file())
         mod=tomllib.loads((bundle/'horizon-mixin.toml').read_text())['mod']
         paths.append(native/'target'/(mod['id']+'-'+mod['version']+'.hnmod'))
-    return paths
+    return paths + release_packages(root, "native")
 
 def content_packages(root):
     from fork_workflow import digest
     path = root.parent / 'horizon-mods/native/gravestone-core/gravestone.hmod'
     if digest(path) != '2695c4885fedfe252271229cc33e771720c44b3c9b5f9230cb10b0b20e9da78f':
         raise ValueError('Gravestone assets differ from the pinned registry release')
-    return [path]
+    ports = [compatible_content(p) for p in release_packages(root, "content")]
+    return [path, *ports, emojiful_assets(root)]
+
+
+def release_packages(root, kind):
+    from fork_workflow import digest
+    entries = json.loads((root.parent / "horizon-mods/default-release-packages.json").read_text())
+    cache = root / ".local" / "distribution-packages"
+    paths = []
+    for entry in entries:
+        if entry["kind"] != kind:
+            continue
+        url, expected = entry["url"], entry["sha256"]
+        folder = cache / expected
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / url.rsplit("/", 1)[-1]
+        if not path.is_file() or digest(path) != expected:
+            with tempfile.NamedTemporaryFile(dir=folder, delete=False) as download:
+                temp = Path(download.name)
+                try:
+                    with urllib.request.urlopen(url, timeout=60) as response:
+                        shutil.copyfileobj(response, download)
+                    download.flush()
+                    if digest(temp) != expected:
+                        raise ValueError(f"Checksum mismatch for {url}")
+                    temp.replace(path)
+                finally:
+                    temp.unlink(missing_ok=True)
+        paths.append(path)
+    return paths
+
+
+def package_files(path):
+    with zipfile.ZipFile(path) as source:
+        files = {}
+        for entry in source.infolist():
+            name = PurePosixPath(entry.filename)
+            if name.is_absolute() or ".." in name.parts or entry.filename in files:
+                raise ValueError(f"Unsafe package member: {entry.filename}")
+            if not entry.is_dir():
+                files[entry.filename] = source.read(entry)
+    return files
+
+
+def write_package(output, files):
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=output.parent, delete=False) as temp:
+        path = Path(temp.name)
+        try:
+            with zipfile.ZipFile(temp, "w") as dest:
+                for name, data in sorted(files.items()):
+                    dest.writestr(zipfile.ZipInfo(name), data)
+            temp.flush()
+            path.replace(output)
+        finally:
+            path.unlink(missing_ok=True)
+    return output
+
+
+def compatible_content(path):
+    if path.stem not in {"bibliocraft", "yungsextras"}:
+        return path
+    files = package_files(path)
+    original = files["horizon-mod.toml"].decode()
+    # The two data-only releases carry SDK metadata our content manifest rejects.
+    # Keep the exact records and assets, and remove only the unused manifest keys.
+    header, _, _ = original.partition("\n[native]\n")
+    manifest = "\n".join(line for line in header.splitlines()
+        if not line.startswith(("license = ", "homepage = ", "issues = ")))
+    expected = tomllib.loads(original)
+    for key in ("native", "license", "homepage", "issues"):
+        expected.pop(key, None)
+    if tomllib.loads(manifest) != expected or "mod.wasm" in files:
+        raise ValueError(f"Unexpected content manifest changes: {path.name}")
+    files["horizon-mod.toml"] = (manifest + "\n").encode()
+    return write_package(path.parent / "compatible" / path.name, files)
+
+
+def emojiful_assets(root):
+    pack, = release_packages(root, "font-pack")
+    output = pack.with_name("emojiful_twemoji.hmod")
+    manifest = '''id = "emojiful_twemoji"
+name = "Emojiful Twemoji"
+version = "0.1.1"
+description = "The Twemoji font and textures from the Emojiful 0.1.1 resource pack."
+authors = ["lavoide", "HorizonStudio", "Twemoji contributors"]
+api = "0.2"
+side = "client"
+namespaces = ["emojiful"]
+capabilities = ["registries"]
+'''
+    # Use the content update channel so glyphs arrive together with the native mod.
+    files = package_files(pack)
+    files["horizon-mod.toml"] = manifest.encode()
+    files["assets/emojiful_twemoji/font/horizon_default.json"] = files.pop(
+        "assets/minecraft/font/default.json"
+    )
+    files.pop("pack.mcmeta")
+    for notice in ("LICENSE-GRAPHICS.txt", "CREDITS.txt"):
+        files[f"assets/emojiful_twemoji/licenses/{notice.lower()}"] = files.pop(notice)
+    return write_package(output, files)
 
 
 def patch_content(root,source,destination,mod_id):
