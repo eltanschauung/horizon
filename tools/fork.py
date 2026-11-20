@@ -206,35 +206,6 @@ def fork_launcher():
 
 
 
-def build_worldedit():
-    """Keep our default WorldEdit source bundle installed before native selection."""
-    source = ROOT.parent / "horizon-mods/native/worldedit/tools/build.py"
-    subprocess.run([sys.executable, str(source), "--horizon", str(ROOT), "--install"], check=True)
-
-
-def build_gensouworks():
-    """Refresh the local content port before the launcher reads installed packages."""
-    source = ROOT.parent / "horizon-mods/native/gensouworks-horizon"
-    if not (source / "horizon-mod.toml").is_file():
-        raise RuntimeError(f"Gensouworks source missing: {source}")
-    env, cargo = build_environment()
-    target = ROOT.parent / "Lunatic/target/tools"
-    tool = target / "debug/cargo-horizon-mod"
-    if not tool.is_file():
-        env["CARGO_TARGET_DIR"] = str(target)
-        subprocess.run([cargo, "build", "--locked", "-p", "cargo-horizon-mod", "-j", "2"],
-                       cwd=ROOT, env=env, check=True)
-    subprocess.run([str(tool), "build"], cwd=source, env=env, check=True)
-    package = source / "target/horizon-mod/gensouworks_horizon.hmod"
-    subprocess.run([str(tool), "check", str(package), "--json"],
-                   cwd=source, env=env, check=True)
-    data = Path(env.get("XDG_DATA_HOME", str(Path.home() / ".local/share")))
-    game_home = Path(env.get("HORIZON_HOME", str(data / "horizon")))
-    destination = game_home / "horizon-mods/gensouworks_horizon.hmod"
-    atomic_copy(package, destination)
-    print(f"Installed Gensouworks content: {destination}", flush=True)
-
-
 def main():
     from fork_cache import cleanup_after_build
     if len(sys.argv) > 1 and sys.argv[1] in {"manifest", "build-plan", "preflight", "deploy", "prune-builds"}:
@@ -245,30 +216,37 @@ def main():
     parser.add_argument("component", nargs="?", default="all", choices=("all", "game", "launcher", "lunatic", "modded"))
     parser.add_argument("--release", action="store_true", help="use slower release builds instead of fast")
     parser.add_argument("--jobs", type=int, default=2, help="parallel compiler jobs (default: 2)")
+    parser.add_argument("--manifest", type=Path, help="use an existing frozen SDK manifest for build modded")
+    parser.add_argument("--base", help="signed SDK base for a new modded manifest")
+    parser.add_argument("--packages-root", type=Path, help="directory holding the SDK package folders")
     args = parser.parse_args()
     if args.jobs < 1:
         parser.error("--jobs must be positive")
     if sys.platform != "linux":
         parser.error("these local build/install commands currently support Linux")
     if args.component == "modded":
-        try:
-            # Native builds fetch committed fork main. Never silently omit local source edits.
-            changed = subprocess.check_output(["git", "diff", "HEAD", "--name-only"], cwd=ROOT, text=True).splitlines()
-            if any(name != "AGENTS.md" for name in changed):
-                raise RuntimeError("Commit source changes first; native builds use pushed main")
-            branch = subprocess.check_output(["git", "branch", "--show-current"], cwd=ROOT, text=True).strip()
-            if branch != "main":
-                raise RuntimeError("Run build modded from main")
-            subprocess.run(["git", "push", "origin", "main"], cwd=ROOT, check=True)
-            build_worldedit()
-            build_gensouworks()
-            from fork_curated import install_defaults
-            install_defaults(ROOT)
-            subprocess.run([fork_launcher(), "native-build", "--instance", "horizon", "--trust-native-code", "--allow-version-mismatch", "--profile", "release" if args.release else "performance"], cwd=ROOT, check=True)
-        except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
-            parser.exit(1, f"fork: {error}\n")
-        cleanup_after_build()
-        return
+        from fork_workflow import main as workflow_main
+        if args.action != "build":
+            parser.error("Use deploy MANIFEST --target local --apply to install a modded build")
+        if args.manifest and (args.base or args.packages_root):
+            parser.error("--base and --packages-root apply when freezing a new manifest")
+        manifest = args.manifest
+        if manifest is None:
+            parent = ROOT / ".local/build-plans"
+            parent.mkdir(parents=True, exist_ok=True)
+            manifest = Path(tempfile.mkdtemp(prefix="modded-", dir=parent)) / "manifest.json"
+            freeze = ["manifest", "--output", str(manifest)]
+            if args.base:
+                freeze.extend(["--base", args.base])
+            if args.packages_root:
+                freeze.extend(["--packages-root", str(args.packages_root)])
+            if result := workflow_main(freeze):
+                sys.exit(result)
+        if result := workflow_main(["preflight", str(manifest), "--target", "client"]):
+            sys.exit(result)
+        sys.exit(workflow_main(["build-plan", str(manifest), "--target", "client"]))
+    if args.manifest or args.base or args.packages_root:
+        parser.error("--manifest, --base and --packages-root require build modded")
     if args.component == "lunatic":
         if args.action != "build":
             parser.error("Lunatic supports build only; install its packages through the launcher")

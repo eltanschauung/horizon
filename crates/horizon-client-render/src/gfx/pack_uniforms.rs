@@ -266,6 +266,9 @@ pub const NAMES: &[&str] = &[
     "viewWidth",
     "viewHeight",
     "aspectRatio",
+    "screenSize",
+    "fsrScreenSize",
+    "fsrRenderScale",
     "near",
     "far",
     "rainStrength",
@@ -355,6 +358,60 @@ pub const NAMES: &[&str] = &[
     "hasSkylight",
     "hasCeiling",
     "cloudTime",
+    // Horizon's own: Horizon Extras' dynamic lights (`dynamic_light.rs`), nearest first: how
+    // many, and each one's camera-relative position and light level (zeros past the count).
+    "horizonDynamicLightCount",
+    "horizonDynamicLight0",
+    "horizonDynamicLight1",
+    "horizonDynamicLight2",
+    "horizonDynamicLight3",
+    "horizonDynamicLight4",
+    "horizonDynamicLight5",
+    "horizonDynamicLight6",
+    "horizonDynamicLight7",
+    "horizonDynamicLight8",
+    "horizonDynamicLight9",
+    "horizonDynamicLight10",
+    "horizonDynamicLight11",
+    "horizonDynamicLight12",
+    "horizonDynamicLight13",
+    "horizonDynamicLight14",
+    "horizonDynamicLight15",
+    // Horizon's own: the boats' water patches, for the shadow pass's water (`water_patches`):
+    // how many, then each one's corner and y range, and its two horizontal edges.
+    "horizonWaterPatchCount",
+    "horizonWaterPatch0",
+    "horizonWaterPatch1",
+    "horizonWaterPatch2",
+    "horizonWaterPatch3",
+    "horizonWaterPatch4",
+    "horizonWaterPatch5",
+    "horizonWaterPatch6",
+    "horizonWaterPatch7",
+    "horizonWaterPatch8",
+    "horizonWaterPatch9",
+    "horizonWaterPatch10",
+    "horizonWaterPatch11",
+    "horizonWaterPatch12",
+    "horizonWaterPatch13",
+    "horizonWaterPatch14",
+    "horizonWaterPatch15",
+    "horizonWaterPatch16",
+    "horizonWaterPatch17",
+    "horizonWaterPatch18",
+    "horizonWaterPatch19",
+    "horizonWaterPatch20",
+    "horizonWaterPatch21",
+    "horizonWaterPatch22",
+    "horizonWaterPatch23",
+    "horizonWaterPatch24",
+    "horizonWaterPatch25",
+    "horizonWaterPatch26",
+    "horizonWaterPatch27",
+    "horizonWaterPatch28",
+    "horizonWaterPatch29",
+    "horizonWaterPatch30",
+    "horizonWaterPatch31",
     "isElytraFlying",
     "cloudHeight",
 ];
@@ -386,6 +443,8 @@ pub struct FrameUniforms {
     center_depth: Option<f32>,
     /// The pack's shadow settings (7.1).
     pub shadow: Shadow,
+    /// The pack's smoothing half-lives in ticks (`horizon_shaders::HALF_LIVES`).
+    pub half_lives: [Option<f32>; 4],
 }
 
 impl Default for FrameUniforms {
@@ -403,6 +462,7 @@ impl Default for FrameUniforms {
             center_depth_raw: None,
             center_depth: None,
             shadow: Shadow::default(),
+            half_lives: [None; 4],
         }
     }
 }
@@ -443,13 +503,18 @@ pub fn tilt_matrix(tilt: f32) -> Mat4 {
 
 /// The world direction of the shadow light (7.1): the sun by day, the moon by night.
 pub fn shadow_light(frame: &Frame, shadow: &Shadow) -> Vec3 {
+    body(light_angle(frame), shadow.sun_path_rotation).normalize()
+}
+
+/// The sky angle in degrees of the body that lights the frame: the sun by day, the moon by
+/// night.
+pub fn light_angle(frame: &Frame) -> f32 {
     let sun_angle = (frame.sky.sun_angle / 360.0 + 0.25).rem_euclid(1.0);
-    let angle = if sun_angle < 0.5 {
+    if sun_angle < 0.5 {
         frame.sky.sun_angle
     } else {
         frame.sky.moon_angle
-    };
-    body(angle, shadow.sun_path_rotation).normalize()
+    }
 }
 
 /// A sky angle in degrees as the fraction of a day Iris 1.11.7 gives packs (`sunAngle`,
@@ -715,6 +780,7 @@ impl FrameUniforms {
         *self = Self {
             atlas: self.atlas,
             shadow: std::mem::take(&mut self.shadow),
+            half_lives: self.half_lives,
             ..Self::default()
         };
     }
@@ -779,10 +845,13 @@ impl FrameUniforms {
         // a tenth of a second a tick: Iris 1.11.7 smooths that slowly (measured frame by frame
         // with a probe pack: wetness 60 s rising, 20 s falling; eyeBrightnessSmooth 1 s;
         // centerDepthSmooth 0.1 s).
+        // The pack's `wetnessHalflife`/`drynessHalflife` when it sets them (OptiFine's defaults
+        // otherwise), as for `eyeBrightnessHalflife` and `centerDepthHalflife` below.
+        let [wet, dry, eye_half, depth_half] = self.half_lives;
         let half_life = if inputs.rain > self.wetness {
-            600.0
+            wet.unwrap_or(600.0)
         } else {
-            200.0
+            dry.unwrap_or(200.0)
         };
         self.wetness = smooth(self.wetness, inputs.rain, half_life * SECONDS_A_TICK, dt);
         let eye = inputs.eye_light.map(|l| (l * 16) as f32);
@@ -791,13 +860,18 @@ impl FrameUniforms {
             self.eye_smooth = eye;
         }
         for (smoothed, target) in self.eye_smooth.iter_mut().zip(eye) {
-            *smoothed = smooth(*smoothed, target, 10.0 * SECONDS_A_TICK, dt);
+            *smoothed = smooth(
+                *smoothed,
+                target,
+                eye_half.unwrap_or(10.0) * SECONDS_A_TICK,
+                dt,
+            );
         }
         // `centerDepthHalflife`'s default, 1 tick (OptiFine's shaders.txt); the first value
         // read back is taken as it is.
         if let Some(raw) = self.center_depth_raw {
             self.center_depth = Some(match self.center_depth {
-                Some(v) => smooth(v, raw, SECONDS_A_TICK, dt),
+                Some(v) => smooth(v, raw, depth_half.unwrap_or(1.0) * SECONDS_A_TICK, dt),
                 None => raw,
             });
         }
@@ -839,6 +913,7 @@ impl FrameUniforms {
             ),
         };
 
+        let patches = water_patches(frame.entities);
         let value = |name: &str| -> Value {
             let v3 = |v: Vec3| Value::f(&v.to_array());
             let m4 = |m: Mat4| Value::f(&m.to_cols_array());
@@ -884,6 +959,14 @@ impl FrameUniforms {
                 "viewWidth" => Value::f(&[size[0] as f32]),
                 "viewHeight" => Value::f(&[size[1] as f32]),
                 "aspectRatio" => Value::f(&[aspect]),
+                // The upscaler a pack runs needs its own view of the frame (#16757): the size
+                // it draws at (`screenSize`, `fsrScreenSize`) is the pack's render size, and
+                // the scale it renders at is 1 — Horizon already divides the world by the
+                // Upscaling ratio, so a pack's FSR pass needs to scale nothing itself. Like
+                // every other name in `NAMES`, these are built-ins: a `uniform.*` of the same
+                // name that a pack declares reads ours (`pack_post::index_in`).
+                "screenSize" | "fsrScreenSize" => Value::f(&[size[0] as f32, size[1] as f32]),
+                "fsrRenderScale" => Value::f(&[1.0]),
                 "near" => Value::f(&[0.05]),
                 // The chunk render distance, not the distant terrain's reach.
                 "far" => Value::f(&[frame.detail_distance]),
@@ -929,6 +1012,17 @@ impl FrameUniforms {
                 "gbufferProjectionInverse" => m4(projection_inverse),
                 "gbufferPreviousModelView" => m4(previous_view),
                 "gbufferPreviousProjection" => m4(previous_projection),
+                "horizonWaterPatchCount" => Value::i(&[patches.len() as i32]),
+                n if water_patch_index(n).is_some() => Value::f(
+                    &(water_patch_index(n).and_then(|k| patches.get(k / 2).map(|p| p[k % 2])))
+                        .unwrap_or([0.0; 4]),
+                ),
+                "horizonDynamicLightCount" => Value::i(&[frame.dynamic_lights.len() as i32]),
+                n if dynamic_light_index(n).is_some() => Value::f(
+                    &(dynamic_light_index(n).and_then(|k| frame.dynamic_lights.get(k)))
+                        .copied()
+                        .unwrap_or([0.0; 4]),
+                ),
                 "heldItemId" => Value::i(&[inputs.held_items[0]]),
                 "heldItemId2" => Value::i(&[inputs.held_items[1]]),
                 "heldBlockLightValue" => Value::i(&[inputs.held_light[0]]),
@@ -1057,8 +1151,12 @@ fn components(name: &str) -> usize {
         | "fogColor"
         | "skyColor"
         | "endFlashPosition" => 3,
-        "eyeBrightness" | "eyeBrightnessSmooth" | "atlasSize" => 2,
+        "eyeBrightness" | "eyeBrightnessSmooth" | "atlasSize" | "screenSize" | "fsrScreenSize" => 2,
         "entityColor" => 4,
+        // Horizon's own vec4s, a dynamic light and half a boat's water patch box; their counts
+        // are ints.
+        n if n.starts_with("horizonDynamicLight") && n != "horizonDynamicLightCount" => 4,
+        n if n.starts_with("horizonWaterPatch") && n != "horizonWaterPatchCount" => 4,
         n if n.starts_with("gbuffer") || n.starts_with("shadow") && n != "shadowAngle" => 16,
         _ => 1,
     }
@@ -1130,6 +1228,28 @@ mod tests {
             (&matrix, "gbufferModelView", "mat4", true),
             (&matrix, "gbufferModelView", "mat3", false),
             (&Value::i(&[1]), GBUFFERS_FOG_MODE, "int", true),
+            // Horizon's own: a dynamic light and a water patch box half are vec4s, their counts
+            // ints.
+            (
+                &Value::f(&[1.0, 64.0, 2.0, 14.0]),
+                "horizonDynamicLight0",
+                "vec4",
+                true,
+            ),
+            (
+                &Value::f(&[1.0, 64.0, 2.0, 14.0]),
+                "horizonDynamicLight0",
+                "float",
+                false,
+            ),
+            (
+                &Value::f(&[0.5, -1.0, 62.0, 62.5]),
+                "horizonWaterPatch0",
+                "vec4",
+                true,
+            ),
+            (&Value::i(&[3]), "horizonDynamicLightCount", "int", true),
+            (&Value::i(&[1]), "horizonWaterPatchCount", "int", true),
         ] {
             assert_eq!(value.read_as(name, ty), kept, "{ty} {name}");
         }
@@ -1235,10 +1355,16 @@ mod tests {
             format!(r#"{{"attributes": {attributes}}}"#),
         )
         .unwrap();
-        let environment =
-            crate::environment::Environment::load_dimension(&root, name, false).unwrap();
+        let environment = crate::environment::Environment::load_dimension(
+            &horizon_assets::resource_source::ResourceSource::directory(root.clone()),
+            name,
+        )
+        .unwrap();
         std::fs::remove_dir_all(&root).unwrap();
-        environment.sample(6000, None, None)
+        environment.sample(&crate::environment::Sample {
+            day_time: 6000,
+            ..Default::default()
+        })
     }
 
     #[test]
@@ -1363,7 +1489,7 @@ pub(super) mod initial_history_tests {
     /// 100-block offset; one it doesn't set is -100.05 (near) or 156 (far).
     #[test]
     fn the_shadow_projection_is_iris_s_for_the_pack_s_planes() {
-        let hud = HudBatch::new([1280, 720]);
+        let hud = HudBatch::scratch([1280, 720]);
         let f = frame(&hud);
         let (o, z, one) = (0, 0x80000000, 0x3f800000);
         type Case = (f32, Option<f32>, Option<f32>, [u32; 4], [u32; 4]);
@@ -1437,7 +1563,7 @@ pub(super) mod initial_history_tests {
     /// flying field of view (76.99999°) at 1280×720, the camera at (13.5, 69.62, -13.5).
     #[test]
     fn the_matrices_are_iris_to_the_last_bit() {
-        let hud = HudBatch::new([1280, 720]);
+        let hud = HudBatch::scratch([1280, 720]);
         let mut f = frame(&hud);
         f.camera = DVec3::new(13.5, 68.0 + f64::from(1.62f32), -13.5);
         f.yaw = 90.0;
@@ -1521,7 +1647,7 @@ pub(super) mod initial_history_tests {
     /// angles are vanilla's timeline at those ticks.
     #[test]
     fn the_sun_moon_and_up_are_iris_s_to_the_last_bit() {
-        let hud = HudBatch::new([1280, 720]);
+        let hud = HudBatch::scratch([1280, 720]);
         let mut f = frame(&hud);
         let o = 0;
         type Case = (f32, f32, f32, u32, u32, [[u32; 3]; 3], bool);
@@ -1618,7 +1744,7 @@ pub(super) mod initial_history_tests {
     /// negative x keeps its sign in the remainder.
     #[test]
     fn the_moon_s_shadow_matrices_are_iris_to_the_last_bit() {
-        let hud = HudBatch::new([1280, 720]);
+        let hud = HudBatch::scratch([1280, 720]);
         let mut f = frame(&hud);
         f.camera = DVec3::new(-556.5, 75.0 + f64::from(1.62f32), 212.5);
         f.sky.sun_angle = f32::from_bits(0x43107d5b);
@@ -1656,7 +1782,7 @@ pub(super) mod initial_history_tests {
     /// (13.5, 69.62, -13.5). The sky angles are vanilla's timeline at those ticks.
     #[test]
     fn the_shadow_matrices_turn_by_iris_s_angle_between_ticks() {
-        let hud = HudBatch::new([1280, 720]);
+        let hud = HudBatch::scratch([1280, 720]);
         let mut f = frame(&hud);
         f.camera = DVec3::new(13.5, 68.0 + f64::from(1.62f32), -13.5);
         let (o, z, one, minus) = (0, 0x80000000, 0x3f800000, 0xbf800000);
@@ -1732,7 +1858,7 @@ pub(super) mod initial_history_tests {
 
     #[test]
     fn first_history_is_current_then_tracks_the_actual_previous_frame() {
-        let hud = HudBatch::new([800, 450]);
+        let hud = HudBatch::scratch([800, 450]);
         let mut f = frame(&hud);
         let mut u = FrameUniforms::default();
         f.camera = DVec3::new(1024.25, -3.5, 11.75);
@@ -1771,7 +1897,7 @@ pub(super) mod initial_history_tests {
     /// clouds' drift at 0.03 blocks a tick, 5266 ticks in.
     #[test]
     fn cloud_time_is_how_far_the_clouds_drifted() {
-        let hud = HudBatch::new([800, 450]);
+        let hud = HudBatch::scratch([800, 450]);
         let f = frame(&hud);
         let mut u = FrameUniforms::default();
         let drift = crate::clouds::drift(5266, 0.0, 256);
@@ -1786,8 +1912,68 @@ pub(super) mod initial_history_tests {
     }
 
     #[test]
+    fn the_dynamic_lights_reach_the_pack_nearest_first() {
+        let hud = HudBatch::new(
+            [800, 450],
+            crate::hud::GuiScale {
+                requested: 0,
+                unicode: false,
+            },
+        );
+        let mut f = frame(&hud);
+        let lights = [[1.0, 2.0, 3.0, 14.0], [-4.0, 0.5, 6.0, 7.0]];
+        f.dynamic_lights = &lights;
+        let mut u = FrameUniforms::default();
+        u.update(&f, &PackInputs::default(), [800, 450]);
+        let count = index("horizonDynamicLightCount").unwrap();
+        assert_eq!(int(&u, count), 2);
+        assert_eq!(float(&u, "horizonDynamicLight0")[..4], lights[0]);
+        assert_eq!(float(&u, "horizonDynamicLight1")[..4], lights[1]);
+        // Past the count, and the last of the sixteen: zeros.
+        assert_eq!(float(&u, "horizonDynamicLight2")[..4], [0.0; 4]);
+        assert_eq!(float(&u, "horizonDynamicLight15")[..4], [0.0; 4]);
+        assert_eq!(index("horizonDynamicLight16"), None);
+        // Off (no lights): none.
+        f.dynamic_lights = &[];
+        u.update(&f, &PackInputs::default(), [800, 450]);
+        assert_eq!(int(&u, count), 0);
+        assert_eq!(float(&u, "horizonDynamicLight0")[..4], [0.0; 4]);
+    }
+
+    #[test]
+    fn a_boats_water_patch_becomes_its_box() {
+        let vertex = |pos: [f32; 3], layer: u32| super::super::Vertex {
+            pos,
+            layer,
+            ..bytemuck::Zeroable::zeroed()
+        };
+        // A patch 1.75 by 1 block, 0.2 thick, turned 30 degrees, at the hull's water line;
+        // a hull quad on each side of it.
+        let (c, s) = (30f32.to_radians().cos(), 30f32.to_radians().sin());
+        let at = |x: f32, y: f32, z: f32| [2.0 + x * c - z * s, y, 3.0 + x * s + z * c];
+        let mask = super::super::WATER_MASK_OVERLAY;
+        let mut quads = vec![vertex([0.0; 3], 0); 4];
+        for y in [-1.2, -1.0] {
+            quads.extend(
+                [(0.0, 0.0), (1.75, 0.0), (1.75, 1.0), (0.0, 1.0)]
+                    .map(|(x, z)| vertex(at(x, y, z), mask)),
+            );
+        }
+        quads.extend(vec![vertex([5.0; 3], 0); 4]);
+        let boxes = water_patches(&quads);
+        assert_eq!(boxes.len(), 1);
+        let [[x, z, low, high], [ax, az, bx, bz]] = boxes[0];
+        let close = |a: f32, b: f32| (a - b).abs() < 1e-4;
+        assert!(close(x, 2.0) && close(z, 3.0) && close(low, -1.2) && close(high, -1.0));
+        // The edges: the 1-block one first (nearer), then the 1.75-block one.
+        assert!(close(ax, -s) && close(az, c), "{boxes:?}");
+        assert!(close(bx, 1.75 * c) && close(bz, 1.75 * s), "{boxes:?}");
+        assert!(water_patches(&quads[..4]).is_empty());
+    }
+
+    #[test]
     fn environmental_smoothing_starts_at_the_first_inputs_without_resetting_each_frame() {
-        let hud = HudBatch::new([800, 450]);
+        let hud = HudBatch::scratch([800, 450]);
         let f = frame(&hud);
         let mut u = FrameUniforms::default();
         let mut input = PackInputs {
@@ -1812,12 +1998,13 @@ pub(super) mod initial_history_tests {
     #[test]
     #[ignore = "requires a host GPU; run with --ignored --nocapture"]
     fn core_matrix_inputs_render_provider_values() {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let _gpu = crate::gfx::test_gpu::lock();
+        let instance = crate::gfx::test_gpu::instance();
         let adapter = pollster::block_on(instance.request_adapter(&Default::default())).unwrap();
         eprintln!("Core matrix GPU: {:?}", adapter.get_info());
         let (device, queue) =
             pollster::block_on(adapter.request_device(&Default::default())).unwrap();
-        let hud = HudBatch::new([800, 400]);
+        let hud = HudBatch::scratch([800, 400]);
         let mut f = frame(&hud);
         f.camera = DVec3::new(1024.25, 100.5, -2048.75);
         f.yaw = 180.0;
@@ -1887,14 +2074,15 @@ pub(super) mod initial_history_tests {
     /// `normalMatrix` in a core-profile gbuffers program is the view's rotation; in the
     /// compatibility profile it stays zero (the issue's Iris 1.11.7 probes, #9136).
     #[test]
-    #[ignore = "requires a host GPU; run with --ignored --nocapture"]
+    #[ignore = "daily"]
     fn core_normal_matrix_renders_the_view_rotation() {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let _gpu = crate::gfx::test_gpu::lock();
+        let instance = crate::gfx::test_gpu::instance();
         let adapter = pollster::block_on(instance.request_adapter(&Default::default())).unwrap();
         eprintln!("Normal matrix GPU: {:?}", adapter.get_info());
         let (device, queue) =
             pollster::block_on(adapter.request_device(&Default::default())).unwrap();
-        let hud = HudBatch::new([800, 400]);
+        let hud = HudBatch::scratch([800, 400]);
         let mut f = frame(&hud);
         // Facing west (-X), level: view space looks down -Z with +X to the right (north).
         f.yaw = 90.0;
@@ -2088,13 +2276,32 @@ pub(super) mod initial_history_tests {
         }
     }
 
+    /// The upscaler's uniforms (#16757): a window 1280×720 at Performance upscaling (ratio 2)
+    /// leaves the world 640×360, and a pack that reads it is given that size to draw at
+    /// (`screenSize`, `fsrScreenSize`), with `fsrRenderScale` 1 — the world is already
+    /// scaled, so the pack's own FSR pass scales nothing.
+    #[test]
+    fn the_upscaler_s_uniforms_tell_the_pack_the_size_it_draws_at() {
+        let hud = HudBatch::scratch([1280, 720]);
+        let mut u = FrameUniforms::default();
+        u.update(&frame(&hud), &PackInputs::default(), [640, 360]);
+        assert_eq!(float(&u, "screenSize")[..2], [640.0, 360.0]);
+        assert_eq!(float(&u, "fsrScreenSize")[..2], [640.0, 360.0]);
+        assert_eq!(float(&u, "fsrRenderScale")[0], 1.0);
+        // A custom uniform checks their shapes before the first frame, at their sizes (#9086).
+        let shape = |name| zero(name).map(|v| v.n);
+        assert_eq!(shape("screenSize"), Some(2));
+        assert_eq!(shape("fsrScreenSize"), Some(2));
+        assert_eq!(shape("fsrRenderScale"), Some(1));
+    }
+
     /// Iris 1.11.7, read back exactly with a probe pack on a clear day (render distance 12,
     /// cloud range 64): fogStart 0 and fogEnd 1024 (the environmental fog, not the render
     /// distance's 172.8 to 192), fogDensity 0; composite and final programs read alphaTestRef
     /// 0.1, blockEntityId -1, fogMode 0 and fogShape -1.
     #[test]
     fn fog_and_draw_uniforms_outside_a_draw_follow_iris() {
-        let hud = HudBatch::new([800, 450]);
+        let hud = HudBatch::scratch([800, 450]);
         let mut f = frame(&hud);
         f.fog = Some(crate::fog::FogData {
             color: [0.7, 0.8, 1.0, 1.0],
@@ -2122,7 +2329,7 @@ pub(super) mod initial_history_tests {
     /// and end, a scale of 1 / (end - start), and a density of 0, not 1.
     #[test]
     fn the_compatibility_gl_fog_has_no_density() {
-        let hud = HudBatch::new([800, 450]);
+        let hud = HudBatch::scratch([800, 450]);
         let mut f = frame(&hud);
         f.fog = Some(crate::fog::FogData {
             color: [0.09, 0.24, 0.23, 1.0],
@@ -2144,7 +2351,7 @@ pub(super) mod initial_history_tests {
     /// (cylinder) where composite and final programs read 0 and -1.
     #[test]
     fn programs_that_draw_geometry_read_their_own_fog_and_centre_depth() {
-        let hud = HudBatch::new([800, 450]);
+        let hud = HudBatch::scratch([800, 450]);
         let mut u = FrameUniforms::default();
         u.update(&frame(&hud), &PackInputs::default(), [800, 450]);
         let at = |name, geometry| index_in(name, geometry).unwrap();
@@ -2167,25 +2374,36 @@ pub(super) mod initial_history_tests {
     /// centre depth 0.1 s.
     #[test]
     fn smoothed_uniforms_take_iris_half_lives() {
-        let hud = HudBatch::new([800, 450]);
+        let hud = HudBatch::scratch([800, 450]);
         let f = frame(&hud);
         let mut u = FrameUniforms::default();
-        // The next frame comes `seconds` after the last (and a few microseconds of the test).
-        let after = |u: &mut FrameUniforms, seconds: f32| {
-            u.last = Some(std::time::Instant::now() - std::time::Duration::from_secs_f32(seconds));
+        // A scripted clock: the next frame comes exactly `seconds` after the last, however long
+        // the test itself takes (a wall-clock gap of a millisecond moved centerDepthSmooth by
+        // more than the tolerance on a busy CI runner).
+        let mut counter = 1;
+        let mut elapsed = 0.0;
+        let mut after = |input: &mut PackInputs, seconds: f32| {
+            counter += 1;
+            elapsed += seconds;
+            input.frame_timing = Some(FrameTiming {
+                counter,
+                elapsed,
+                delta: seconds,
+            });
         };
         let mut input = PackInputs {
             eye_light: [0, 15],
+            frame_timing: Some(FrameTiming::nth(1, 0.0)),
             ..Default::default()
         };
         u.center_depth_raw = Some(1.0);
         u.update(&f, &input, [800, 450]);
         input.eye_light = [0, 0];
         u.center_depth_raw = Some(0.0);
-        after(&mut u, 0.1);
+        after(&mut input, 0.1);
         u.update(&f, &input, [800, 450]);
         assert!((float(&u, "centerDepthSmooth")[0] - 0.5).abs() < 1e-3);
-        after(&mut u, 0.6);
+        after(&mut input, 0.6);
         u.update(&f, &input, [800, 450]);
         // 240 falling toward 0 for 0.7 s: 147.8, read as 147.
         match u.values[index("eyeBrightnessSmooth").unwrap()] {
@@ -2193,11 +2411,52 @@ pub(super) mod initial_history_tests {
             _ => panic!("integer uniform expected"),
         }
         input.rain = 1.0;
-        after(&mut u, 60.0);
+        after(&mut input, 60.0);
         u.update(&f, &input, [800, 450]);
         assert!((float(&u, "wetness")[0] - 0.5).abs() < 1e-3);
         input.rain = 0.0;
-        after(&mut u, 20.0);
+        after(&mut input, 20.0);
+        u.update(&f, &input, [800, 450]);
+        assert!((float(&u, "wetness")[0] - 0.25).abs() < 1e-3);
+    }
+
+    /// A pack's `const float wetnessHalflife = 30.0;` (and its dryness) replace the defaults:
+    /// wetness reaches half the rain in 3 s instead of 60 s.
+    #[test]
+    fn a_pack_s_half_lives_replace_the_defaults() {
+        let hud = HudBatch::new(
+            [800, 450],
+            crate::hud::GuiScale {
+                requested: 0,
+                unicode: false,
+            },
+        );
+        let f = frame(&hud);
+        let mut u = FrameUniforms {
+            half_lives: [Some(30.0), Some(10.0), None, None],
+            ..Default::default()
+        };
+        // A scripted clock, as in `smoothed_uniforms_take_iris_half_lives`: the wall clock's gap
+        // between two updates is not exact on a busy runner.
+        let mut input = PackInputs {
+            frame_timing: Some(FrameTiming::nth(1, 0.0)),
+            ..Default::default()
+        };
+        u.update(&f, &input, [800, 450]);
+        input.rain = 1.0;
+        input.frame_timing = Some(FrameTiming {
+            counter: 2,
+            elapsed: 3.0,
+            delta: 3.0,
+        });
+        u.update(&f, &input, [800, 450]);
+        assert!((float(&u, "wetness")[0] - 0.5).abs() < 1e-3);
+        input.rain = 0.0;
+        input.frame_timing = Some(FrameTiming {
+            counter: 3,
+            elapsed: 4.0,
+            delta: 1.0,
+        });
         u.update(&f, &input, [800, 450]);
         assert!((float(&u, "wetness")[0] - 0.25).abs() < 1e-3);
     }
@@ -2206,7 +2465,7 @@ pub(super) mod initial_history_tests {
     /// the frame is drawn, and smoothed values are at their targets.
     #[test]
     fn a_still_frame_takes_the_world_ticks_as_its_clock() {
-        let hud = HudBatch::new([800, 450]);
+        let hud = HudBatch::scratch([800, 450]);
         let f = frame(&hud);
         let mut u = FrameUniforms::default();
         let mut input = PackInputs {
@@ -2241,7 +2500,7 @@ pub(super) mod initial_history_tests {
     /// A scripted clock's values reach the pack as they are, before STILL's ticks.
     #[test]
     fn a_scripted_clock_comes_before_the_still_ticks() {
-        let hud = HudBatch::new([800, 450]);
+        let hud = HudBatch::scratch([800, 450]);
         let f = frame(&hud);
         for still_ticks in [None, Some(47_811)] {
             let mut u = FrameUniforms::default();
@@ -2275,7 +2534,7 @@ pub(super) mod initial_history_tests {
     /// otherwise put them at their targets.
     #[test]
     fn a_scripted_clock_moves_smoothed_values_by_its_delta() {
-        let hud = HudBatch::new([800, 450]);
+        let hud = HudBatch::scratch([800, 450]);
         let f = frame(&hud);
         let mut u = FrameUniforms::default();
         let mut input = PackInputs {
@@ -2318,7 +2577,7 @@ pub(super) mod initial_history_tests {
             &horizon_shaders::Macros::standard(),
         );
         let mut custom = horizon_shaders::Custom::parse(&properties);
-        let hud = HudBatch::new([800, 450]);
+        let hud = HudBatch::scratch([800, 450]);
         let f = frame(&hud);
         let mut u = FrameUniforms::default();
         let mut run = |u: &mut FrameUniforms| -> Vec<[u32; 2]> {
@@ -2381,7 +2640,13 @@ pub(super) mod initial_history_tests {
     /// at their targets, the clock from 0; the atlas size it was given stays.
     #[test]
     fn a_reset_forgets_the_uniforms_history_and_keeps_the_pack_s_settings() {
-        let hud = HudBatch::new([16, 16]);
+        let hud = HudBatch::new(
+            [16, 16],
+            crate::hud::GuiScale {
+                requested: 0,
+                unicode: false,
+            },
+        );
         let mut f = frame(&hud);
         let mut uniforms = FrameUniforms {
             atlas: [256, 128],
@@ -2436,7 +2701,7 @@ pub(super) mod initial_history_tests {
     /// 0.25 in the End), and `playerMood` and `constantMood` both the cave mood.
     #[test]
     fn ambient_light_and_mood_come_from_the_inputs() {
-        let hud = HudBatch::new([800, 450]);
+        let hud = HudBatch::scratch([800, 450]);
         let mut u = FrameUniforms::default();
         let input = PackInputs {
             ambient_light: 0.25,
@@ -2532,6 +2797,73 @@ pub(super) mod initial_history_tests {
             post_effects: crate::post_chain::Request::none(),
         }
     }
+}
+
+/// `horizonWaterPatch<k>`'s `k`: patch `k / 2`, its corner and y range (even) or edges (odd).
+fn water_patch_index(name: &str) -> Option<usize> {
+    let k: usize = name.strip_prefix("horizonWaterPatch")?.parse().ok()?;
+    (k < 2 * horizon_shaders::WATER_PATCHES).then_some(k)
+}
+
+/// The boats' water patches among the frame's entity quads (`WATER_MASK_OVERLAY`), the first
+/// `WATER_PATCHES`, each as a camera-relative box: a corner's x and z and the patch's lowest and
+/// highest y, then its two horizontal edges from that corner. A boat rocks a little: its patch's
+/// corners are told apart in x and z within 2 cm.
+pub(super) fn water_patches(entities: &[super::Vertex]) -> Vec<[[f32; 4]; 2]> {
+    let mut out = Vec::new();
+    let mut points: Vec<[f32; 3]> = Vec::new();
+    let flush = |points: &mut Vec<[f32; 3]>, out: &mut Vec<[[f32; 4]; 2]>| {
+        if let Some(b) = patch_box(points)
+            && out.len() < horizon_shaders::WATER_PATCHES
+        {
+            out.push(b);
+        }
+        points.clear();
+    };
+    for quad in entities.as_chunks::<4>().0 {
+        if quad[0].layer & 0xffff == super::WATER_MASK_OVERLAY {
+            points.extend(quad.iter().map(|v| v.pos));
+        } else if !points.is_empty() {
+            flush(&mut points, &mut out);
+        }
+    }
+    flush(&mut points, &mut out);
+    out
+}
+
+/// A water patch's box (`water_patches`) from its corners.
+fn patch_box(points: &[[f32; 3]]) -> Option<[[f32; 4]; 2]> {
+    let first = points.first()?;
+    let (low, high) = points
+        .iter()
+        .fold((f32::MAX, f32::MIN), |(l, h), p| (l.min(p[1]), h.max(p[1])));
+    let mut corners: Vec<[f32; 2]> = Vec::new();
+    for p in points {
+        let c = [p[0], p[2]];
+        if !corners
+            .iter()
+            .any(|q| (q[0] - c[0]).abs() < 0.02 && (q[1] - c[1]).abs() < 0.02)
+        {
+            corners.push(c);
+        }
+    }
+    let origin = [first[0], first[2]];
+    let mut others: Vec<[f32; 2]> = corners.into_iter().filter(|c| *c != origin).collect();
+    if others.len() < 2 {
+        return None;
+    }
+    let distance = |c: &[f32; 2]| (c[0] - origin[0]).powi(2) + (c[1] - origin[1]).powi(2);
+    others.sort_by(|a, b| distance(a).total_cmp(&distance(b)));
+    // The two nearest corners are the edges' ends; the farthest is across.
+    let edge = |c: [f32; 2]| [c[0] - origin[0], c[1] - origin[1]];
+    let (a, b) = (edge(others[0]), edge(others[1]));
+    Some([[origin[0], origin[1], low, high], [a[0], a[1], b[0], b[1]]])
+}
+
+/// `horizonDynamicLight<k>`'s `k`, for the lights `Frame::dynamic_lights` holds.
+fn dynamic_light_index(name: &str) -> Option<usize> {
+    let k: usize = name.strip_prefix("horizonDynamicLight")?.parse().ok()?;
+    (k < crate::dynamic_light::MAX).then_some(k)
 }
 
 #[cfg(test)]

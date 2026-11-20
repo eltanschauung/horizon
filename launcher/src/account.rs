@@ -7,7 +7,7 @@
 //! output.
 //!
 //! The owner gate ([`launch`]): the launcher starts the game only while an account in it owns
-//! Minecraft: Java Edition, as other launchers do. Offline names play behind such an account.
+//! Minecraft: Java Edition, as other launchers do, and the game plays as the selected account.
 //! The game binary itself, its harnesses and the servers don't go through the launcher's gate.
 //!
 //! The Azure app (client ID) is Horizon's own and is configuration: `HORIZON_MSA_CLIENT_ID` at
@@ -18,6 +18,7 @@ pub mod ely;
 
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -76,17 +77,59 @@ impl Endpoints {
     }
 }
 
+/// Orders resolved addresses so the two families alternate, the first one's address first (the
+/// order RFC 8305 asks a client to try them in). A host whose IPv6 route is dead then costs one
+/// short attempt before its IPv4 address is tried, instead of every AAAA record in turn.
+fn interleave(addrs: Vec<SocketAddr>) -> Vec<SocketAddr> {
+    let Some(first) = addrs.first().map(SocketAddr::is_ipv6) else {
+        return addrs;
+    };
+    let (mut same, mut other): (Vec<_>, Vec<_>) =
+        addrs.into_iter().partition(|a| a.is_ipv6() == first);
+    same.reverse();
+    other.reverse();
+    let mut out = Vec::with_capacity(same.len() + other.len());
+    while !same.is_empty() || !other.is_empty() {
+        out.extend(same.pop());
+        out.extend(other.pop());
+    }
+    out
+}
+
+/// The system's resolver with its answer interleaved (`interleave`).
+struct Interleaved<R>(R);
+
+impl<R: ureq::Resolver> ureq::Resolver for Interleaved<R> {
+    fn resolve(&self, netloc: &str) -> std::io::Result<Vec<SocketAddr>> {
+        self.0.resolve(netloc).map(interleave)
+    }
+}
+
+struct System;
+
+impl ureq::Resolver for System {
+    fn resolve(&self, netloc: &str) -> std::io::Result<Vec<SocketAddr>> {
+        netloc.to_socket_addrs().map(Iterator::collect)
+    }
+}
+
+/// The agent builder sign-in requests start from: the launcher's user agent, a 20 s timeout, a
+/// 10 s connect timeout (shared between the addresses, so a dead IPv6 route falls back to IPv4
+/// long before the 20 s run out) and addresses of both families interleaved.
+fn builder() -> ureq::AgentBuilder {
+    ureq::AgentBuilder::new()
+        .timeout(Duration::from_secs(20))
+        .timeout_connect(Duration::from_secs(10))
+        .resolver(Interleaved(System))
+        .user_agent(&format!("horizon-launcher/{}", crate::backend::VERSION))
+}
+
 /// A request to `url`: the launcher's user agent, a 20 s timeout, and the player's proxy when one
 /// is set (`proxy`), since a sign-in has to get out the way downloads do.
 fn request_to(method: &str, url: &str) -> ureq::Request {
-    crate::proxy::agent(
-        ureq::AgentBuilder::new()
-            .timeout(Duration::from_secs(20))
-            .user_agent(&format!("horizon-launcher/{}", crate::backend::VERSION)),
-        url,
-    )
-    .build()
-    .request(method, url)
+    crate::proxy::agent(builder(), url)
+        .build()
+        .request(method, url)
 }
 
 /// One request's result: the status and the JSON body (empty when there is none). Transport
@@ -186,8 +229,14 @@ pub fn device_code(ep: &Endpoints, client_id: &str) -> Result<DeviceCode, String
                 .get("interval")
                 .and_then(Value::as_u64)
                 .unwrap_or(5)
-                .max(1),
-            expires_at: now() + v.get("expires_in").and_then(Value::as_u64).unwrap_or(900),
+                .clamp(1, 60),
+            // The service's numbers, bounded: Instant + a huge interval panics the sign-in thread.
+            expires_at: now().saturating_add(
+                v.get("expires_in")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(900)
+                    .min(3600),
+            ),
             device_code,
         }),
         _ => Err(oauth_error(&v)),
@@ -261,7 +310,7 @@ pub fn wait_for_sign_in(
         }
         match poll(ep, client_id, code)? {
             Poll::Pending => {}
-            Poll::SlowDown => interval += 5,
+            Poll::SlowDown => interval = (interval + 5).min(60),
             Poll::Done(tokens) => return Ok(tokens),
         }
     }
@@ -347,7 +396,7 @@ fn minecraft_login(
     let (token, expires_in) = minecraft_token(ep, &format!("XBL3.0 x={uhs};{xsts_token}"))?;
     Ok(Minecraft {
         token,
-        expires_at: now() + expires_in,
+        expires_at: now().saturating_add(expires_in.min(7 * 86_400)),
         xuid,
     })
 }
@@ -1734,10 +1783,9 @@ fn secrets_in(store: &dyn SecretStore, uuid: &str) -> Option<Secrets> {
         .and_then(|s| serde_json::from_str(&s).ok())
 }
 
-/// Whether `name` can be an offline name: 3 to 16 letters, digits or `_`, as account names are.
+/// Check the name used by an offline profile.
 pub fn valid_offline_name(name: &str) -> bool {
-    (3..=16).contains(&name.chars().count())
-        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    (3..=16).contains(&name.len()) && name.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_')
 }
 
 impl Accounts {
@@ -1761,7 +1809,39 @@ impl Accounts {
             std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         }
         let text = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
-        std::fs::write(path, text + "\n").map_err(|e| e.to_string())
+        // A new file renamed over the old one: a crash or a full disk mid-write leaves the old list,
+        // not an empty file that reads as no accounts at all.
+        let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
+        if let Err(e) = std::fs::write(&tmp, text + "\n").and_then(|()| std::fs::rename(&tmp, path))
+        {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e.to_string());
+        }
+        Ok(())
+    }
+    /// Saves what a launch renewed (names, skins) into `accounts.json` as it is now, under the
+    /// accounts' lock: an account signed in or out while the services were asked stays so, where
+    /// saving this copy, loaded before, would undo it.
+    pub fn save_renewed(&self) -> Result<(), String> {
+        self.save_renewed_to(store(), &Self::path())
+    }
+    pub(crate) fn save_renewed_to(
+        &self,
+        store: &dyn SecretStore,
+        path: &Path,
+    ) -> Result<(), String> {
+        let _operation = session::lock(store)?;
+        let mut saved = Self::load_from(path);
+        for account in &self.accounts {
+            saved.update(account.clone());
+        }
+        if saved.selected().is_none() {
+            saved.selected = self
+                .selected
+                .clone()
+                .filter(|u| saved.accounts.iter().any(|a| &a.uuid == u));
+        }
+        saved.save_to(path)
     }
     pub fn selected(&self) -> Option<&Account> {
         let uuid = self.selected.as_ref()?;
@@ -1809,7 +1889,7 @@ impl Accounts {
         Ok(())
     }
     /// Whether an account here owned the game at its last check (the keychain's answer, no
-    /// request): what Play and offline names need.
+    /// request): what Play needs.
     pub fn has_owner(&self, store: &dyn SecretStore) -> bool {
         // The selected account first: it owning the game ends the search after one account's
         // item — every account's item read can ask for the keychain (macOS, #4912).
@@ -1938,8 +2018,7 @@ impl Accounts {
         }
     }
 
-    /// Sign out: the secrets leave the keychain, the account the list. Offline names stay, but
-    /// play only once an account that owns the game is back.
+    /// Sign out: the secrets leave the keychain, the account the list.
     pub fn remove(&mut self, store: &dyn SecretStore, uuid: &str) -> Result<(), String> {
         let _operation = session::lock(store)?;
         self.remove_locked(store, uuid)
@@ -1961,8 +2040,9 @@ impl Accounts {
 /// No account in the launcher owns Minecraft: Java Edition: the game must not start.
 #[derive(Debug, Default, PartialEq)]
 pub struct NoOwner {
-    /// Why a sign-in couldn't be read, when the keyring didn't give it (#12179): what is said
-    /// instead of the refusal, which would tell a signed-in player to sign in.
+    /// Why a sign-in couldn't be read, when the keyring didn't give it (#12179), or why the
+    /// account that plays can't: what is said instead of the refusal, which would tell a
+    /// signed-in player to sign in.
     pub keyring: Option<String>,
 }
 impl std::fmt::Display for NoOwner {
@@ -1992,8 +2072,8 @@ impl NoOwner {
 /// The owner gate's pass for one launch.
 #[derive(Debug, Default)]
 pub struct Launch {
-    /// The selected account and its renewed session; none when an offline name plays, or when
-    /// its sign-in couldn't be renewed now (`offline` says why).
+    /// The selected account and its renewed session; none when its sign-in couldn't be renewed
+    /// now (`offline` says why).
     pub session: Option<(Account, Secrets)>,
     /// Why the selected account plays without its session this time.
     pub offline: Option<String>,
@@ -2110,10 +2190,9 @@ pub fn launch(
     }
 }
 
-/// The owner gate before the game starts. With the window's hidden developer option
-/// (`backend::Settings::dev_offline`, `offline_without_owner`) no owner is no refusal: the game
-/// starts offline, without a session and without an `owner`. Downloads never come through here:
-/// `backend::download_for_owner` asks [`launch`] itself, so the option never downloads the game.
+/// The owner gate before the game starts: [`launch`], where the account that plays (the selected
+/// one, else the first) must own the game itself, by the services' answer or, when they can't be
+/// asked, its last one. Never another account's ownership for a name of its own.
 pub fn launch_for_game(
     ep: &Endpoints,
     client_id: Option<&str>,
@@ -2359,8 +2438,7 @@ pub struct GameSession {
 }
 
 /// The owner gate for the game about to start, then the selected account's session in a file
-/// for it, and the other accounts' for its splitscreen players. `offline_without_owner`: see
-/// [`launch_for_game`].
+/// for it, and the other accounts' for its splitscreen players.
 pub fn session_for_game(
     game_home: &Path,
     offline_without_owner: bool,
@@ -2382,7 +2460,7 @@ pub fn session_for_game(
         &mut accounts,
         pass.session.as_ref().map(|(a, _)| a.uuid.as_str()),
     );
-    if let Err(e) = accounts.save() {
+    if let Err(e) = accounts.save_renewed() {
         eprintln!("Horizon: the accounts are not saved: {e}");
     }
     Ok(session_file(game_home, pass, env))
@@ -2406,7 +2484,7 @@ pub fn session_for_game_as(game_home: &Path, who: &Player) -> Result<GameSession
         &mut accounts,
         who,
     );
-    if let Err(e) = accounts.save() {
+    if let Err(e) = accounts.save_renewed() {
         eprintln!("Horizon: the accounts are not saved: {e}");
     }
     let pass = pass?;
@@ -2415,7 +2493,7 @@ pub fn session_for_game_as(game_home: &Path, who: &Player) -> Result<GameSession
         &mut accounts,
         pass.session.as_ref().map(|(a, _)| a.uuid.as_str()),
     );
-    if let Err(e) = accounts.save() {
+    if let Err(e) = accounts.save_renewed() {
         eprintln!("Horizon: the accounts are not saved: {e}");
     }
     Ok(session_file(game_home, pass, env))
@@ -2467,7 +2545,7 @@ fn split_sessions(
     playing: Option<&str>,
 ) -> Vec<(&'static str, String)> {
     if splitscreen_on(game_home) {
-        // The launch may override the saved player, or play with an offline name.
+        // The launch may override the saved player.
         let selected = std::mem::replace(&mut accounts.selected, playing.map(str::to_owned));
         let env = account_sessions(
             &Endpoints::live(),
@@ -2614,7 +2692,7 @@ pub fn java_player() -> Result<crate::java_launch::Player, String> {
         store(),
         &mut accounts,
     );
-    if let Err(e) = accounts.save() {
+    if let Err(e) = accounts.save_renewed() {
         eprintln!("Horizon: the accounts are not saved: {e}");
     }
     player

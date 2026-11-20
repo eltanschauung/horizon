@@ -1,6 +1,5 @@
 //! Bounded, immutable surface plans, shared by every chunk referencing a start.
 use super::{
-    BoundingBox,
     jigsaw::Projection,
     start::{Piece, StartContext, StructureStart},
 };
@@ -9,6 +8,7 @@ use crate::{
     registry::BlockStateId,
     worldgen::terrain::{TerrainBlockStates, TerrainChunk, TerrainError},
 };
+use horizon_core::bounding_box::BoundingBox;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

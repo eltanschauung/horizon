@@ -110,6 +110,7 @@ impl Variant {
 pub(super) fn tick(
     mob: &mut Mob,
     w: &MobWorld,
+    level: &mut super::DamageLevel<'_>,
     events: &mut Vec<MobEvent>,
     variant: Variant,
 ) -> bool {
@@ -252,7 +253,7 @@ pub(super) fn tick(
         mob.velocity.z *= 0.65;
     }
     mob.fall_distance = 0.0;
-    mob.do_move(w, events);
+    mob.do_move(w, level, events, &mut horizon_world::move_gate::MoveGate::default());
     mob.fall_distance = 0.0;
     if mob.rider.is_some() && !mob.on_ground && mob.age % 3 == 0 {
         let kind = match variant.family {

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Frozen native build inputs, compact deployment reports and conservative pruning."""
 import argparse
+import contextlib
 import datetime as dt
-import fcntl
 import hashlib
 import json
 import os
@@ -12,11 +12,13 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import tomllib
 import zipfile
-import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
+PACKAGE_DIRS = {'native': 'horizon-native-mods', 'content': 'horizon-mods'}
+SCHEMA = 2
 
 
 def digest(path):
@@ -48,18 +50,9 @@ def git(*args):
 
 
 def safe_id(value):
-    if not re.fullmatch(r'[a-z0-9_]+', value):
+    if not re.fullmatch(r'[a-z0-9_]{1,64}', value):
         raise ValueError('Invalid package id: '+value)
     return value
-
-
-def package(path, native):
-    with zipfile.ZipFile(path) as z:
-        if native:
-            info = json.loads(z.read('horizon-native.json'))
-        else:
-            info = tomllib.loads(z.read('horizon-mod.toml').decode())
-    return {'id': safe_id(info['id']), 'version': info['version'], 'sha256': digest(path)}
 
 
 def unpack(source, destination):
@@ -73,76 +66,93 @@ def unpack(source, destination):
         z.extractall(destination)
 
 
+def collect_sdk_packages(game, revision, wanted=None):
+    from fork_sync import identity, native_digest
+
+    required = read(ROOT/'tools/fork-distribution.json')
+    seen = set()
+    entries = []
+    for kind, folder in PACKAGE_DIRS.items():
+        for source in sorted((game/folder).glob('*.hmod')):
+            if not source.is_file() or source.is_symlink():
+                raise ValueError(f'Invalid SDK package: {source}')
+            info = identity(source, kind, revision)
+            mod_id = safe_id(info['id'])
+            if kind == 'native' and wanted is not None and mod_id not in wanted:
+                continue
+            if mod_id in seen:
+                raise ValueError(f'Duplicate package ID: {mod_id}. Bundle native code and its content together.')
+            seen.add(mod_id)
+            entry = dict(id=mod_id, version=info['version'], sha256=digest(source), kind=kind)
+            if kind == 'native':
+                entry['source_sha256'] = native_digest(source)
+            entries.append((source, entry))
+        expected = required[kind] if kind != 'native' or wanted is None else wanted
+        found = {entry['id'] for _, entry in entries if entry['kind'] == kind}
+        missing = set(expected)-found
+        if missing:
+            raise ValueError(f'Missing {kind} SDK packages: {", ".join(sorted(missing))}')
+    return entries
+
+
 def snapshot(args):
     from fork import fork_launcher
     h, game = homes()
     revision = git('rev-parse', args.revision or 'HEAD')
     if not re.fullmatch(r'[a-f0-9]{40}', revision):
         raise ValueError('Expected a complete game commit')
+    selected = args.base or read(h/'instances.json').get('instances',{}).get(args.instance,{}).get('version') or read(h/'settings.json').get('selected')
+    if not selected:
+        raise ValueError('No installed base version; supply --base')
     launcher = Path(fork_launcher()).resolve()
     launcher_hash = digest(launcher)
-    provenance = json.loads(subprocess.check_output([launcher, 'fork-info'], text=True))
-    if provenance.get('dirty') or not provenance.get('revision') or 'cached-preflight' not in provenance.get('capabilities', []):
-        raise ValueError('Install the committed workflow-capable fork launcher first')
+    provenance = json.loads(subprocess.check_output([launcher, 'fork-info', '--base', selected], text=True))
+    if provenance.get('dirty') or not provenance.get('revision') or 'sdk-hmod' not in provenance.get('capabilities', []):
+        raise ValueError('Install the committed SDK workflow-capable fork launcher first')
+    sdk = provenance['sdk']
+    if sdk['revision'] != revision:
+        raise ValueError(f"Installed base {sdk['tag']} uses {sdk['revision']}; expected SDK {revision}")
     stamp = dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
     out = (args.output or ROOT/'.local/build-plans'/stamp/'manifest.json').resolve()
     if out.exists() or (out.parent/'inputs').exists():
         raise ValueError('Choose a fresh manifest directory')
-    from fork_curated import content_packages, lunatic_packages, native_packages, patch_content, published_main, REMOVED
-    mods_checkout = ROOT.parent/'horizon-mods'
-    mods_revision = subprocess.check_output(['git','-C',mods_checkout,'rev-parse','HEAD'],text=True).strip()
-    if mods_revision != published_main(mods_checkout):
-        raise ValueError('The horizon-mods checkout must match its published main before freezing')
-    subprocess.run(['git', '-C', mods_checkout, 'diff', '--quiet', 'HEAD'], check=True)
-    with tempfile.TemporaryDirectory(prefix='horizon-lunatic-bundles-') as directory:
-        lunatic_revision, lunatic_content, lunatic_native = lunatic_packages(ROOT, Path(directory))
-        entries = []
-        seen = set()
-        wanted = set(args.mods.split(',')) if args.mods else None
-        for folder, suffix, native in [('horizon-native-mods','hnmod',True),('horizon-mods','hmod',False)]:
-            curated = [*native_packages(ROOT), lunatic_native] if native else [*content_packages(ROOT), lunatic_content]
-            curated_ids = {package(p, native)['id'] for p in curated}
-            sources = list((game/folder).glob('*.'+suffix)) + curated
-            for src in sorted(sources):
-                info = package(src, native)
-                if (native and info['id'] in REMOVED) or (info['id'] in curated_ids and src not in curated): continue
-                if native and wanted is not None and info['id'] not in wanted:
-                    continue
-                key = (native, info['id'])
-                if key in seen:raise ValueError('Duplicate package id: '+info['id'])
-                seen.add(key)
-                dest = out.parent/'inputs'/folder/(info['id']+'.'+suffix)
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(src, dest)
-                if not native: patch_content(ROOT, src, dest, info['id'])
-                frozen = package(dest, native)
-                if frozen['id'] != info['id']:raise ValueError('Package identity changed during snapshot; retry')
-                entries.append(dict(frozen, kind='native' if native else 'content', path=str(dest.relative_to(out.parent))))
-        ids = {e['id'] for e in entries if e['kind']=='native'}
-        if not ids or (wanted is not None and wanted != ids):
-            raise ValueError('Native package selection is empty or contains missing ids')
-        # The compiler is shipped by the frozen launcher, which may be newer than the game.
-        src = git('show', provenance['revision']+':launcher/src/rust_toolchain.rs')
-        toolchain = re.search(r'pub const VERSION: &str = "([^"]+)"', src).group(1)
-        shutil.copy2(launcher, out.parent/'inputs/launcher')
-        if digest(out.parent/'inputs/launcher') != launcher_hash:
-            raise ValueError('Launcher changed during snapshot; retry')
-        manifest = {'schema':1, 'created_utc':stamp, 'game_revision':revision,
-                    'launcher_revision':provenance['revision'], 'launcher_tree':provenance['launcher_tree'],
-                    'launcher_sha256':launcher_hash, 'launcher_version':subprocess.check_output([out.parent/'inputs/launcher','--version'],text=True).strip(),
-                    'mods_revision':mods_revision, 'lunatic_revision':lunatic_revision,
-                    'toolchain':toolchain, 'profile':args.profile, 'base':args.base or read(h/'instances.json').get('instances',{}).get(args.instance,{}).get('version') or read(h/'settings.json').get('selected'),
-                    'instance':args.instance, 'packages':entries}
-        if not manifest['base']:
-            raise ValueError('No installed base version; supply --base')
-        write(out, manifest)
-        return {'manifest':str(out),'manifest_sha256':digest(out),'revision':revision,'native_mods':sorted(ids)}
+    wanted = {safe_id(part) for part in args.mods.split(',')} if args.mods else None
+    packages = collect_sdk_packages((args.packages_root or game).resolve(), revision, wanted)
+    workspace = Path(git('rev-parse', '--path-format=absolute', '--git-common-dir')).parent.parent
+    lunatic_revision = subprocess.check_output(['git','-C',workspace/'Lunatic','rev-parse','HEAD'],text=True).strip()
+    mods_revision = subprocess.check_output(['git','-C',workspace/'horizon-mods','rev-parse','HEAD'],text=True).strip()
+    toolchain = git('show', provenance['revision']+':tools/ci/rust-version')
+    if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', toolchain):
+        raise ValueError('The launcher revision has no exact Rust compiler version')
+    entries = []
+    for source, entry in packages:
+        dest = out.parent/'inputs'/PACKAGE_DIRS[entry['kind']]/(entry['id']+'.hmod')
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, dest)
+        if digest(dest) != entry['sha256']:
+            raise ValueError(f"Package changed during snapshot: {entry['id']}")
+        entries.append(dict(entry, path=str(dest.relative_to(out.parent))))
+    frozen_launcher = out.parent/'inputs/launcher'
+    shutil.copy2(launcher, frozen_launcher)
+    if digest(frozen_launcher) != launcher_hash:
+        raise ValueError('Launcher changed during snapshot')
+    manifest = {
+        'schema': SCHEMA, 'created_utc': stamp, 'game_revision': revision,
+        'launcher_revision': provenance['revision'], 'launcher_tree': provenance['launcher_tree'],
+        'launcher_sha256': launcher_hash, 'launcher_version': provenance['version'],
+        'mods_revision': mods_revision, 'lunatic_revision': lunatic_revision,
+        'toolchain': toolchain, 'profile': 'optimized', 'base': sdk['tag'],
+        'instance': args.instance, 'packages': entries,
+    }
+    write(out, manifest)
+    return {'manifest':str(out), 'manifest_sha256':digest(out), 'revision':revision,
+            'native_mods':sorted(e['id'] for e in entries if e['kind'] == 'native')}
 
 
 def load(path):
     path = Path(path).resolve()
     m = read(path)
-    if m.get('schema')!=1 or not re.fullmatch(r'[a-f0-9]{40}',m.get('game_revision','')):
+    if m.get('schema')!=SCHEMA or not re.fullmatch(r'[a-f0-9]{40}',m.get('game_revision','')):
         raise ValueError('Invalid workflow manifest')
     for e in m['packages']:
         safe_id(e['id'])
@@ -154,14 +164,46 @@ def load(path):
     return path,m
 
 
-def verify_about(m, about):
-    expected = {e['id']:e['version'] for e in m['packages'] if e['kind']=='native'}
-    actual = {e['id']:e['version'] for e in about['mods']}
-    if about['horizon']!=m['game_revision'] or expected!=actual or about.get('left_out'):
-        raise ValueError('Build does not match pinned revision and complete native mod set')
-    if about['rust']!=m['toolchain'] or about['profile']!=m['profile']:
+def verify_about(manifest, about, target=None):
+    expected = {e['id']:(e['version'], e['source_sha256'])
+                for e in manifest['packages'] if e['kind']=='native'}
+    mods = about['mods']
+    actual = {e['id']:(e['version'], e['sha256']) for e in mods}
+    if (about['horizon'] != manifest['game_revision'] or about['base'] != manifest['base']
+            or expected != actual or len(mods) != len(actual) or about.get('left_out') != []):
+        raise ValueError('Build does not match the pinned SDK and complete native mod set')
+    if about['rust'] != manifest['toolchain'] or about['profile'] != manifest['profile']:
         raise ValueError('Build compiler/profile differs from the manifest')
+    if target and about.get('target') != target:
+        raise ValueError('Build is for a different runtime side')
     return sorted(actual)
+
+
+def runtime_files(folder, target, about):
+    binary = 'horizon-client' if target == 'client' else 'horizon-engine'
+    files = {binary, 'native-mods.json'}
+    if target == 'server':
+        files.add('horizon-server')
+    if (folder/'horizon-wasm-std.wasm').is_file():
+        files.add('horizon-wasm-std.wasm')
+    # SDK base/runtime libraries and the compiled mod libraries use $ORIGIN.
+    files.update(p.name for p in folder.iterdir()
+                 if p.is_file() and re.fullmatch(r'[A-Za-z0-9_+.-]+\.so(?:\.[0-9]+)*', p.name))
+    for library in about.get('libraries', []):
+        path = library['file']
+        if path not in files or digest(folder/path) != library['sha256']:
+            raise ValueError(f'SDK mod library missing or changed: {path}')
+    for mod in about['mods']:
+        prefix = Path('horizon-native-mods')/safe_id(mod['id'])
+        source = folder/prefix
+        if source.is_symlink() or not (source/'horizon-mod.toml').is_file():
+            raise ValueError(f"SDK runtime package is missing: {mod['id']}")
+        for path in source.rglob('*'):
+            if path.is_symlink():
+                raise ValueError(f'SDK runtime package contains a symlink: {path}')
+            if path.is_file():
+                files.add(path.relative_to(folder).as_posix())
+    return {name:digest(folder/name) for name in sorted(files)}
 
 
 def logged(command, log, env=None, cwd=None):
@@ -180,20 +222,26 @@ def build(args):
     remote = git('ls-remote','origin','refs/heads/main').split()[0]
     subprocess.run(['git','merge-base','--is-ancestor',m['game_revision'],remote],cwd=ROOT,check=True)
     env = os.environ.copy()
-    env['HORIZON_FORK_REVISION']=m['game_revision']
+    provenance = json.loads(subprocess.check_output(
+        [p.parent/'inputs/launcher', 'fork-info', '--base', m['base']], text=True, env=env))
+    if provenance['sdk'] != {'tag':m['base'], 'revision':m['game_revision']}:
+        raise ValueError('Installed base no longer matches the frozen SDK')
     if args.command=='preflight':env['HORIZON_FORK_PREFLIGHT']='1'
     else:env.pop('HORIZON_FORK_PREFLIGHT',None)
-    source = p.parent/'native-input'
+    source = p.parent/'inputs/native-input'
     if source.exists():shutil.rmtree(source)
     for e in m['packages']:
-        if e['kind']=='native':unpack(p.parent/e['path'],source/e['id'])
+        if e['kind'] == 'native':
+            unpack(p.parent/e['path'], source/e['id'])
+    (source.parent/'horizon-mods.txt').write_text(
+        ''.join(f"mod.{e['id']}:true\n" for e in m['packages']))
     results = read(p.parent/'artifacts.json')
     # Separate targets are sequential: the launcher owns one reusable staging workspace.
     for target in (['client','server'] if args.target=='both' else [args.target]):
         log = p.parent/(args.command+'-'+target+'.log')
         out = p.parent/('server-check' if args.command=='preflight' else 'server-export')
         command = [str(p.parent/'inputs/launcher'),'native-build',str(source),'--version',m['base'],
-                   '--trust-native-code','--allow-version-mismatch','--profile',m['profile']]
+                   '--trust-native-code','--profile',m['profile']]
         if target=='client':command+=['--instance',m['instance']]
         else:command+=['--server-output',str(out)]
         if target=='server' and out.exists():
@@ -207,16 +255,10 @@ def build(args):
             version = read(h/'instances.json')['instances'][m['instance']]['version']
             folder=h/'fork-versions'/version
         else:folder=out;version=None
-        about=read(folder/'native-mods.json');verify_about(m,about)
-        files=['native-mods.json','horizon-client' if target=='client' else 'horizon-engine']
-        if target=='server':
-            # Native export carries a base supervisor. Build this revision's supervisor
-            # with the SAME staged workspace, managed compiler and native target cache.
-            build_supervisor(p,m,env,log.with_name('supervisor.log'))
-            cache=build_home(h)/'fork-native'
-            shutil.copy2(cache/'target'/('fast' if m['profile']=='performance' else 'release')/'horizon-server',folder/'horizon-server')
-            files+=['horizon-server']
-        results[target]={'directory':str(folder),'version':version,'files':{f:digest(folder/f)for f in files}}
+        about = read(folder/'native-mods.json')
+        verify_about(m, about, target)
+        results[target] = {'directory':str(folder), 'version':version,
+                           'files':runtime_files(folder, target, about)}
         results['manifest_sha256']=digest(p)
         write(p.parent/'artifacts.json',results)
     report = {'manifest':str(p),'check_only':args.command=='preflight','targets':args.target,'artifacts':results if args.command!='preflight' else {},'logs':str(p.parent)}
@@ -235,28 +277,17 @@ def build_home(home):
     return Path(read(config).get('roots',{}).get('build',home))
 
 
-def build_supervisor(p,m,env,log):
-    h,_=homes();root=build_home(h);cache=root/'fork-native';stage=cache/'stage'
-    compiler=root/'rust'/(m['toolchain']+'-x86_64-unknown-linux-gnu')/'bin'
-    if not (compiler/'cargo').is_file():raise ValueError('Expected managed Linux x86-64 toolchain missing')
-    clean={k:v for k,v in env.items() if not k.startswith(('CARGO_','RUST','HORIZON_FORK_PREFLIGHT'))}
-    clean.update(PATH=str(compiler)+os.pathsep+env.get('PATH',''),RUSTC=str(compiler/'rustc'),CARGO_HOME=str(root/'cargo'),CARGO_TARGET_DIR=str(cache/'target'))
-    command=[str(compiler/'cargo'),'build','--manifest-path',str(stage/'Cargo.toml'),'--locked','--profile','fast' if m['profile']=='performance' else 'release','-p','horizon-server','-j','2']
-    # cwd / excludes home Cargo configuration, matching the managed build.
-    logged(command,log,clean,cwd='/')
-
-
 def artifacts(path):
     p,m=load(path);a=read(p.parent/'artifacts.json')
     if a.get('manifest_sha256')!=digest(p):raise ValueError('No artifacts for this exact manifest')
-    for key in ['client','server']:
-        if key not in a:continue
-        folder=Path(a[key]['directory']);verify_about(m,read(folder/'native-mods.json'))
-        for f,sha in a[key]['files'].items():
-            if digest(folder/f)!=sha:raise ValueError('Artifact changed: '+str(folder/f))
-    if 'client'in a and 'server'in a:
-        def mods(k):return read(Path(a[k]['directory'])/'native-mods.json')['mods']
-        if sorted(mods('client'),key=lambda x:x['id'])!=sorted(mods('server'),key=lambda x:x['id']):raise ValueError('Client/server compiled mod fingerprints differ')
+    for key in ('client','server'):
+        if key not in a:
+            continue
+        folder = Path(a[key]['directory'])
+        about = read(folder/'native-mods.json')
+        verify_about(m, about, key)
+        if runtime_files(folder, key, about) != a[key]['files']:
+            raise ValueError(f'{key} runtime files changed after the build')
     return p,m,a
 
 
@@ -314,43 +345,56 @@ def deploy(args):
     if 'server'in targets:
         if 'server'not in a:raise ValueError('Build server artifacts first')
         if not re.fullmatch(r'[A-Za-z0-9_.@-]+',args.host)or args.host.startswith('-'):raise ValueError('Invalid SSH host')
-        payload={'schema':1,'root':args.server_dir,'service':args.service,'apply':args.apply,'restart_occupied':args.restart_occupied,'files':{}}
-        staging=p.parent/'upload';staging.mkdir(exist_ok=True)
-        for name in ['horizon-engine','horizon-server','native-mods.json']:
-            dest=('bin/'if name!='native-mods.json'else'')+name;src=Path(a['server']['directory'])/name
-            (staging/Path(dest).parent).mkdir(parents=True,exist_ok=True);shutil.copy2(src,staging/dest);payload['files'][dest]=digest(src)
-        for e in m['packages']:
-            src=p.parent/e['path'];dest=('horizon-native-mods/'if e['kind']=='native'else'horizon-mods/')+src.name
-            (staging/Path(dest).parent).mkdir(parents=True,exist_ok=True);shutil.copy2(src,staging/dest);payload['files'][dest]=e['sha256']
-        update_channel=None
-        if args.apply:
-            # Download inputs must be public and complete BEFORE changing a server.
-            # Publication failure leaves the running server and client pointer alone.
-            from fork_sync import stage_plan
-            update_channel=stage_plan(p,m)
-        remote=args.server_dir+'/.workflow-stage/'+digest(p)[:20]
-        ssh=['ssh','--',args.host]
-        if args.apply:
-            subprocess.run(ssh+['mkdir -p -- '+shlex.quote(remote)],check=True)
-        # tar over stdin avoids scp's remote-path parsing and shell interpolation.
-        if args.apply:
-            archive=subprocess.Popen(['tar','-C',str(staging),'-cf','-','.'],stdout=subprocess.PIPE)
-            try:subprocess.run(ssh+['tar -xf - -C '+shlex.quote(remote)],stdin=archive.stdout,check=True)
-            finally:
-                archive.stdout.close();code=archive.wait()
-            if code:raise RuntimeError('Upload archive failed')
-        runner=ROOT/'tools/fork_remote.py'
-        payload['stage']=remote
-        cmd='python3 - '+shlex.quote(json.dumps(payload))
-        text=subprocess.check_output(ssh+[cmd],input=runner.read_bytes(),timeout=240)
-        result['server']=json.loads(text)
-        # Promote only inputs whose exact binaries and packages are now healthy.
-        # A skipped deployment with different inputs must never advance clients.
-        report=result['server']
-        if args.apply and report.get('artifacts_match') and report.get('packages_match') and report.get('phase')=='running':
-            from fork_sync import promote
-            result['client_update_channel']=promote(*update_channel)
-        shutil.rmtree(staging)
+        payload={'schema':SCHEMA,'root':args.server_dir,'service':args.service,'apply':args.apply,
+                 'restart_occupied':args.restart_occupied,'files':{}}
+        with tempfile.TemporaryDirectory(prefix='upload-', dir=p.parent) as temporary:
+            staging = Path(temporary)
+            server = a['server']
+            runtime = Path(server['directory'])
+            for name, sha in server['files'].items():
+                dest = 'bin/'+name
+                (staging/Path(dest).parent).mkdir(parents=True, exist_ok=True)
+                shutil.copy2(runtime/name,staging/dest)
+                payload['files'][dest] = sha
+            # Retain the channel publisher's root-level build record as well.
+            shutil.copy2(runtime/'native-mods.json', staging/'native-mods.json')
+            payload['files']['native-mods.json'] = server['files']['native-mods.json']
+            for e in m['packages']:
+                src=p.parent/e['path'];dest=('horizon-native-mods/'if e['kind']=='native'else'horizon-mods/')+src.name
+                (staging/Path(dest).parent).mkdir(parents=True,exist_ok=True);shutil.copy2(src,staging/dest);payload['files'][dest]=e['sha256']
+            from check_glibc import check_binaries
+            with contextlib.redirect_stdout(sys.stderr):
+                check_binaries(staging/name for name in payload['files']
+                               if name in {'bin/horizon-engine','bin/horizon-server'}
+                               or re.fullmatch(r'bin/[A-Za-z0-9_+.-]+\.so(?:\.[0-9]+)*', name))
+            update_channel=None
+            if args.apply:
+                # Download inputs must be public and complete BEFORE changing a server.
+                # Publication failure leaves the running server and client pointer alone.
+                from fork_sync import stage_plan
+                update_channel=stage_plan(p,m)
+            remote=args.server_dir+'/.workflow-stage/'+digest(p)[:20]
+            ssh=['ssh','--',args.host]
+            if args.apply:
+                subprocess.run(ssh+['mkdir -p -- '+shlex.quote(remote)],check=True)
+            # tar over stdin avoids scp's remote-path parsing and shell interpolation.
+            if args.apply:
+                archive=subprocess.Popen(['tar','-C',str(staging),'-cf','-','.'],stdout=subprocess.PIPE)
+                try:subprocess.run(ssh+['tar -xf - -C '+shlex.quote(remote)],stdin=archive.stdout,check=True)
+                finally:
+                    archive.stdout.close();code=archive.wait()
+                if code:raise RuntimeError('Upload archive failed')
+            runner=ROOT/'tools/fork_remote.py'
+            payload['stage']=remote
+            cmd='python3 - '+shlex.quote(json.dumps(payload))
+            text=subprocess.check_output(ssh+[cmd],input=runner.read_bytes(),timeout=240)
+            result['server']=json.loads(text)
+            # Promote only inputs whose exact binaries and packages are now healthy.
+            # A skipped deployment with different inputs must never advance clients.
+            report=result['server']
+            if args.apply and report.get('artifacts_match') and report.get('packages_match') and report.get('phase')=='running':
+                from fork_sync import promote
+                result['client_update_channel']=promote(*update_channel)
     if 'local' in targets:
         from fork_cache import purge_resource_cache
         result['resource_cache'] = purge_resource_cache(game, apply=args.apply)
@@ -426,9 +470,10 @@ def prune(args):
 
 
 def main(argv=None):
+    import fcntl
     parser=argparse.ArgumentParser(description=__doc__)
     commands=parser.add_subparsers(dest='command',required=True)
-    p=commands.add_parser('manifest');p.add_argument('--output',type=Path);p.add_argument('--revision');p.add_argument('--mods');p.add_argument('--base');p.add_argument('--instance',default='horizon');p.add_argument('--profile',choices=['performance','release'],default='performance')
+    p=commands.add_parser('manifest');p.add_argument('--output',type=Path);p.add_argument('--revision');p.add_argument('--mods');p.add_argument('--base');p.add_argument('--packages-root',type=Path);p.add_argument('--instance',default='horizon')
     for name in ['build-plan','preflight']:
         p=commands.add_parser(name);p.add_argument('manifest',type=Path);p.add_argument('--target',choices=['client','server','both'],default='both')
     p=commands.add_parser('deploy');p.add_argument('manifest',type=Path);p.add_argument('--target',choices=['local','server','both'],default='local');p.add_argument('--host',default='telemazer@74.91.116.171');p.add_argument('--server-dir',default='/home/telemazer/lunatic-server');p.add_argument('--service',default='lunatic-horizon.service');p.add_argument('--apply',action='store_true');p.add_argument('--restart-occupied',action='store_true',help='Restart the dedicated server even if players are online')

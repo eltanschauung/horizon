@@ -2,17 +2,18 @@
 //! `optifine/sky/world<N>/sky<M>.properties` (`world0` the Overworld, `world1` the End; the Nether
 //! draws no sky), and the `sun` and `moon_phases` textures that replace the vanilla ones.
 //!
-//! A layer is a skybox (one texture, six faces in a 3x2 grid, [`Face`]) drawn on top of the
-//! previous layer (or the vanilla sky) with a blend ([`Blend`]), at a brightness its fade times
-//! give for the time of day ([`Fade`]), on the days, in the weather, biomes and heights it names
-//! ([`SkyLayer::shows`]), and turning with the time of day around its axis ([`SkyLayer::turns`]).
+//! A layer is a skybox (one texture, six faces in a 3x2 grid: bottom, top and south over west,
+//! north and east, the renderer's custom sky layout) drawn on top of the previous layer (or the
+//! vanilla sky) with a blend ([`Blend`]), at a brightness its fade times give for the time of day
+//! ([`Fade`]), on the days, in the weather, biomes and heights it names ([`SkyLayer::shows`]), and
+//! turning with the time of day around its axis ([`SkyLayer::turns`]).
 //! Everything here is read once at load; a frame evaluates a few numbers per layer.
 //!
 //! Written from OptiFine's public documentation of the format (`OptiFineDoc/doc/sky.properties`
 //! and the Custom Sky page of OptiDocs, with its skybox template); no OptiFine code was read.
 
+use horizon_assets::resource_source::ResourceSource;
 use std::collections::BTreeMap;
-use std::path::Path;
 
 use crate::matchers::{IdList, RangeList};
 use crate::paths::{properties_files, resolve};
@@ -354,89 +355,25 @@ impl Transition {
     }
 }
 
-/// A face of the skybox, as the 3x2 grid of its texture holds them: `Bottom`, `Top`, `South` in
-/// the top row, `West`, `North`, `East` below.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Face {
-    Bottom,
-    Top,
-    South,
-    West,
-    North,
-    East,
-}
-
-impl Face {
-    pub const ALL: [Self; 6] = [
-        Self::Bottom,
-        Self::Top,
-        Self::South,
-        Self::West,
-        Self::North,
-        Self::East,
-    ];
-
-    /// The face's cell of the texture, `[u0, v0, u1, v1]` in 0..1.
-    pub fn cell(self) -> [f32; 4] {
-        let (col, row) = match self {
-            Self::Bottom => (0, 0),
-            Self::Top => (1, 0),
-            Self::South => (2, 0),
-            Self::West => (0, 1),
-            Self::North => (1, 1),
-            Self::East => (2, 1),
-        };
-        let (u, v) = (col as f32 / 3.0, row as f32 / 2.0);
-        [u, v, u + 1.0 / 3.0, v + 0.5]
-    }
-
-    /// The face's corners (on the unit cube around the camera; x east, y up, z south) in the
-    /// order of its cell's `(u0, v0)`, `(u1, v0)`, `(u1, v1)`, `(u0, v1)`. The side faces are
-    /// seen from inside with up at the top of their cell; the top face has north at the bottom of
-    /// its cell, the bottom face north at the top (the template's `N` marks).
-    pub fn corners(self) -> [[f32; 3]; 4] {
-        match self {
-            // Seen looking north: west on the left.
-            Self::North => [
-                [-1., 1., -1.],
-                [1., 1., -1.],
-                [1., -1., -1.],
-                [-1., -1., -1.],
-            ],
-            Self::South => [[1., 1., 1.], [-1., 1., 1.], [-1., -1., 1.], [1., -1., 1.]],
-            Self::East => [[1., 1., -1.], [1., 1., 1.], [1., -1., 1.], [1., -1., -1.]],
-            Self::West => [
-                [-1., 1., 1.],
-                [-1., 1., -1.],
-                [-1., -1., -1.],
-                [-1., -1., 1.],
-            ],
-            // Looking up with north toward the cell's bottom edge: east on the right.
-            Self::Top => [[-1., 1., 1.], [1., 1., 1.], [1., 1., -1.], [-1., 1., -1.]],
-            // Looking down with north toward the cell's top edge: east on the right.
-            Self::Bottom => [
-                [-1., -1., -1.],
-                [1., -1., -1.],
-                [1., -1., 1.],
-                [-1., -1., 1.],
-            ],
-        }
-    }
-}
-
 impl Skies {
     /// Every `sky/world<N>/` of the pack under `root`. Layers draw in the order of their number
     /// (`sky1` before `sky10`); a file that fails to parse is skipped with a warning.
-    pub fn scan(root: &Path) -> Self {
+    pub fn scan(root: &ResourceSource) -> Self {
         let mut out = Self::default();
         for ns in ["minecraft"] {
             for top in ["optifine", "mcpatcher"] {
                 let base = format!("assets/{ns}/{top}/sky");
-                let Ok(dirs) = std::fs::read_dir(root.join(&base)) else {
-                    continue;
-                };
-                for dir in dirs.flatten() {
-                    let name = dir.file_name().to_string_lossy().into_owned();
+                let prefix = format!("{base}/");
+                let dirs: std::collections::BTreeSet<_> = root
+                    .list(&prefix)
+                    .into_iter()
+                    .filter_map(|file| {
+                        file.strip_prefix(&prefix)?
+                            .split_once('/')
+                            .map(|(name, _)| name.to_owned())
+                    })
+                    .collect();
+                for name in dirs {
                     let Some(world) = name.strip_prefix("world").and_then(|n| n.parse().ok())
                     else {
                         continue;
@@ -461,9 +398,9 @@ impl Skies {
 
 impl WorldSky {
     /// The layers and bodies of the folder at resource path `dir`.
-    fn scan(root: &Path, dir: &str) -> Self {
+    fn scan(root: &ResourceSource, dir: &str) -> Self {
         let read = |file: &str| {
-            std::fs::read_to_string(root.join(file))
+            root.read_to_string(file)
                 .ok()
                 .map(|t| Properties::parse(&t))
         };
@@ -483,7 +420,7 @@ impl WorldSky {
             };
             let Some(p) = read(&file) else { continue };
             match SkyLayer::parse(&file, &p) {
-                Some(layer) if root.join(&layer.source).is_file() => layers.push((n, layer)),
+                Some(layer) if root.contains(&layer.source) => layers.push((n, layer)),
                 Some(layer) => log::warn!("{file}: no texture {}", layer.source),
                 None => log::warn!("{file}: unknown blend or bad source; skipped"),
             }
@@ -496,7 +433,7 @@ impl WorldSky {
                 Some(s) => with_png(&resolve(&props, s)?),
                 None => format!("{dir}/{name}.png"),
             };
-            if !root.join(&source).is_file() {
+            if !root.contains(&source) {
                 return None;
             }
             let blend = p
@@ -674,38 +611,6 @@ mod tests {
     }
 
     #[test]
-    fn the_grid_holds_each_face_once_and_faces_point_out() {
-        let mut cells: Vec<_> = Face::ALL
-            .iter()
-            .map(|f| f.cell().map(|x| (x * 6.0) as i32))
-            .collect();
-        cells.dedup();
-        assert_eq!(cells.len(), 6);
-        assert_eq!(Face::East.cell(), [2.0 / 3.0, 0.5, 1.0, 1.0]);
-        for face in Face::ALL {
-            let c = face.corners();
-            let sub = |a: [f32; 3], b: [f32; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-            let (a, b) = (sub(c[1], c[0]), sub(c[3], c[0]));
-            let n = [
-                a[1] * b[2] - a[2] * b[1],
-                a[2] * b[0] - a[0] * b[2],
-                a[0] * b[1] - a[1] * b[0],
-            ];
-            let centre: [f32; 3] =
-                std::array::from_fn(|i| c.iter().map(|p| p[i]).sum::<f32>() / 4.0);
-            // Seen from inside, u runs right and v down, so u x v points away from the camera.
-            let dot: f32 = (0..3).map(|i| n[i] * centre[i]).sum();
-            assert!(dot > 0.0, "{face:?} is mirrored");
-        }
-        // The top cell's bottom edge (v1) is north: its corners 2 and 3 have z = -1.
-        assert_eq!(Face::Top.corners()[2][2], -1.0);
-        assert_eq!(Face::Top.corners()[3][2], -1.0);
-        // The bottom cell's top edge (v0) is north.
-        assert_eq!(Face::Bottom.corners()[0][2], -1.0);
-        assert_eq!(Face::Bottom.corners()[1][2], -1.0);
-    }
-
-    #[test]
     fn scan_reads_worlds_in_number_order_with_bodies() {
         let root = std::env::temp_dir().join(format!("horizon-sky-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -726,7 +631,22 @@ mod tests {
         }
         std::fs::write(end.join("sky1.properties"), "").unwrap();
         std::fs::write(end.join("sky1.png"), b"png").unwrap();
-        let skies = Skies::scan(&root);
+        let source = ResourceSource::directory(root.clone());
+        let skies = Skies::scan(&source);
+        let indexed = ResourceSource::indexed(
+            source
+                .list("assets/")
+                .into_iter()
+                .map(|name| {
+                    let bytes = source.read(&name).unwrap();
+                    (
+                        name,
+                        horizon_assets::resource_source::Resource::bytes(bytes),
+                    )
+                })
+                .collect(),
+        );
+        assert_eq!(Skies::scan(&indexed), skies);
         let _ = std::fs::remove_dir_all(&root);
         let o = &skies.worlds[&0];
         assert_eq!(

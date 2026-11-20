@@ -3,10 +3,16 @@ on:
   workflow_dispatch:
     inputs:
       tag:
+        description: Draft release containing the frozen sdk-packages.zip
         required: true
-        default: v0.3.1
+
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: fork-friends-${{ inputs.tag }}
+  cancel-in-progress: false
+
 jobs:
   build:
     strategy:
@@ -17,65 +23,84 @@ jobs:
             platform: windows
             exe: .exe
             flags: -C target-feature=+crt-static
-            asset: windows-x64.zip
           - os: ubuntu-22.04
             platform: linux
             exe: ""
             flags: ""
-            asset: linux-x86_64.tar.gz
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     env:
       HORIZON_MSA_CLIENT_ID: 331e08f8-172d-43b9-835a-3108c2fcdbf3
-      HORIZON_LAUNCHER_VERSION: 0.3.1
       HORIZON_LAUNCHER_TAG: ${{ inputs.tag }}
       HORIZON_TELEMETRY_URL: off
       RUSTFLAGS: ${{ matrix.flags }}
       GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.tag }}
     defaults:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - id: rust
+        run: echo "version=$(cat tools/ci/rust-version)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
+        with:
+          toolchain: ${{ steps.rust.outputs.version }}
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: |
-            source
-            launcher
+          workspaces: launcher
           shared-key: fork-friends-${{ matrix.platform }}
           cache-on-failure: true
-      - name: Fetch the exact patched prebuild source and curated payload
-        run: |
-          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern prebuild-source.tar.gz
-          tar xzf prebuild-source.tar.gz
-          test -f source/native-hooks.json
-          test -f source/tools/native-hook-fragments/render_hand_pose.json
-        env:
-          RELEASE_TAG: ${{ inputs.tag }}
       - name: Linux build libraries
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libvulkan-dev libasound2-dev libudev-dev
-      - name: Build the selected native game and tools
-        working-directory: source
-        env:
-          HORIZON_MOD_API_INJECTIONS: ${{ github.workspace }}/source/.horizon-mod-api-injections.json
-        run: cargo build --locked --profile fast -j 2 -p horizon-native-game -p horizon-client-lib -p horizon-prepare -p horizon-server --bin horizon-client --bin horizon-ctl --bin horizon-prepare --bin horizon-server
-      - name: Build Microsoft-enabled launcher
-        working-directory: launcher
-        run: cargo build --locked --profile fast -j 2 --bin horizon-launcher
+          sudo apt-get install -y binutils libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libvulkan-dev libasound2-dev libudev-dev patchelf
+      - name: Fetch the frozen SDK package set
+        run: |
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern sdk-packages.zip
+          python -m zipfile -e sdk-packages.zip plan
+      - name: Build the launcher at the frozen revision
+        run: |
+          HORIZON_LAUNCHER_VERSION=$(python -c 'import json; print(json.load(open("plan/manifest.json"))["launcher_version"])')
+          export HORIZON_LAUNCHER_VERSION
+          cargo build --manifest-path launcher/Cargo.toml --locked --profile fast -j 2 --bin horizon-launcher
       - name: Prepare Windows voice codec runtime
         if: runner.os == 'Windows'
         run: |
           python -m pip install "zstandard>=0.23,<1"
-          python tools/windows_runtime.py --output source/target/fast
-      - name: Package and upload platform assets
+          python tools/windows_runtime.py --output runtime
+      - name: Build and verify the portable SDK client
         run: |
-          python tools/fork_release.py --source source --binaries source/target/fast --payload source/fork-release-payload --launcher launcher/target/fast/horizon-launcher${{ matrix.exe }} --out dist --platform ${{ matrix.platform }} --tag "$RELEASE_TAG"
-          gh release upload "$RELEASE_TAG" dist/horizon-${{ matrix.asset }} dist/horizon-launcher-${{ matrix.asset }} --repo "$GITHUB_REPOSITORY" --clobber
-        env:
-          RELEASE_TAG: ${{ inputs.tag }}
+          python tools/fork_release.py --plan plan --scratch work --launcher launcher/target/fast/horizon-launcher${{ matrix.exe }} --out dist --runtime runtime --platform ${{ matrix.platform }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fork-friends-${{ matrix.platform }}
+          path: dist/horizon-*.*
+          if-no-files-found: error
+          retention-days: 7
+
+  upload:
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: fork-friends-*
+          merge-multiple: true
+          path: dist
+      - name: Upload both platforms to the draft release
+        shell: bash
+        run: |
+          test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = true
+          gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" dist/horizon-linux-x86_64.tar.gz dist/horizon-windows-x64.zip dist/horizon-launcher-linux-x86_64.tar.gz dist/horizon-launcher-windows-x64.zip

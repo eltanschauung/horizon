@@ -126,7 +126,7 @@ impl Launcher {
                 )
                 .when(!plays, |d| {
                     d.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                        this.play_as(Player::Offline(who.clone()));
+                        this.play_as(&Player::Offline(who.clone()));
                         cx.notify();
                     }))
                 })
@@ -158,7 +158,7 @@ impl Launcher {
                 self.name_chip("game-name-chip", made_up, plays)
                     .when(!plays, |d| {
                         d.on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                            this.play_as(Player::GameName);
+                            this.play_as(&Player::GameName);
                             cx.notify();
                         }))
                     })
@@ -344,6 +344,8 @@ impl Launcher {
             .flex_col()
             .rounded(px(16.))
             .bg(white(0.045))
+            .border_1()
+            .border_color(white(ui::edge::REST))
             .p(px(24.))
             .when(has_accounts, |d| {
                 d.child(rows.mx(px(-16.)).mt(px(-16.)).mb(px(16.)))

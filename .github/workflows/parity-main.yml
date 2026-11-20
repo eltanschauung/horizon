@@ -28,16 +28,21 @@ jobs:
     # behind the next run. PR parity jobs have ludovics-mac-mini and playhorizon. Not playhorizon: its 4 CPUs
     # make a core-crate run several times longer, and a failure here bisects and comments on merges.
     runs-on: [self-hosted, macOS, horizon-parity-main]
-    timeout-minutes: 240  # a core-crate batch reruns ~300 harnesses (~60-90 min), a bisect a few rounds of the failures
+    # A batch reruns up to ~670 harnesses, then bisects any failures: 89-234 min in the nine runs logged up to
+    # 2026-11-20, the longest on a loaded Mac (an 85 min probe prebuild). After the oracle shim's key changes, its
+    # records are rebuilt once, which adds up to ~23 min to the first full run.
+    timeout-minutes: 300
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
           # Keeps .local/ (parity state, probe builds, oracle results) and target/ between runs.
           clean: false
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable, 2026-11
+        with:
+          toolchain: stable
       - name: Tools from the runner
         run: bash tools/ci/runner-env.sh
       - name: Vanilla data, and resources prepared by this preparer
@@ -58,6 +63,18 @@ jobs:
           echo "Merges since ${BASE_SHA}:"
           git log --first-parent --format='  %h %s' "$BASE_SHA..HEAD"
           python3 tools/parity.py --changed "$BASE_SHA" --timeout 2400
+      - name: Preserve the initial failure logs
+        if: steps.harnesses.outcome == 'failure'
+        run: |
+          rm -rf .local/parity-main-logs && cp -R .local/parity-runner/logs .local/parity-main-logs 2>/dev/null || true
+      - name: Upload the initial failure logs
+        if: steps.harnesses.outcome == 'failure'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: parity-main-logs
+          path: .local/parity-main-logs/
+          if-no-files-found: warn
+          retention-days: 7
       - name: A flake, or the merge that broke them
         if: steps.harnesses.outcome == 'failure'
         env:
@@ -65,13 +82,4 @@ jobs:
           PARITY_HOSTS: ''
           BASE_SHA: ${{ steps.base.outputs.sha }}
         run: |
-          rm -rf .local/parity-main-logs && cp -R .local/parity-runner/logs .local/parity-main-logs 2>/dev/null || true
           python3 tools/parity_main.py bisect "$BASE_SHA" --comment
-      - name: Logs of the failed harnesses
-        if: steps.harnesses.outcome == 'failure'
-        uses: actions/upload-artifact@v7
-        with:
-          name: parity-main-logs
-          path: .local/parity-main-logs/
-          if-no-files-found: ignore
-          retention-days: 7

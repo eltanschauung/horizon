@@ -8,6 +8,7 @@ pub(super) struct SyncUi {
     running: Option<Run>,
     checked: HashMap<String, Instant>,
     launch_ready: Option<String>,
+    preparing: Option<(String, bool)>,
     play_after: bool,
 }
 struct Run {
@@ -100,7 +101,13 @@ impl Launcher {
         if self.server_sync.launch_ready.take().as_deref() == Some(instance.id.as_str()) {
             return false;
         }
-        self.begin_server_sync(true);
+        if let Some((id, play)) = &mut self.server_sync.preparing {
+            if *id == instance.id {
+                *play = true;
+            }
+        } else {
+            self.begin_server_sync(true);
+        }
         true
     }
     pub(super) fn server_sync_tick(&mut self) -> bool {
@@ -137,6 +144,15 @@ impl Launcher {
             run.progress(phase, line);
         }
     }
+    pub(super) fn server_sync_prepared(&mut self, succeeded: bool) {
+        let Some((id, play)) = self.server_sync.preparing.take() else {
+            return;
+        };
+        if succeeded && self.managed_instance().is_some_and(|instance| instance.id == id) {
+            self.begin_server_sync(play);
+        }
+    }
+
     pub(super) fn server_sync_done(
         &mut self,
         id: String,
@@ -160,9 +176,8 @@ impl Launcher {
         match result {
             Ok(server_sync::Outcome::Prepare(base)) => {
                 if self.owner == Some(true) {
-                    self.server_sync.checked.remove(&id);
-                    self.play_when_prepared = play.then_some(base);
-                    self.prepare(backend::MinecraftFrom::Install);
+                    self.server_sync.preparing = Some((id, play));
+                    self.prepare_version(base, backend::MinecraftFrom::Install);
                 }
             }
             Ok(server_sync::Outcome::Ready(_))

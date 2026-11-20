@@ -2,8 +2,7 @@
 
 Run from the Horizon checkout. Existing `build`, `install`, Lunatic-only and direct-play
 commands still work. New commands print one JSON summary; compiler output stays in
-logs beside the manifest. Requires the Linux x86-64 fork launcher installed with
-`HORIZON_LAUNCHER_VERSION=0.2.58 ./tools/fork.py install launcher` after committing source.
+logs beside the manifest. Use the committed SDK-compatible fork launcher on Linux x86-64.
 
 ```sh
 ./tools/fork.py manifest --output .local/my-build/manifest.json
@@ -24,13 +23,14 @@ and SHA-256 hashes. Default game revision is local committed HEAD; publish it be
 building. The frozen launcher reports its compiled source provenance; unknown/dirty
 launcher builds cannot create a plan. This is build provenance, not an account export.
 
-Optional: `--revision SHA`, `--base INSTALLED_VERSION`, `--instance NAME`,
-`--profile performance|release`, `--mods id,id` to restrict the native set.
-All installed content packages are captured. Inspect the JSON before building;
-the freeze uses the packaged distribution defaults and the installed packages
-outside that set. It rebuilds both Lunatic packages from its published main
-commit and records that revision. Server deployment requires a fresh freeze
-if Lunatic main advances. Do not commit the private snapshot/binaries.
+Optional arguments include `--revision SHA`, `--base INSTALLED_VERSION`, `--instance NAME`
+and `--packages-root DIRECTORY`. The package root contains `horizon-native-mods`
+and `horizon-mods` directories. Both use SDK `.hmod` archives. Package native code
+and content together when they share an ID. A full freeze checks every ID in
+`tools/fork-distribution.json` and records the signed base plus the hash of each
+native source bundle. Use `--mods id,id` for focused development checks. Deploy from
+a full distribution manifest and refresh it when published Lunatic main advances.
+Keep private snapshots and binaries outside Git.
 
 `preflight` stages and checks the actual frozen mod set using the launcher's managed
 compiler, Cargo home, target directory, features and profile. It creates no installed
@@ -41,8 +41,7 @@ shared native stage. This replaces a separate unmodded/debug-cache compatibility
 `build-plan --target client|server|both` builds the same pinned commit for each target,
 ignoring cached mutable `main` lookups. Missing mods, wrong profiles and changed
 snapshots fail. Client builds select the instance through the existing launcher;
-server builds export an engine and build the matching supervisor with the same
-managed compiler/cache. Artifact hashes are recorded in `artifacts.json`. A repeated
+server builds export the SDK engine and carry the supervisor from the signed base. Artifact hashes are recorded in `artifacts.json`. A repeated
 server export keeps the previous one as `server-export.previous` during replacement.
 Successful verification removes it; a failed replacement preserves it for recovery
 and must be inspected before retrying. GUI and server feature sets differ, but their
@@ -63,6 +62,24 @@ binaries/packages and restarts the previous service. World/config/account files 
 not deployment inputs. The JSON report records package agreement, selection, health,
 backup and log locations. Preview does not restart or upload server artifacts.
 
+## Portable releases
+
+Put `manifest.json`, `inputs/horizon-native-mods/` and `inputs/horizon-mods/`
+from the full frozen manifest into `sdk-packages.zip` and upload it to a draft
+release. Run the Fork friends release workflow from the manifest's launcher
+revision. Each runner installs the same signed base, runs SDK preflight, builds
+the complete package set, and checks the build record before archiving. The final
+job uploads both platform pairs after both builds pass.
+
+## Linux releases
+
+Build Linux binaries intended for distribution on Ubuntu 22.04, matching upstream's
+glibc 2.35 baseline. Use the Ubuntu 22.04 Linux release job or an equivalent build
+environment. Run `python3 tools/check_glibc.py` with the launcher, client, preparation
+tools, server and any bundled shared libraries before distributing them. The public
+release and private portable packagers enforce this check. A build made locally on a
+newer distribution can still be used locally.
+
 ## Pruning
 
 `prune-builds` previews old managed installations; `--apply` removes candidates only.
@@ -75,14 +92,11 @@ not prune VPS backups, GitHub releases or arbitrary folders.
 
 ## Default Lunatic mod set
 
-Keep these native mods installed/enabled when freezing a full deployment: arcadiandream,
-chatheads, classic_music, eatinganimation, justenoughitems, lunatic, minimap, no_copper,
-tectonic_horizon, worldedit and zoom. JEI 1.1.0 and Classic Music 0.1.0 are client features;
-include their bundles in both deployment snapshots so clients keep the same defaults.
-Content packages include Arcadian Dream, Biomes O’ Plenty and Lunatic.
-The frozen distribution also includes Gravestone's content pack and native core,
-with private grave markers in the Minimap. Corpse is excluded from new builds.
-Legacy Corpse inventory files stay in existing world backups for recovery.
+The full native and content package lists are in `tools/fork-distribution.json`.
+Native client features such as JEI and Classic Music stay in the manifest so
+clients receive the same defaults. Gravestone packages retain the private grave
+markers in Minimap. Legacy Corpse inventory files stay in existing world backups
+for recovery.
 
 ## Local modded shortcut
 
@@ -136,6 +150,5 @@ no native compiler is active; running or data-bearing partials remain protected.
 ## Gensokyo Legacy port
 
 The biome port is maintained in `../horizon-mods/native/gensokyo-legacy`.
-Run its `python3 tools/build.py --install` after content/native changes, then freeze
-and validate the complete installed mod set normally. Both the content `.hmod`
-and native `.hnmod` are required. New biomes affect new chunks only.
+Package its native code, biome data and assets as one SDK `.hmod` before freezing the
+distribution. New biomes affect new chunks only.

@@ -19,7 +19,18 @@ def sha(path):
 
 
 def allowed(name):
-    return name in {'bin/horizon-engine','bin/horizon-server','native-mods.json'} or bool(re.fullmatch(r'horizon-(?:native-mods/[a-z0-9_]+\.hnmod|mods/[a-z0-9_]+\.hmod)',name))
+    fixed = {'bin/horizon-engine', 'bin/horizon-server', 'bin/horizon-wasm-std.wasm',
+             'bin/native-mods.json', 'native-mods.json'}
+    if name in fixed:
+        return True
+    if re.fullmatch(r'bin/[A-Za-z0-9_+.-]+\.so(?:\.[0-9]+)*', name):
+        return True
+    if re.fullmatch(r'horizon-(?:native-mods|mods)/[a-z0-9_]{1,64}\.hmod', name):
+        return True
+    parts = name.split('/')
+    return (len(parts) >= 4 and parts[:2] == ['bin', 'horizon-native-mods']
+            and re.fullmatch(r'[a-z0-9_]{1,64}', parts[2]) is not None
+            and not any(part in {'', '.', '..'} or '\\' in part or '\0' in part for part in parts[3:]))
 
 
 def players(status):
@@ -70,7 +81,8 @@ def install_mod_settings(path, contents):
 def execute(payload):
     root=Path(payload['root']);stage=Path(payload['stage']);service=payload['service']
     if not root.is_absolute()or not stage.is_relative_to(root/'.workflow-stage')or not re.fullmatch(r'[a-zA-Z0-9_.@-]+\.service',service):raise ValueError('Invalid deployment destination')
-    if not all(allowed(n)for n in payload['files']):raise ValueError('Invalid deployment file')
+    if payload.get('schema') != 2 or not all(allowed(n) for n in payload['files']):
+        raise ValueError('Invalid SDK deployment payload')
     def status():return json.loads(subprocess.check_output([root/'bin/server','--dir',root,'status','--json']))
     restart_occupied = payload.get('restart_occupied') is True
     before=status();online=players(before)
@@ -83,18 +95,17 @@ def execute(payload):
         if (root/name).is_symlink():raise ValueError('Refusing symlink destination: '+name)
     # Check loader/library compatibility before stopping the working service.
     env=dict(os.environ,HORIZON_HOME=str(stage/'probe'),HORIZON_NO_AUDIO='1')
-    loader=root/'lib/ld-linux-x86-64.so.2'
     for name,flag in [('horizon-engine','--help'),('horizon-server','--version')]:
         path=stage/'bin'/name;path.chmod(0o755)
-        cmd=[str(loader),'--library-path',str(root/'lib'),str(path)]if loader.exists()else[str(path)]
+        cmd=[str(path)]
         subprocess.run(cmd+[flag],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,check=True,timeout=30)
     backup=root/'backups'/('workflow-'+datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ'))
     extras=[]
-    for folder,suffix in [('horizon-native-mods','*.hnmod'),('horizon-mods','*.hmod')]:
+    for folder,suffix in [('horizon-native-mods','*.hmod'),('horizon-mods','*.hmod')]:
         extras.extend(str(p.relative_to(root))for p in(root/folder).glob(suffix)if str(p.relative_to(root))not in payload['files'])
     config=root/'horizon-mods.txt'
     if config.is_symlink():raise ValueError('Refusing symlink mod settings')
-    settings, enabled = content_defaults(config, (stage/n for n in payload['files'] if n.startswith('horizon-mods/')))
+    settings, enabled = content_defaults(config, (stage/n for n in payload['files'] if n.startswith(('horizon-mods/', 'horizon-native-mods/'))))
     names=list(payload['files'])+extras+([config.name] if enabled else [])
     existed={name:(root/name).exists()for name in names}
     for name in names:

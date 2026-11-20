@@ -2,6 +2,7 @@
 //! bundles published only after the corresponding server deployment is healthy.
 //! No moving source branch, account credentials or player data enter the channel.
 use crate::{backend, browser, instances, native_mods};
+use horizon_platform::mod_package::manifest::Package as ModPackage;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -16,6 +17,7 @@ pub const CHANNEL: &str =
     "https://raw.githubusercontent.com/eltanschauung/horizon/server-sync/manifest.json";
 const RECORD: &str = ".horizon-server-sync/manifest.json";
 const LIMIT: u64 = 1024 * 1024;
+const SCHEMA: u32 = 2;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -91,7 +93,11 @@ fn err(e: impl std::fmt::Display) -> String {
 }
 impl Manifest {
     pub fn validate(&self) -> Result<(), String> {
-        if self.schema != 1
+        self.validate_schema(SCHEMA)
+    }
+
+    fn validate_schema(&self, schema: u32) -> Result<(), String> {
+        if self.schema != schema
             || !hex(&self.generation, 64)
             || !hex(&self.game_revision, 40)
             || self.base.is_empty()
@@ -114,7 +120,14 @@ impl Manifest {
                 || !hex(&p.sha256, 64)
                 || p.size == 0
                 || p.size > 512 * 1024 * 1024
-                || !seen.insert((format!("{:?}", p.kind), p.id.clone()))
+                || !seen.insert((
+                    if schema == SCHEMA && p.kind != Kind::Runtime {
+                        "mod".to_owned()
+                    } else {
+                        format!("{:?}", p.kind)
+                    },
+                    p.id.as_str(),
+                ))
                 || !p.url.starts_with(&format!(
                     "https://github.com/{}/releases/download/",
                     backend::REPO
@@ -147,7 +160,7 @@ impl Package {
     }
     fn relative(&self) -> PathBuf {
         match self.kind {
-            Kind::Native => PathBuf::from(format!("horizon-native-mods/{}.hnmod", self.id)),
+            Kind::Native => PathBuf::from(format!("horizon-native-mods/{}.hmod", self.id)),
             Kind::Content => PathBuf::from(format!("horizon-mods/{}.hmod", self.id)),
             Kind::Runtime => PathBuf::from(match self.id.as_str() {
                 "libopus" => "libopus-0.dll",
@@ -170,7 +183,11 @@ fn read_record(home: &Path) -> Option<Manifest> {
         return None;
     }
     let m: Manifest = serde_json::from_slice(&b).ok()?;
-    m.validate().ok()?;
+    if m.schema == 1 {
+        m.validate_schema(1).ok()?;
+    } else {
+        m.validate().ok()?;
+    }
     Some(m)
 }
 pub fn required(home: &Path, mod_id: &str) -> bool {
@@ -217,7 +234,7 @@ fn replace(from: &Path, to: &Path) -> Result<(), String> {
 fn replace(from: &Path, to: &Path) -> Result<(), String> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::{
-        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
     };
     let from: Vec<u16> = from.as_os_str().encode_wide().chain(Some(0)).collect();
     let to: Vec<u16> = to.as_os_str().encode_wide().chain(Some(0)).collect();
@@ -249,44 +266,25 @@ fn atomic_copy(src: &Path, dst: &Path) -> Result<(), String> {
         .map_err(err)?;
     replace(&tmp, dst)
 }
-fn package_identity(p: &Path, kind: &Kind) -> Result<(String, String), String> {
-    let mut z = zip::ZipArchive::new(fs::File::open(p).map_err(err)?).map_err(err)?;
-    let name = if *kind == Kind::Native {
-        "horizon-native.json"
-    } else {
-        "horizon-mod.toml"
-    };
-    let mut s = String::new();
-    z.by_name(name)
-        .map_err(err)?
-        .take(LIMIT)
-        .read_to_string(&mut s)
-        .map_err(err)?;
-    if *kind == Kind::Native {
-        let v: serde_json::Value = serde_json::from_str(&s).map_err(err)?;
-        Ok((
-            v.get("id")
-                .and_then(|v| v.as_str())
-                .ok_or("Missing mod id")?
-                .into(),
-            v.get("version")
-                .and_then(|v| v.as_str())
-                .ok_or("Missing mod version")?
-                .into(),
-        ))
-    } else {
-        let v: toml::Value = toml::from_str(&s).map_err(err)?;
-        Ok((
-            v.get("id")
-                .and_then(|v| v.as_str())
-                .ok_or("Missing mod id")?
-                .into(),
-            v.get("version")
-                .and_then(|v| v.as_str())
-                .ok_or("Missing mod version")?
-                .into(),
-        ))
+fn check_package(path: &Path, entry: &Package, revision: &str) -> Result<(), String> {
+    let package = ModPackage::read(path)?;
+    if package.is_native() != (entry.kind == Kind::Native)
+        || package.manifest.id != entry.id
+        || package.manifest.version != entry.version
+    {
+        return Err(format!("Update identity mismatch: {}", entry.id));
     }
+    if package
+        .manifest
+        .native
+        .is_some_and(|native| native.horizon != revision)
+    {
+        return Err(format!(
+            "{} was not built for server SDK {revision}",
+            entry.id
+        ));
+    }
+    Ok(())
 }
 /// Recover only paths recorded by our own bounded transaction, never worlds,
 /// account files, or arbitrary paths supplied by a downloaded manifest.
@@ -354,10 +352,8 @@ fn apply(
         if hash(&file)? != p.sha256 || fs::metadata(&file).map_err(err)?.len() != p.size {
             return Err(format!("Update checksum mismatch: {}", p.id));
         }
-        if p.kind != Kind::Runtime
-            && package_identity(&file, &p.kind)? != (p.id.clone(), p.version.clone())
-        {
-            return Err(format!("Update identity mismatch: {}", p.id));
+        if p.kind != Kind::Runtime {
+            check_package(&file, p, &m.game_revision)?;
         }
     }
     let backup = home.join(".horizon-server-sync/rollback");
@@ -400,21 +396,26 @@ fn apply(
         remember(&home.join(RECORD))?;
         // Replace duplicate filenames for a managed id, but preserve the originals
         // in the rollback transaction until the replacement compiled successfully.
-        for (folder, kind, ext) in [
-            ("horizon-native-mods", Kind::Native, "hnmod"),
-            ("horizon-mods", Kind::Content, "hmod"),
+        let previous = read_record(home);
+        for (folder, kind) in [
+            ("horizon-native-mods", Kind::Native),
+            ("horizon-mods", Kind::Content),
         ] {
             if let Ok(entries) = fs::read_dir(home.join(folder)) {
                 for entry in entries {
                     let path = entry.map_err(err)?.path();
-                    if path.extension().and_then(|s| s.to_str()) != Some(ext) {
+                    if path.extension().and_then(|s| s.to_str()) != Some("hmod") {
                         continue;
                     }
-                    if let Ok((id, _)) = package_identity(&path, &kind) {
+                    if let Ok(package) = ModPackage::read(&path) {
+                        let id = package.manifest.id;
                         let wanted = m.packages.iter().find(|p| p.id == id && p.kind == kind);
-                        let obsolete = read_record(home).is_some_and(|old| {
+                        let obsolete = previous.as_ref().is_some_and(|old| {
                             old.packages.iter().any(|p| p.id == id && p.kind == kind)
-                        });
+                        }) || m
+                            .packages
+                            .iter()
+                            .any(|p| p.id == id && p.kind != Kind::Runtime);
                         if wanted.is_some_and(|p| home.join(p.relative()) != path)
                             || (wanted.is_none() && obsolete)
                         {
@@ -436,21 +437,22 @@ fn apply(
                 atomic_copy(&files.join(&p.sha256), &dest)?;
             }
         }
-        // Preserve explicit choices for optional client mods. Required mods are
-        // enabled unconditionally; a missing optional choice gets its default on.
-        let text = fs::read_to_string(home.join("horizon-mods.txt")).unwrap_or_default();
+        // The caller holds the home lock. Apply the managed choices and journal
+        // them in the same transaction as the package changes.
+        let mut settings = horizon_platform::mod_package::selections::load(home);
         for p in m.packages.iter().filter(|p| p.kind != Kind::Runtime) {
             let key = format!("mod.{}", p.id);
-            if (p.required && !browser::java::is_enabled(home, &p.id))
-                || !text
-                    .lines()
-                    .any(|l| l.split_once(':').is_some_and(|(k, _)| k.trim() == key))
-            {
-                // The policy is published after compilation; this does not bypass
-                // the normal per-home mutation lock or a player's optional choice.
-                browser::java::set_enabled(home, &p.id, true)?;
+            let matches = |line: &str| line.split_once(':').is_some_and(|(k, _)| k.trim() == key);
+            if p.required || !settings.lines().any(matches) {
+                let mut kept: Vec<_> = settings.lines().filter(|line| !matches(line)).collect();
+                let enabled = format!("{key}:true");
+                kept.push(&enabled);
+                settings = kept.join("\n") + "\n";
             }
         }
+        let choices = backup.join("choices-new");
+        fs::write(&choices, settings).map_err(err)?;
+        atomic_copy(&choices, &home.join("horizon-mods.txt"))?;
         let version = build()?;
         let bytes = serde_json::to_vec_pretty(m).map_err(err)?;
         let tmp = backup.join("manifest-new");
@@ -530,7 +532,6 @@ pub fn sync(
         Phase::Downloading,
         "Checking the dedicated server's updates".into(),
     );
-    let m = fetch_manifest()?;
     let cache = backend::data_dir().join("server-sync");
     fs::create_dir_all(&cache).map_err(err)?;
     let lease = fs::OpenOptions::new()
@@ -541,7 +542,7 @@ pub fn sync(
         .open(cache.join("update.lock"))
         .map_err(err)?;
     lease.lock().map_err(err)?;
-    let _lock = browser::lock_home(&instance.home);
+    let m = fetch_manifest()?;
     let files = cache.join("files");
     fs::create_dir_all(&files).map_err(err)?;
     let keep: BTreeSet<_> = m.packages.iter().map(|p| p.sha256.as_str()).collect();
@@ -566,24 +567,26 @@ pub fn sync(
         );
         backend::download(&p.url, p.size, &p.sha256, &dest, &|_| {})?;
     }
-    let base = match current.filter(|v| backend::is_prepared(v)) {
-        Some(base) => base.to_owned(),
-        None => {
-            if !backend::installed().contains(&m.base) {
-                backend::install_tag(&m.base, false, |_| {})?;
-            }
-            if !backend::is_prepared(&m.base) {
-                instances::edit(&instance.id, |meta| meta.version = Some(m.base.clone()))?;
-                return Ok(Outcome::Prepare(m.base.clone()));
-            }
-            m.base.clone()
-        }
-    };
+    if !backend::installed().contains(&m.base) {
+        backend::install_tag(&m.base, false, |_| {})?;
+    }
+    let base = m.base.clone();
+    if native_mods::revision_of(&base)? != m.game_revision {
+        return Err(format!(
+            "Release {base} does not supply the server's SDK revision"
+        ));
+    }
+    if !backend::is_prepared(&base) {
+        instances::edit(&instance.id, |meta| meta.version = Some(base.clone()))?;
+        return Ok(Outcome::Prepare(base));
+    }
     let runtime = backend::version_dir(&base);
+    let _lock = browser::lock_home(&instance.home).map_err(err)?;
     let version = apply(&instance.home, &m, &files, &runtime, || {
         if let Some(current) = current.filter(|v| {
             native_mods::about(v)
                 .is_some_and(|a| a.horizon == m.game_revision && a.left_out.is_empty())
+                && backend::is_prepared(v)
         }) {
             let enabled = crate::native_status::enabled(&instance.home);
             let built = crate::native_status::built(current);
@@ -598,10 +601,12 @@ pub fn sync(
             &base,
             &instance.home,
             &m.game_revision,
-            native_mods::Profile::Performance,
+            native_mods::Profile::Optimized,
             |step| {
                 let phase = match step {
-                    native_mods::Step::Rust(_) | native_mods::Step::Source(_) => Phase::Downloading,
+                    native_mods::Step::Rust(_)
+                    | native_mods::Step::Tools { .. }
+                    | native_mods::Step::Source(_) => Phase::Downloading,
                     _ => Phase::Building,
                 };
                 progress(phase, step.label());
@@ -610,7 +615,6 @@ pub fn sync(
     })?;
     // The executable is selected only AFTER both package and build verification.
     instances::edit(&instance.id, |meta| meta.version = Some(version.clone()))?;
-    native_mods::prune(&version);
     Ok(Outcome::Ready(version))
 }
 
@@ -643,19 +647,27 @@ mod tests {
         fs::create_dir_all(&home).unwrap();
         let file = cache.join("fixture");
         let mut zip = zip::ZipWriter::new(fs::File::create(&file).unwrap());
-        zip.start_file(
-            "horizon-native.json",
-            zip::write::SimpleFileOptions::default(),
-        )
-        .unwrap();
-        zip.write_all(br#"{"id":"test_mod","version":"1"}"#)
+        zip.start_file("horizon-mod.toml", zip::write::SimpleFileOptions::default())
             .unwrap();
+        write!(
+            zip,
+            "id='test_mod'\nname='Test mod'\nversion='1'\napi='0.2'\ncapabilities=['registries']\n[native]\ngame='26.3'\nhorizon='{}'\nmixins='{}'\n",
+            "b".repeat(40),
+            "c".repeat(40),
+        ).unwrap();
+        zip.start_file("Cargo.toml", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(b"[package]\nname='mod-test_mod'\nversion='1.0.0'\nedition='2024'\n")
+            .unwrap();
+        zip.start_file("src/lib.rs", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(b"// test source\n").unwrap();
         zip.finish().unwrap();
         let digest = hash(&file).unwrap();
         let size = fs::metadata(&file).unwrap().len();
         fs::rename(file, cache.join(&digest)).unwrap();
         let m = Manifest {
-            schema: 1,
+            schema: SCHEMA,
             generation: "a".repeat(64),
             game_revision: "b".repeat(40),
             base: "v0.3.3".into(),
@@ -666,7 +678,7 @@ mod tests {
                 sha256: digest,
                 size,
                 url: format!(
-                    "https://github.com/{}/releases/download/sync-test/test.hnmod",
+                    "https://github.com/{}/releases/download/sync-test/test.hmod",
                     backend::REPO
                 ),
                 required,
@@ -680,10 +692,10 @@ mod tests {
         let t = Temp::new();
         let (mut m, _, _) = fixture(&t.0, true);
         m.validate().unwrap();
-        m.packages[0].url = "https://evil.example/mod.hnmod".into();
+        m.packages[0].url = "https://evil.example/mod.hmod".into();
         assert!(m.validate().is_err());
         m.packages[0].url = format!(
-            "https://github.com/{}/releases/download/x/a.hnmod",
+            "https://github.com/{}/releases/download/x/a.hmod",
             backend::REPO
         );
         m.packages[0].id = "../outside".into();
@@ -698,10 +710,12 @@ mod tests {
         let (m, files, home) = fixture(&t.0, true);
         fs::write(files.join(&m.packages[0].sha256), b"corrupt").unwrap();
         fs::write(home.join("horizon-mods.txt"), "mod.test_mod:false\n").unwrap();
-        assert!(apply(&home, &m, &files, &t.0.join("runtime"), || panic!(
-            "must not build"
-        ))
-        .is_err());
+        assert!(
+            apply(&home, &m, &files, &t.0.join("runtime"), || panic!(
+                "must not build"
+            ))
+            .is_err()
+        );
         assert_eq!(
             fs::read_to_string(home.join("horizon-mods.txt")).unwrap(),
             "mod.test_mod:false\n"
@@ -714,7 +728,7 @@ mod tests {
         let (m, files, home) = fixture(&t.0, true);
         fs::create_dir_all(home.join("horizon-native-mods")).unwrap();
         fs::write(
-            home.join("horizon-native-mods/test_mod.hnmod"),
+            home.join("horizon-native-mods/test_mod.hmod"),
             b"old package",
         )
         .unwrap();
@@ -723,12 +737,14 @@ mod tests {
             "mod.test_mod:false\nmod.custom:true\n",
         )
         .unwrap();
-        assert!(apply(&home, &m, &files, &t.0.join("runtime"), || Err(
-            "compiler failed".into()
-        ))
-        .is_err());
+        assert!(
+            apply(&home, &m, &files, &t.0.join("runtime"), || Err(
+                "compiler failed".into()
+            ))
+            .is_err()
+        );
         assert_eq!(
-            fs::read(home.join("horizon-native-mods/test_mod.hnmod")).unwrap(),
+            fs::read(home.join("horizon-native-mods/test_mod.hmod")).unwrap(),
             b"old package"
         );
         assert_eq!(
@@ -781,7 +797,7 @@ mod tests {
         })
         .unwrap();
         fs::write(
-            home.join("horizon-native-mods/test_mod.hnmod"),
+            home.join("horizon-native-mods/test_mod.hmod"),
             b"player edited package",
         )
         .unwrap();

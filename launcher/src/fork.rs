@@ -1,12 +1,18 @@
 //! Fork source policy shared by native builds and release installs.
 //! A mod's upstream compatibility pin must never remove our skin changes.
 use crate::{backend, native_mods};
+use horizon_platform::mod_package::manifest::Package;
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, fs, path::Path};
 
 /// Signed fork releases carry content and editable native bundles beside the prebuild.
 /// Update managed defaults, preserving player-modified packages and selections.
 pub fn install_bundled_mods(version: &Path, home: &Path) -> Result<(), String> {
+    let bundle_dir = version.join("fork-mods");
+    if !bundle_dir.is_dir() {
+        return Ok(());
+    }
+    let _lock = crate::browser::lock_home(home).map_err(|error| error.to_string())?;
     let record = home.join(".horizon-bundled-mods.json");
     let read = |p: &Path| -> BTreeMap<String, String> {
         fs::read(p)
@@ -17,8 +23,8 @@ pub fn install_bundled_mods(version: &Path, home: &Path) -> Result<(), String> {
     let mut managed = read(&record);
     let previous = read(&version.join("fork-mods/previous-defaults.json"));
     let mut changed = false;
-    for (folder, extension) in [("horizon-mods", "hmod"), ("horizon-native-mods", "hnmod")] {
-        let source = version.join("fork-mods").join(folder);
+    for (folder, native) in [("horizon-mods", false), ("horizon-native-mods", true)] {
+        let source = bundle_dir.join(folder);
         if !source.exists() {
             continue;
         }
@@ -27,10 +33,24 @@ pub fn install_bundled_mods(version: &Path, home: &Path) -> Result<(), String> {
         for entry in fs::read_dir(source).map_err(|e| e.to_string())? {
             let entry = entry.map_err(|e| e.to_string())?;
             let path = entry.path();
-            if !entry.file_type().map_err(|e| e.to_string())?.is_file()
-                || path.extension().and_then(|e| e.to_str()) != Some(extension)
+            let extension = path.extension().and_then(|e| e.to_str());
+            // Earlier signed releases can still supply prepared resources.
+            if native && extension == Some("hnmod") {
+                continue;
+            }
+            if !entry.file_type().map_err(|e| e.to_string())?.is_file() || extension != Some("hmod")
             {
                 return Err("Invalid bundled mod file".into());
+            }
+            let package = Package::read(&path)?;
+            if package.is_native() != native {
+                return Err(format!(
+                    "{} is in the wrong bundled mod folder",
+                    path.display()
+                ));
+            }
+            if crate::server_sync::managed(home, &package.manifest.id) {
+                continue;
             }
             let destination = target.join(entry.file_name());
             let key = format!("{folder}/{}", entry.file_name().to_string_lossy());
@@ -65,12 +85,25 @@ pub fn install_bundled_mods(version: &Path, home: &Path) -> Result<(), String> {
     if defaults.is_file() {
         let path = home.join("horizon-mods.txt");
         let mut text = fs::read_to_string(&path).unwrap_or_default();
-        for line in fs::read_to_string(defaults).map_err(|e| e.to_string())?.lines() {
-            let Some((key, value)) = line.split_once(':') else { continue; };
-            if !key.starts_with("mod.") || !matches!(value, "true" | "false") { continue; }
-            if !text.lines().any(|old| old.split_once(':').is_some_and(|(name, _)| name == key)) {
-                if !text.is_empty() && !text.ends_with('\n') { text.push('\n'); }
-                text.push_str(line); text.push('\n');
+        for line in fs::read_to_string(defaults)
+            .map_err(|e| e.to_string())?
+            .lines()
+        {
+            let Some((key, value)) = line.split_once(':') else {
+                continue;
+            };
+            if !key.starts_with("mod.") || !matches!(value, "true" | "false") {
+                continue;
+            }
+            if !text
+                .lines()
+                .any(|old| old.split_once(':').is_some_and(|(name, _)| name == key))
+            {
+                if !text.is_empty() && !text.ends_with('\n') {
+                    text.push('\n');
+                }
+                text.push_str(line);
+                text.push('\n');
             }
         }
         fs::write(path, text).map_err(|e| e.to_string())?;
@@ -146,13 +179,26 @@ mod tests {
         let home = root.join("home");
         let source = version.join("fork-mods/horizon-mods");
         fs::create_dir_all(&source).unwrap();
-        fs::write(source.join("lunatic.hmod"), b"bundled").unwrap();
+        use std::io::Write;
+        let bundle = source.join("lunatic.hmod");
+        let write_package = |version: &str| {
+            let mut zip = zip::ZipWriter::new(fs::File::create(&bundle).unwrap());
+            zip.start_file("horizon-mod.toml", zip::write::SimpleFileOptions::default())
+                .unwrap();
+            write!(
+                zip,
+                "id='lunatic'\nname='Lunatic'\napi='0.2'\nversion='{version}'\ncapabilities=[]\n"
+            )
+            .unwrap();
+            zip.finish().unwrap();
+        };
+        write_package("1");
         install_bundled_mods(&version, &home).unwrap();
         let installed = home.join("horizon-mods/lunatic.hmod");
-        assert_eq!(fs::read(&installed).unwrap(), b"bundled");
-        fs::write(source.join("lunatic.hmod"), b"updated").unwrap();
+        assert_eq!(Package::read(&installed).unwrap().manifest.version, "1");
+        write_package("2");
         install_bundled_mods(&version, &home).unwrap();
-        assert_eq!(fs::read(&installed).unwrap(), b"updated");
+        assert_eq!(Package::read(&installed).unwrap().manifest.version, "2");
 
         fs::write(&installed, b"custom").unwrap();
         fs::write(home.join("horizon-mods.txt"), b"mod.lunatic:false\n").unwrap();

@@ -680,7 +680,7 @@ fn any_owner_opens_the_gate_and_the_one_who_plays_brings_the_session() {
         .unwrap()
         .starts_with("Alex is no longer signed in"));
     assert_eq!(pass.owner.unwrap().0.name, "Notch");
-    // An offline name plays: Notch is asked, and no session goes to the game.
+    // Nobody selected (a download's gate): Notch is asked, and no session comes back.
     accounts.selected = None;
     m.lock().unwrap().log.clear();
     let pass = launch(&ep, Some("test-client"), &store, &mut accounts).unwrap();
@@ -2150,6 +2150,73 @@ fn a_connection_failure_is_retryable_and_keeps_the_saved_sign_in() {
     assert!(!kept(&store).sign_in_required);
 }
 
+struct Fixed(Vec<SocketAddr>);
+
+impl ureq::Resolver for Fixed {
+    fn resolve(&self, _: &str) -> std::io::Result<Vec<SocketAddr>> {
+        Ok(self.0.clone())
+    }
+}
+
+#[test]
+fn addresses_alternate_families_starting_with_the_first() {
+    let v6 = |n: u16| SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 1], n));
+    let v4 = |n: u16| SocketAddr::from(([127, 0, 0, 1], n));
+    assert_eq!(
+        interleave(vec![v6(1), v6(2), v6(3), v4(4), v4(5)]),
+        vec![v6(1), v4(4), v6(2), v4(5), v6(3)]
+    );
+    assert_eq!(interleave(vec![v4(1), v6(2)]), vec![v4(1), v6(2)]);
+    assert_eq!(
+        interleave(vec![v4(1), v4(2), v4(3), v6(4), v6(5)]),
+        vec![v4(1), v6(4), v4(2), v6(5), v4(3)]
+    );
+    assert_eq!(interleave(vec![v4(1), v4(2)]), vec![v4(1), v4(2)]);
+    assert_eq!(interleave(vec![v6(1), v6(2)]), vec![v6(1), v6(2)]);
+    assert!(interleave(Vec::new()).is_empty());
+}
+
+#[test]
+fn a_dead_ipv6_address_falls_back_to_ipv4() {
+    // Loopback only: a closed IPv6 port stands for the broken route, a local listener for the host's
+    // IPv4 address. Both IPv6 answers come first, as a resolver lists them.
+    let dead = |p: u16| SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 1], p));
+    let closed = TcpListener::bind("[::1]:0")
+        .map(|l| l.local_addr().unwrap().port())
+        .unwrap_or(9);
+    let live = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = live.local_addr().unwrap().port();
+    let server = std::thread::spawn(move || {
+        let (mut conn, _) = live.accept().unwrap();
+        let mut line = String::new();
+        BufReader::new(conn.try_clone().unwrap())
+            .read_line(&mut line)
+            .unwrap();
+        conn.write_all(
+            b"HTTP/1.1 200 OK
+Content-Length: 2
+Connection: close
+
+ok",
+        )
+        .unwrap();
+    });
+    let addrs = vec![
+        dead(closed),
+        dead(closed),
+        SocketAddr::from(([127, 0, 0, 1], port)),
+    ];
+    let agent = builder().resolver(Interleaved(Fixed(addrs))).build();
+    let body = agent
+        .get("http://horizon.test/")
+        .call()
+        .unwrap()
+        .into_string()
+        .unwrap();
+    assert_eq!(body, "ok");
+    server.join().unwrap();
+}
+
 #[test]
 fn a_rotated_microsoft_credential_survives_a_later_service_failure() {
     let store = MemoryStore::default();
@@ -2282,7 +2349,7 @@ fn targeted_sign_in_rejects_another_identity_without_writing_or_selecting_it() {
 }
 
 #[test]
-fn targeted_sign_in_preserves_the_selected_account_or_offline_name() {
+fn targeted_sign_in_preserves_the_selected_account() {
     let store = MemoryStore::default();
     let mut accounts = signed_in(&store, &secrets("old", true));
     let mut other = notch();
@@ -2302,20 +2369,6 @@ fn targeted_sign_in_preserves_the_selected_account_or_offline_name() {
     .unwrap();
     assert_eq!(accounts.selected.as_deref(), Some(other.uuid.as_str()));
     assert_eq!(kept(&store).minecraft_token, "renewed");
-    accounts.selected = None;
-    accounts.offline_selected = Some("Builder".into());
-    accept_sign_in(
-        &mut accounts,
-        &store,
-        Some(&notch()),
-        notch(),
-        &secrets("renewed-again", true),
-        &|| false,
-        &|_| {},
-    )
-    .unwrap();
-    assert!(accounts.selected.is_none());
-    assert_eq!(accounts.offline_selected.as_deref(), Some("Builder"));
 }
 
 #[test]
@@ -2530,4 +2583,47 @@ fn joining_a_service_id_tells_mojangs_session_server() {
         "svc-42",
     );
     assert!(refused.unwrap_err().contains("Sign in again"));
+}
+
+/// A launch loads the accounts, asks the services for a while, then saves: a sign-in or sign-out
+/// made meanwhile stays, and only the names and skins it renewed are written.
+#[test]
+fn a_launch_saving_late_keeps_sign_ins_and_outs_made_meanwhile() {
+    let store = MemoryStore::default();
+    let dir = std::env::temp_dir().join(format!("horizon-launcher-late-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let file = dir.join("accounts.json");
+    let other = |uuid: &str, name: &str| Account {
+        uuid: uuid.into(),
+        name: name.into(),
+        skin: None,
+        cape: None,
+    };
+    let mut before = signed_in(&store, &secrets("mc-token", true));
+    before.accounts.push(other("gone", "Leaving"));
+    before.save_to(&file).unwrap();
+    // The launch's copy, with Notch's new skin.
+    let mut renewed = Accounts::load_from(&file);
+    renewed.accounts[0].skin = Some(("https://textures.example/notch".into(), "classic".into()));
+    // Meanwhile: one account signs out, another signs in.
+    let mut now = Accounts::load_from(&file);
+    now.accounts.retain(|a| a.uuid != "gone");
+    now.accounts.push(other("new", "Arriving"));
+    now.save_to(&file).unwrap();
+    renewed.save_renewed_to(&store, &file).unwrap();
+    let saved = Accounts::load_from(&file);
+    let uuids: Vec<&str> = saved.accounts.iter().map(|a| a.uuid.as_str()).collect();
+    assert_eq!(uuids, [UUID, "new"]);
+    assert!(
+        saved.find(UUID).unwrap().skin.is_some(),
+        "the renewed skin is kept"
+    );
+    assert_eq!(saved.selected.as_deref(), Some(UUID));
+    // Written whole through a new file: nothing else is left beside it.
+    let names: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert_eq!(names, [std::ffi::OsString::from("accounts.json")]);
+    let _ = std::fs::remove_dir_all(&dir);
 }

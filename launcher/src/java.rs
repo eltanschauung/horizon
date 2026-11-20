@@ -140,7 +140,7 @@ pub fn runtimes_dir() -> PathBuf {
 
 /// The runtimes in a Mojang `runtime` folder.
 pub fn mojang_runtimes(dir: &Path) -> Vec<Runtime> {
-    horizon_prepare::java::minecraft_runtimes(dir)
+    horizon_platform::prepare::java::minecraft_runtimes(dir)
         .into_iter()
         .filter_map(|home| runtime(home, Source::Mojang))
         .collect()
@@ -263,16 +263,11 @@ pub fn install(need: &Need, log: &dyn Fn(String)) -> Result<Runtime, String> {
             need.major
         ));
     }
-    let fetch = |url: &str| -> Result<Vec<u8>, String> {
-        let mut body = Vec::new();
-        std::io::Read::read_to_end(&mut backend::get(url)?.into_reader(), &mut body)
-            .map_err(|e| e.to_string())?;
-        Ok(body)
-    };
-    let home = mojang::java_runtime(
+    let fetch = crate::downloads::install_metadata;
+    let home = mojang::java_runtime_http(
         &need.component,
         &runtimes_dir(),
-        8,
+        mojang::JOBS,
         &fetch,
         &mojang::CANCEL,
         log,

@@ -6,7 +6,7 @@ use std::{
     path::Path,
 };
 
-pub const CHANNEL: &str = "horizon_magic:spells";
+pub use horizon_protocol::lunatic_channels::SPELLS as CHANNEL;
 pub const SLOT_COUNT: usize = 144;
 pub const PAGE_SIZE: usize = 36;
 
@@ -102,11 +102,18 @@ impl Spell {
             && (0.125..=8.0).contains(&self.scale)
             && (1..=200).contains(&self.transition_ticks)
             && match self.kind {
-                Kind::Bat => self.bat_tint.is_some()
-                    && (1200..=3600).contains(&self.duration_ticks)
-                    && self.min_duration_ticks.is_some_and(|min| (1200..=self.duration_ticks).contains(&min)),
-                _ => (1..=1200).contains(&self.duration_ticks)
-                    && self.min_duration_ticks.is_none() && self.bat_tint.is_none(),
+                Kind::Bat => {
+                    self.bat_tint.is_some()
+                        && (1200..=3600).contains(&self.duration_ticks)
+                        && self
+                            .min_duration_ticks
+                            .is_some_and(|min| (1200..=self.duration_ticks).contains(&min))
+                }
+                _ => {
+                    (1..=1200).contains(&self.duration_ticks)
+                        && self.min_duration_ticks.is_none()
+                        && self.bat_tint.is_none()
+                }
             }
             && (1..=200).contains(&self.ending_ticks)
             && self
@@ -148,13 +155,17 @@ struct Definitions {
 }
 impl Catalog {
     pub fn load(root: &Path) -> Self {
+        Self::from_source(&horizon_assets::resource_source::ResourceSource::directory(
+            root.to_owned(),
+        ))
+    }
+    pub fn from_source(source: &horizon_assets::resource_source::ResourceSource) -> Self {
         let mut catalog = Self::default();
-        for namespace in crate::mod_content::namespaces(root) {
-            let path = root
-                .join("assets")
-                .join(&namespace)
-                .join("horizon/magic.json");
-            let Ok(bytes) = horizon_core::prepared_files::read(&path) else {
+        let mut namespaces = source.namespaces("assets");
+        namespaces.sort();
+        for namespace in namespaces {
+            let path = format!("assets/{namespace}/horizon/magic.json");
+            let Ok(bytes) = source.read(&path) else {
                 continue;
             };
             let Ok(defs) = serde_json::from_slice::<Definitions>(&bytes) else {
@@ -227,11 +238,24 @@ impl Ledger {
     /// Reconcile ownership before accepting any queued inventory/cast request.
     /// A legacy unowned ledger keeps current starters in place, removing stale
     /// spells of other characters without resetting the player's arrangement.
-    pub fn bind_character(&mut self, character: Option<&str>, starters: &[String], catalog: &Catalog) -> bool {
-        if self.character.as_deref() == character && self.character.is_some() { return false; }
+    pub fn bind_character(
+        &mut self,
+        character: Option<&str>,
+        starters: &[String],
+        catalog: &Catalog,
+    ) -> bool {
+        if self.character.as_deref() == character && self.character.is_some() {
+            return false;
+        }
         let switched = self.character.is_some();
         for slot in &mut self.slots {
-            if switched || slot.as_ref().is_some_and(|id| catalog.spells.contains_key(id) && !starters.contains(id)) { *slot = None; }
+            if switched
+                || slot
+                    .as_ref()
+                    .is_some_and(|id| catalog.spells.contains_key(id) && !starters.contains(id))
+            {
+                *slot = None;
+            }
         }
         self.character = character.map(str::to_owned);
         self.revision = self.revision.wrapping_add(1);

@@ -3,13 +3,22 @@
 //! Feeds recorded `.mcpr` packet streams into the client's packet processing
 //! loop at user-controlled playback speeds (slow-motion, 1x, fast-forward, pause).
 
-use super::mcpr::{McprReader, Metadata, TimestampedPacket};
-use std::{io, path::Path, time::Duration};
+use super::{
+    mcpr::{Marker, McprReader, McprWriter, Metadata, TimestampedPacket},
+    spline::CameraTrack,
+};
+use crate::packet_source::PacketSource;
+use std::{
+    io,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 /// Playback controller driving recorded packets according to a virtual timeline.
 pub struct ReplayDriver {
     pub metadata: Metadata,
     reader: McprReader,
+    path: PathBuf,
     cursor_ms: f64,
     speed: f64,
     paused: bool,
@@ -33,6 +42,7 @@ impl ReplayDriver {
         Ok(Self {
             metadata,
             reader,
+            path: path.to_path_buf(),
             cursor_ms: 0.0,
             speed: 1.0,
             paused: false,
@@ -42,23 +52,52 @@ impl ReplayDriver {
         })
     }
 
-    /// Current timeline position in milliseconds.
-    pub fn position_ms(&self) -> u32 {
+    /// Camera keyframes saved alongside the packet stream, if present.
+    pub fn camera_track(&self) -> Option<&CameraTrack> {
+        self.reader.camera_track.as_ref()
+    }
+
+    /// Markers saved alongside the packet stream, in timeline order.
+    pub fn markers(&self) -> &[Marker] {
+        &self.reader.markers
+    }
+
+    /// Add a bookmark at the current playhead and persist it in `markers.json`.
+    pub fn add_marker(&mut self, label: String) -> io::Result<Marker> {
+        let marker = Marker {
+            time_ms: self.position_ms(),
+            label,
+        };
+        let mut markers = self.reader.markers.clone();
+        markers.push(marker.clone());
+        markers.sort_by_key(|entry| entry.time_ms);
+        McprWriter::replace_markers(&self.path, &markers)?;
+        self.reader.markers = markers;
+        Ok(marker)
+    }
+
+    /// Save the edited camera path in the recording archive.
+    pub fn save_camera_track(&mut self, track: &CameraTrack) -> io::Result<()> {
+        McprWriter::replace_camera_track(&self.path, track)?;
+        self.reader.camera_track = (!track.is_empty()).then(|| track.clone());
+        Ok(())
+    }
+}
+
+impl PacketSource for ReplayDriver {
+    fn position_ms(&self) -> u32 {
         self.cursor_ms as u32
     }
 
-    /// Total recording duration in milliseconds.
-    pub fn duration_ms(&self) -> u32 {
+    fn duration_ms(&self) -> u32 {
         self.metadata.duration
     }
 
-    /// Total number of indexed packets in the recording stream.
-    pub fn packet_count(&self) -> usize {
+    fn packet_count(&self) -> usize {
         self.reader.total_packets()
     }
 
-    /// Current playback progress as a fraction from 0.0 to 1.0.
-    pub fn progress(&self) -> f32 {
+    fn progress(&self) -> f32 {
         if self.metadata.duration == 0 {
             0.0
         } else {
@@ -66,43 +105,35 @@ impl ReplayDriver {
         }
     }
 
-    /// Current playback speed multiplier (e.g. 0.25, 1.0, 2.0).
-    pub fn speed(&self) -> f64 {
+    fn speed(&self) -> f64 {
         self.speed
     }
 
-    /// Set playback speed multiplier. Clamped between 0.01x and 20.0x.
-    pub fn set_speed(&mut self, speed: f64) {
+    fn set_speed(&mut self, speed: f64) {
         self.speed = speed.clamp(0.01, 20.0);
     }
 
-    /// Check if playback is paused.
-    pub fn is_paused(&self) -> bool {
+    fn is_paused(&self) -> bool {
         self.paused
     }
 
-    /// Set paused state.
-    pub fn set_paused(&mut self, paused: bool) {
+    fn set_paused(&mut self, paused: bool) {
         self.paused = paused;
     }
 
-    /// Toggle paused state.
-    pub fn toggle_pause(&mut self) {
+    fn toggle_pause(&mut self) {
         self.paused = !self.paused;
     }
 
-    /// Set whether replay should loop when reaching the end.
-    pub fn set_looping(&mut self, looping: bool) {
+    fn set_looping(&mut self, looping: bool) {
         self.looping = looping;
     }
 
-    /// Check if playback reached the end of the recording.
-    pub fn is_finished(&self) -> bool {
+    fn is_finished(&self) -> bool {
         self.finished
     }
 
-    /// Advance virtual time by `delta` and collect all packets scheduled up to the new time.
-    pub fn advance(&mut self, delta: Duration) -> io::Result<Vec<TimestampedPacket>> {
+    fn advance(&mut self, delta: Duration) -> io::Result<Vec<TimestampedPacket>> {
         if self.paused || self.finished {
             return Ok(Vec::new());
         }
@@ -136,8 +167,7 @@ impl ReplayDriver {
         Ok(ready)
     }
 
-    /// Seek directly to a specific timestamp in milliseconds.
-    pub fn seek(&mut self, target_ms: u32) -> io::Result<()> {
+    fn seek(&mut self, target_ms: u32) -> io::Result<()> {
         let clamped_ms = target_ms.min(self.metadata.duration);
         self.cursor_ms = clamped_ms as f64;
         self.finished = false;
@@ -147,10 +177,7 @@ impl ReplayDriver {
         Ok(())
     }
 
-    /// Seek from the beginning and return all packets needed to reconstruct the
-    /// replay state at `target_ms`. The first packet after the target remains
-    /// cached for normal playback.
-    pub fn seek_and_collect(&mut self, target_ms: u32) -> io::Result<Vec<TimestampedPacket>> {
+    fn seek_and_collect(&mut self, target_ms: u32) -> io::Result<Vec<TimestampedPacket>> {
         let target_ms = target_ms.min(self.metadata.duration);
         self.reader.seek_to_timestamp(0)?;
         self.next_packet_cache = self.reader.next_packet()?;
@@ -170,8 +197,7 @@ impl ReplayDriver {
         Ok(packets)
     }
 
-    /// Move forward from the current cursor and return the newly crossed packets.
-    pub fn seek_forward(&mut self, target_ms: u32) -> io::Result<Vec<TimestampedPacket>> {
+    fn seek_forward(&mut self, target_ms: u32) -> io::Result<Vec<TimestampedPacket>> {
         let target_ms = target_ms.min(self.metadata.duration);
         if (target_ms as f64) < self.cursor_ms {
             return Err(io::Error::new(
@@ -195,9 +221,16 @@ impl ReplayDriver {
         Ok(packets)
     }
 
-    /// Rewind playback to the beginning.
-    pub fn restart(&mut self) -> io::Result<()> {
+    fn restart(&mut self) -> io::Result<()> {
         self.seek(0)
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
     }
 }
 

@@ -1,22 +1,59 @@
-//! Persistent operator-issued mutes and duration utilities. No word matching or automatic punishments.
+//! The dedicated server's chat filter (docs/chat-filter.md), without the game: `server.toml`'s
+//! `[chat_filter]`, the matcher for the slur list (`data/slurs.txt`, or the owner's `words_file`), and
+//! the escalation (a refused message, then a mute, then a temporary ban), with the mutes kept in a file
+//! so that they outlive a restart. The server's hub (`horizon_client::lan`) asks it, through the engine's
+//! `horizon_server_files::chat_guard` hook, before it relays a player's text, and carries out what it decides.
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-/// The mutes, beside server.properties.
-const MINUTE: i64 = 60_000;
+mod normalise;
 
+use horizon_server_files::chat_guard::{self, ChatGuard, Loaded, Place};
+pub use horizon_server_files::chat_guard::{Action, Mute};
+pub use horizon_server_files::duration::{
+    DurationUnit, duration_parts, duration_text, now_millis, parse_duration,
+};
+pub use normalise::{Run, Text};
+
+/// The list built into the game, used when `words_file` is empty.
+pub const DEFAULT_WORDS: &str = include_str!("../data/slurs.txt");
+
+/// The mutes, beside server.properties.
 pub const MUTES_FILE: &str = "chat-filter-mutes.json";
 
-/// Legacy section controlling operator mute commands; old word-filter options are ignored.
+/// `server.toml`'s `[chat_filter]`: on by default.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub enabled: bool,
+    /// The hit, counted within `window_minutes`, that mutes the player; 0: never.
+    pub mute_after: u32,
+    /// The hit that bans the player for `tempban_hours`; 0: never.
+    pub tempban_after: u32,
+    /// How long a hit counts towards the next ones (the time spent muted doesn't count).
+    pub window_minutes: u32,
+    pub mute_minutes: u32,
+    pub tempban_hours: u32,
+    /// The slur list, relative to the server's folder; empty: the list built into the game.
+    pub words_file: String,
+    /// Every refused text with the player and what followed, relative to the server's folder.
+    pub log: String,
 }
+
 impl Default for Config {
     fn default() -> Self {
-        Self { enabled: true }
+        Self {
+            enabled: true,
+            mute_after: 2,
+            tempban_after: 3,
+            window_minutes: 10,
+            mute_minutes: 10,
+            tempban_hours: 24,
+            words_file: String::new(),
+            log: "logs/chat-filter.log".into(),
+        }
     }
 }
 
@@ -42,66 +79,267 @@ impl Config {
     }
 
     pub fn check(&self) -> Result<(), String> {
+        if self.window_minutes == 0 {
+            return Err("chat_filter.window_minutes must be 1 or more".into());
+        }
         Ok(())
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Mute {
-    pub uuid: String,
-    pub name: String,
-    /// Epoch milliseconds; `None`: until `/unmute`.
-    pub until: Option<i64>,
-    /// The operator who muted them (`/mute`, `/tempmute`); `None`: the filter.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub by: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
+/// How an entry of the list matches.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Kind {
+    /// Inside a longer word too.
+    Embedded,
+    /// Only as a whole word.
+    Whole,
+    /// Inside a word, or spread over several words from the start of one.
+    Spread,
 }
 
-impl Mute {
-    pub fn active(&self, now: i64) -> bool {
-        self.until.is_none_or(|until| until > now)
+#[derive(Debug)]
+struct Entry {
+    runs: Vec<Run>,
+    kind: Kind,
+}
+
+/// The slur list, compiled: each entry's letters as runs, indexed by first letter.
+#[derive(Debug)]
+pub struct Filter {
+    entries: Vec<Entry>,
+    by_first: [Vec<usize>; 27],
+    /// Words never matched: exact (`false`) or as a prefix (`true`).
+    allowed: Vec<(Vec<Run>, bool)>,
+}
+
+impl Filter {
+    /// Compiles a list in `data/slurs.txt`'s format.
+    pub fn new(list: &str) -> Self {
+        let mut f = Filter {
+            entries: Vec::new(),
+            by_first: Default::default(),
+            allowed: Vec::new(),
+        };
+        for line in list.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            if let Some(word) = line.strip_prefix('!') {
+                let (word, prefix) = match word.strip_suffix('*') {
+                    Some(w) => (w, true),
+                    None => (word, false),
+                };
+                // An allow entry with no letters would allow every word (an empty prefix).
+                let runs = normalise::word(word);
+                if !runs.is_empty() {
+                    f.allowed.push((runs, prefix));
+                }
+                continue;
+            }
+            let (kind, word) = match line.as_bytes()[0] {
+                b'=' => (Kind::Whole, &line[1..]),
+                b'~' => (Kind::Spread, &line[1..]),
+                _ => (Kind::Embedded, line),
+            };
+            let runs = normalise::word(word);
+            let Some(first) = runs.first() else {
+                continue;
+            };
+            f.by_first[usize::from(first.letter)].push(f.entries.len());
+            f.entries.push(Entry { runs, kind });
+        }
+        f
+    }
+
+    /// The built-in list.
+    pub fn default_list() -> Self {
+        Self::new(DEFAULT_WORDS)
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Whether `text` holds a slur of the list.
+    pub fn matches(&self, text: &str) -> bool {
+        let t = Text::new(text);
+        let runs = &t.runs;
+        for &(start, end) in t.words.iter().chain(&t.spaced) {
+            let word = &runs[start..end];
+            if self.is_allowed(word) {
+                continue;
+            }
+            for at in 0..word.len() {
+                for &e in &self.by_first[usize::from(word[at].letter)] {
+                    let e = &self.entries[e];
+                    let whole = e.kind == Kind::Whole;
+                    if (!whole || at == 0) && fits(&e.runs, &word[at..], whole) {
+                        return true;
+                    }
+                }
+            }
+        }
+        // Spread entries over the whole text, from the start of a word, across at least two.
+        for (w, &at) in t.joined_at.iter().enumerate() {
+            for &e in &self.by_first[usize::from(t.joined[at].letter)] {
+                let e = &self.entries[e];
+                if e.kind == Kind::Spread
+                    && fits(&e.runs, &t.joined[at..], false)
+                    && t.spans_words(w, e.runs.len())
+                {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn is_allowed(&self, word: &[Run]) -> bool {
+        self.allowed.iter().any(|(a, prefix)| {
+            if *prefix {
+                // A prefix: its last run may be part of a longer one.
+                word.len() >= a.len() && fits(a, word, false)
+            } else {
+                fits(a, word, true)
+            }
+        })
+    }
+}
+
+/// Whether `entry`'s runs start `runs` (are all of it with `whole`): the same letters, each at least
+/// as many times as the entry has it.
+fn fits(entry: &[Run], runs: &[Run], whole: bool) -> bool {
+    if runs.len() < entry.len() || (whole && runs.len() != entry.len()) {
+        return false;
+    }
+    entry
+        .iter()
+        .zip(runs)
+        .all(|(e, r)| e.letter == r.letter && r.count >= e.count)
+}
+
+/// A mute as the mutes file keeps it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+struct SavedMute {
+    uuid: String,
+    name: String,
+    until: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
+}
+
+impl From<SavedMute> for Mute {
+    fn from(m: SavedMute) -> Self {
+        let SavedMute {
+            uuid,
+            name,
+            until,
+            by,
+            reason,
+        } = m;
+        Mute {
+            uuid,
+            name,
+            until,
+            by,
+            reason,
+        }
+    }
+}
+
+impl From<Mute> for SavedMute {
+    fn from(m: Mute) -> Self {
+        let Mute {
+            uuid,
+            name,
+            until,
+            by,
+            reason,
+        } = m;
+        SavedMute {
+            uuid,
+            name,
+            until,
+            by,
+            reason,
+        }
     }
 }
 
 #[derive(Default, Serialize, Deserialize)]
 struct MutesFile {
-    mutes: Vec<Mute>,
+    mutes: Vec<SavedMute>,
 }
 
-/// Persistent operator-issued mutes.
+/// One player's hits: how many, and when the last one stops counting.
+#[derive(Clone, Copy, Debug)]
+struct Strikes {
+    count: u32,
+    counts_until: i64,
+}
+
+/// The filter, the players' hits and the mutes.
 pub struct Guard {
     pub config: Config,
+    pub filter: Filter,
+    strikes: HashMap<u128, Strikes>,
     mutes: HashMap<u128, Mute>,
     /// Where the mutes are kept; `None` keeps them in memory only (tests).
     file: Option<PathBuf>,
 }
 
+const MINUTE: i64 = 60_000;
+
 impl Guard {
-    pub fn new(config: Config, file: Option<PathBuf>) -> Self {
+    pub fn new(config: Config, filter: Filter, file: Option<PathBuf>) -> Self {
         let mut mutes = HashMap::new();
         if let Some(text) = file.as_ref().and_then(|f| std::fs::read_to_string(f).ok())
             && let Ok(saved) = serde_json::from_str::<MutesFile>(&text)
         {
             for m in saved.mutes {
-                if m.by.is_some()
-                    && let Some(uuid) = parse_uuid(&m.uuid)
-                {
-                    mutes.insert(uuid, m);
+                if let Some(uuid) = parse_uuid(&m.uuid) {
+                    mutes.insert(uuid, m.into());
                 }
             }
         }
         Self {
             config,
+            filter,
+            strikes: HashMap::new(),
             mutes,
             file,
         }
     }
 
-    /// Load operator-issued mutes, ignoring historical automatic mutes.
+    /// The server's guard: `words_file` or the built-in list, the mutes in `dir`. An unreadable
+    /// `words_file` falls back to the built-in list, with why.
     pub fn load(config: Config, dir: &Path) -> (Self, Option<String>) {
-        (Self::new(config, Some(dir.join(MUTES_FILE))), None)
+        let mut problem = None;
+        let filter = if config.words_file.is_empty() {
+            Filter::default_list()
+        } else {
+            match std::fs::read_to_string(dir.join(&config.words_file)) {
+                Ok(text) => Filter::new(&text),
+                Err(e) => {
+                    problem = Some(format!(
+                        "chat_filter.words_file {}: {e}; using the built-in list",
+                        config.words_file
+                    ));
+                    Filter::default_list()
+                }
+            }
+        };
+        (
+            Self::new(config, filter, Some(dir.join(MUTES_FILE))),
+            problem,
+        )
     }
 
     /// The player's mute, if they are muted at `now`.
@@ -138,7 +376,55 @@ impl Guard {
         self.save();
     }
 
-    /// Lifts a player's mute by name; the name as muted, if they were.
+    /// A hit by the player at `now`: the hit's number in the window, and what it leads to.
+    pub fn strike(&mut self, uuid: u128, name: &str, now: i64) -> (u32, Action) {
+        let c = &self.config;
+        let window = i64::from(c.window_minutes) * MINUTE;
+        let s = self.strikes.entry(uuid).or_insert(Strikes {
+            count: 0,
+            counts_until: 0,
+        });
+        if now > s.counts_until {
+            s.count = 0;
+        }
+        s.count += 1;
+        s.counts_until = now + window;
+        let count = s.count;
+        let action = if c.tempban_after > 0 && count >= c.tempban_after {
+            self.strikes.remove(&uuid);
+            Action::Banned {
+                until: now + i64::from(c.tempban_hours) * 60 * MINUTE,
+            }
+        } else if c.mute_after > 0 && count >= c.mute_after {
+            let until = now + i64::from(c.mute_minutes) * MINUTE;
+            // The window starts again when the mute ends.
+            s.counts_until = until + window;
+            // An operator's longer mute stays.
+            if !self
+                .mutes
+                .get(&uuid)
+                .is_some_and(|m| m.until.is_none_or(|u| u >= until))
+            {
+                self.mutes.insert(
+                    uuid,
+                    Mute {
+                        uuid: uuid_string(uuid),
+                        name: name.to_owned(),
+                        until: Some(until),
+                        by: None,
+                        reason: None,
+                    },
+                );
+                self.save();
+            }
+            Action::Muted { until }
+        } else {
+            Action::Refused
+        };
+        (count, action)
+    }
+
+    /// Lifts a player's mute (and forgets their hits), by name; the name as muted, if they were.
     pub fn unmute(&mut self, name: &str) -> Option<String> {
         let uuid = *self
             .mutes
@@ -146,6 +432,7 @@ impl Guard {
             .find(|(_, m)| m.name.eq_ignore_ascii_case(name))?
             .0;
         let mute = self.mutes.remove(&uuid)?;
+        self.strikes.remove(&uuid);
         self.save();
         Some(mute.name)
     }
@@ -156,7 +443,7 @@ impl Guard {
         };
         let now = now_millis();
         self.mutes.retain(|_, m| m.active(now));
-        let mut mutes: Vec<Mute> = self.mutes.values().cloned().collect();
+        let mut mutes: Vec<SavedMute> = self.mutes.values().cloned().map(Into::into).collect();
         mutes.sort_by(|a, b| a.name.cmp(&b.name));
         if let Ok(text) = serde_json::to_string_pretty(&MutesFile { mutes }) {
             let tmp = file.with_extension("json.tmp");
@@ -167,59 +454,121 @@ impl Guard {
     }
 }
 
-/// `/tempmute`'s duration in milliseconds: a positive whole number and a unit, `s`, `m`, `h`, `d` or
-/// `w` (`10m`, `2h`, `1d`).
-pub fn parse_duration(text: &str) -> Option<i64> {
-    let unit = match text.chars().last()? {
-        's' => 1_000,
-        'm' => MINUTE,
-        'h' => 60 * MINUTE,
-        'd' => 24 * 60 * MINUTE,
-        'w' => 7 * 24 * 60 * MINUTE,
-        _ => return None,
-    };
-    let count: i64 = text[..text.len() - 1].parse().ok()?;
-    (count > 0).then(|| count.checked_mul(unit)).flatten()
+impl ChatGuard for Guard {
+    fn matches(&self, text: &str) -> bool {
+        self.filter.matches(text)
+    }
+
+    fn muted(&self, uuid: u128, now: i64) -> Option<&Mute> {
+        Guard::muted(self, uuid, now)
+    }
+
+    fn mutes(&self, now: i64) -> Vec<&Mute> {
+        Guard::mutes(self, now)
+    }
+
+    fn mute(
+        &mut self,
+        uuid: u128,
+        name: &str,
+        until: Option<i64>,
+        by: &str,
+        reason: Option<String>,
+    ) {
+        Guard::mute(self, uuid, name, until, by, reason);
+    }
+
+    fn strike(&mut self, uuid: u128, name: &str, now: i64) -> (u32, Action) {
+        Guard::strike(self, uuid, name, now)
+    }
+
+    fn unmute(&mut self, name: &str) -> Option<String> {
+        Guard::unmute(self, name)
+    }
+
+    fn log(
+        &mut self,
+        now: i64,
+        name: &str,
+        uuid: u128,
+        place: Place,
+        count: u32,
+        action: Action,
+        text: &str,
+    ) -> Result<(), String> {
+        let path = &self.config.log;
+        if path.is_empty() {
+            return Ok(());
+        }
+        let line = log_line(now, name, uuid, place.name(), count, action, text);
+        append_log(Path::new(path), &line).map_err(|e| format!("{path}: {e}"))
+    }
 }
 
-/// The unit used when presenting a moderation duration to a player.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DurationUnit {
-    Minute,
-    Hour,
-    Day,
+/// `server.toml`'s `[chat_filter]` for the dedicated server ([`chat_guard::install`] it at startup): on
+/// by default, off (with an error logged) when the section is wrong. The mutes are kept in `dir`.
+pub fn load(server_toml: &str, dir: &Path) -> Loaded {
+    let mut loaded = Loaded::default();
+    let config = match Config::from_server_toml(server_toml) {
+        Ok(config) => config,
+        Err(e) => {
+            loaded.log.push((
+                "ERROR",
+                format!("server.toml: {e}; the chat filter stays off"),
+            ));
+            return loaded;
+        }
+    };
+    if !config.enabled {
+        return loaded;
+    }
+    let guard = Guard::new(config, Filter::new(""), Some(dir.join(MUTES_FILE)));
+    loaded.log.push((
+        "INFO",
+        "Operator-issued chat mutes enabled".into(),
+    ));
+    loaded.guard = Some(Box::new(guard));
+    loaded
 }
 
-/// A duration's rounded count and unit, shared by logs and translated replies.
-pub fn duration_parts(millis: i64) -> (i64, DurationUnit) {
-    let (unit, kind) = if millis <= 60 * MINUTE {
-        (MINUTE, DurationUnit::Minute)
-    } else if millis <= 48 * 60 * MINUTE {
-        (60 * MINUTE, DurationUnit::Hour)
-    } else {
-        (24 * 60 * MINUTE, DurationUnit::Day)
-    };
-    (
-        millis.div_euclid(unit) + i64::from(millis.rem_euclid(unit) > 0),
-        kind,
+/// Gives the dedicated server this chat filter.
+pub fn install() {
+    chat_guard::install(load);
+}
+
+/// One line of `logs/chat-filter.log`, without its newline.
+pub fn log_line(
+    now: i64,
+    name: &str,
+    uuid: u128,
+    place: &str,
+    count: u32,
+    action: Action,
+    text: &str,
+) -> String {
+    let text: String = text
+        .chars()
+        .map(|c| if c == '\n' { ' ' } else { c })
+        .collect();
+    format!(
+        "{} {name} {} {place} hit {count} {}: {text}",
+        utc(now),
+        uuid_string(uuid),
+        action.name()
     )
 }
 
-/// `millis` for logs, rounded up: minutes up to an hour, hours up to two days, then days.
-pub fn duration_text(millis: i64) -> String {
-    let (count, unit) = duration_parts(millis);
-    let unit = match unit {
-        DurationUnit::Minute => "minute",
-        DurationUnit::Hour => "hour",
-        DurationUnit::Day => "day",
-    };
-    format!("{count} {unit}{}", if count == 1 { "" } else { "s" })
-}
-
-pub fn now_millis() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis() as i64)
+/// Appends a line to the log at `path` (its folder made if needed).
+pub fn append_log(path: &Path, line: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    writeln!(f, "{line}")
 }
 
 /// `YYYY-MM-DDTHH:MM:SSZ` for epoch milliseconds.

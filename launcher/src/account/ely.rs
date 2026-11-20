@@ -58,11 +58,11 @@ fn response(v: Value, client: &str) -> Result<(Account, Tokens), String> {
     let name = profile["name"].as_str().unwrap_or_default();
     if uuid.len() != 32
         || !uuid.bytes().all(|b| b.is_ascii_hexdigit())
-        || !u128::from_str_radix(&uuid, 16).is_ok_and(horizon_core::auth_provider::valid_ely_uuid)
+        || !u128::from_str_radix(&uuid, 16).is_ok_and(horizon_platform::auth_provider::valid_ely_uuid)
     {
         return Err("Ely.by returned an invalid account UUID.".into());
     }
-    if !horizon_core::auth_provider::valid_ely_name(name) {
+    if !horizon_platform::auth_provider::valid_ely_name(name) {
         return Err("Ely.by returned an invalid account name.".into());
     }
     let access = v["accessToken"]

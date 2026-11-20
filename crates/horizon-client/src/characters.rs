@@ -3,8 +3,8 @@ use crate::hud::HudAtlas;
 use serde::{Deserialize, Serialize};
 use std::{fs, io, io::Write, path::Path};
 
-pub mod sync;
 pub mod reservations;
+pub mod sync;
 
 pub const FALLBACK_SKIN: &str = "entity/player/wide/steve";
 const CHOICE_FILE: &str = "character.json";
@@ -51,29 +51,54 @@ fn character_size<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f32, D::Erro
     })
 }
 
-fn default_chest() -> f32 { 1.0 }
-fn flat_chest(value: &f32) -> bool { *value == 1.0 }
+fn default_chest() -> f32 {
+    1.0
+}
+fn flat_chest(value: &f32) -> bool {
+    *value == 1.0
+}
 fn character_chest<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f32, D::Error> {
     #[derive(Deserialize)]
     #[serde(untagged)]
-    enum Chest { Number(f32), Text(String) }
-    let value = match Chest::deserialize(d)? { Chest::Number(v) => v, Chest::Text(v) => v.parse().unwrap_or(1.0) };
-    Ok(if value.is_finite() { value.clamp(1.0, 2.0) } else { 1.0 })
+    enum Chest {
+        Number(f32),
+        Text(String),
+    }
+    let value = match Chest::deserialize(d)? {
+        Chest::Number(v) => v,
+        Chest::Text(v) => v.parse().unwrap_or(1.0),
+    };
+    Ok(if value.is_finite() {
+        value.clamp(1.0, 2.0)
+    } else {
+        1.0
+    })
 }
-fn default_hunger() -> i32 { 20 }
+fn default_hunger() -> i32 {
+    20
+}
 fn character_hunger<'de, D: serde::Deserializer<'de>>(d: D) -> Result<i32, D::Error> {
-    character_health(d).map(|v| v.clamp(1.0,100.0) as i32)
+    character_health(d).map(|v| v.clamp(1.0, 100.0) as i32)
 }
-fn default_health() -> f32 { 20.0 }
+fn default_health() -> f32 {
+    20.0
+}
 fn character_health<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f32, D::Error> {
     #[derive(Deserialize)]
     #[serde(untagged)]
-    enum Health { Number(f32), Text(String) }
+    enum Health {
+        Number(f32),
+        Text(String),
+    }
     let value = match Health::deserialize(d)? {
         Health::Number(value) => value,
         Health::Text(value) => value.parse().unwrap_or(20.0),
     };
-    Ok(if value.is_finite() && value > 0.0 { value.clamp(1.0, 1024.0) } else { 20.0 })
+    Ok(if value.is_finite() && value > 0.0 {
+        value.clamp(1.0, 1024.0)
+    } else {
+        20.0
+    })
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -131,24 +156,50 @@ struct CharacterDefinition {
     #[serde(default)]
     color: Option<String>,
 }
-fn default_character_model() -> Model { Model::Slim }
-fn default_character_chat() -> bool { true }
+fn default_character_model() -> Model {
+    Model::Slim
+}
+fn default_character_chat() -> bool {
+    true
+}
 impl From<CharacterDefinition> for Character {
     fn from(value: CharacterDefinition) -> Self {
         let texture = value.texture.unwrap_or_else(|| {
-            value.id.split_once(':').map(|(namespace, name)|
-                format!("{namespace}:entity/character/{name}")
-            ).unwrap_or_default()
+            value
+                .id
+                .split_once(':')
+                .map(|(namespace, name)| format!("{namespace}:entity/character/{name}"))
+                .unwrap_or_default()
         });
-        Self { id: value.id, name: value.name, texture, race: value.race,
-            size: value.size, health: value.health, hunger: value.hunger, chest: if value.model == Model::Slim { value.chest } else { 1.0 }, starting_items: value.starting_items, starting_spells: value.starting_spells, model: value.model,
-            character_chat: value.character_chat, color: value.color }
+        Self {
+            id: value.id,
+            name: value.name,
+            texture,
+            race: value.race,
+            size: value.size,
+            health: value.health,
+            hunger: value.hunger,
+            chest: if value.model == Model::Slim {
+                value.chest
+            } else {
+                1.0
+            },
+            starting_items: value.starting_items,
+            starting_spells: value.starting_spells,
+            model: value.model,
+            character_chat: value.character_chat,
+            color: value.color,
+        }
     }
 }
 
 impl Character {
     /// Character renderers may replace a model while preserving its posed bones.
-    pub fn presentation_model(&self, _model: &crate::mobs::Part, _slim: bool) -> Option<crate::mobs::Part> {
+    pub fn presentation_model(
+        &self,
+        _model: &crate::mobs::Part,
+        _slim: bool,
+    ) -> Option<crate::mobs::Part> {
         None
     }
     pub fn has_race(&self, race: &str) -> bool {
@@ -197,16 +248,23 @@ fn identifier_part(s: &str) -> bool {
 
 /// Only enabled mods' namespaces are searched; no machine-specific paths.
 pub fn roster(root: &Path) -> Vec<Character> {
+    roster_from_source(&horizon_assets::resource_source::ResourceSource::directory(
+        root.to_owned(),
+    ))
+}
+
+fn roster_from_source(source: &horizon_assets::resource_source::ResourceSource) -> Vec<Character> {
     #[derive(Deserialize)]
     struct Catalog {
         characters: Vec<Character>,
     }
     let mut characters = Vec::new();
-    let mut namespaces = crate::mod_content::namespaces(root);
+    let mut namespaces = source.namespaces("assets");
     namespaces.sort();
     for namespace in namespaces {
-        let path = root.join(format!("assets/{namespace}/horizon/characters.json"));
-        let Some(catalog) = fs::read(path)
+        let path = format!("assets/{namespace}/horizon/characters.json");
+        let Some(catalog) = source
+            .read(&path)
             .ok()
             .and_then(|bytes| serde_json::from_slice::<Catalog>(&bytes).ok())
         else {
@@ -245,6 +303,9 @@ pub struct Catalog {
 impl Catalog {
     pub fn load(root: &Path) -> Self {
         Self::new(roster(root))
+    }
+    pub fn from_source(source: &horizon_assets::resource_source::ResourceSource) -> Self {
+        Self::new(roster_from_source(source))
     }
     pub fn new(mut characters: Vec<Character>) -> Self {
         use sha2::{Digest, Sha256};
@@ -325,19 +386,39 @@ mod tests {
         let base = serde_json::json!({"id":"lunatic:test", "name":"Test"});
         let c: Character = serde_json::from_value(base.clone()).unwrap();
         assert_eq!(c.chest, 1.0);
-        for (value, expected) in [(serde_json::json!(1.3),1.3),(serde_json::json!("1.6"),1.6),(serde_json::json!(3),2.0),(serde_json::json!(0),1.0),(serde_json::json!("invalid"),1.0)] {
-            let mut row = base.clone(); row["chest"] = value;
+        for (value, expected) in [
+            (serde_json::json!(1.3), 1.3),
+            (serde_json::json!("1.6"), 1.6),
+            (serde_json::json!(3), 2.0),
+            (serde_json::json!(0), 1.0),
+            (serde_json::json!("invalid"), 1.0),
+        ] {
+            let mut row = base.clone();
+            row["chest"] = value;
             let c: Character = serde_json::from_value(row.clone()).unwrap();
             assert_eq!(c.chest, expected);
-            assert_eq!(serde_json::from_value::<Character>(serde_json::to_value(&c).unwrap()).unwrap().chest, expected);
+            assert_eq!(
+                serde_json::from_value::<Character>(serde_json::to_value(&c).unwrap())
+                    .unwrap()
+                    .chest,
+                expected
+            );
             row["model"] = serde_json::json!("wide");
             assert_eq!(serde_json::from_value::<Character>(row).unwrap().chest, 1.0);
         }
     }
     #[test]
     fn health_accepts_numbers_strings_and_safe_defaults() {
-        for (value, expected) in [(serde_json::json!("16"), 16.0), (serde_json::json!(16), 16.0), (serde_json::json!("invalid"), 20.0), (serde_json::json!(-1), 20.0)] {
-            let c: Character = serde_json::from_value(serde_json::json!({"id":"lunatic:test", "name":"Test", "health":value})).unwrap();
+        for (value, expected) in [
+            (serde_json::json!("16"), 16.0),
+            (serde_json::json!(16), 16.0),
+            (serde_json::json!("invalid"), 20.0),
+            (serde_json::json!(-1), 20.0),
+        ] {
+            let c: Character = serde_json::from_value(
+                serde_json::json!({"id":"lunatic:test", "name":"Test", "health":value}),
+            )
+            .unwrap();
             assert_eq!(c.health, expected);
         }
     }

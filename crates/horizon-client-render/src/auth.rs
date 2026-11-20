@@ -204,12 +204,17 @@ pub fn discovery_url() -> String {
         .unwrap_or_else(|| DEFAULT_DISCOVERY.to_owned())
 }
 
-fn agent() -> ureq::Agent {
+pub(crate) fn agent() -> ureq::Agent {
     ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(15))
         .redirects(0)
         .user_agent(&format!("Horizon/{}", horizon_core::release::VERSION))
         .build()
+}
+
+/// Whether `HORIZON_API_DISCOVERY` names another services environment.
+pub fn discovery_overridden() -> bool {
+    discovery_url() != DEFAULT_DISCOVERY
 }
 
 /// The discovery document, fetched once per game (a failure is retried next time).
@@ -1046,6 +1051,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "daily"]
     fn certificates_response() {
         let pair = parse_certificates(&certificates(PRIVATE_B64, PUBLIC_B64)).unwrap();
         assert_eq!(

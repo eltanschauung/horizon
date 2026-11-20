@@ -30,6 +30,8 @@ pub struct Entry {
     pub values: Vec<f64>,
     /// Its options page's `[[pages]]`; empty for one page of every option.
     pub pages: Vec<OptionPage>,
+    /// A Horizon pack that declares `[ray_tracing]`.
+    pub traces: bool,
 }
 
 impl Entry {
@@ -67,29 +69,6 @@ impl Entry {
         };
         let Some(new) = slider_value(&o.kind, at) else {
             return false;
-        };
-        let changed = new != *v;
-        *v = new;
-        changed
-    }
-
-    /// Option `i`'s slider one step on (`back`: one before), stopping at its ends. Whether its
-    /// value changed.
-    pub fn nudge_option(&mut self, i: usize, back: bool) -> bool {
-        let (Some(o), Some(v)) = (self.options.get(i), self.values.get_mut(i)) else {
-            return false;
-        };
-        let dir = if back { -1.0 } else { 1.0 };
-        let new = match &o.kind {
-            OptionKind::Float { min, max, step, .. } => {
-                let (min, max, step) = (f64::from(*min), f64::from(*max), f64::from(*step));
-                let n = ((*v - min) / step).round() + dir;
-                on_f32((min + n * step).clamp(min, max))
-            }
-            OptionKind::Int { min, max, .. } => {
-                (v.round() + dir).clamp(f64::from(*min), f64::from(*max))
-            }
-            _ => return false,
         };
         let changed = new != *v;
         *v = new;
@@ -140,9 +119,18 @@ fn entry(path: &Path) -> Option<Entry> {
         // Its manifest's name; a pack that can't be read is still listed, under its file
         // name: picking it says why in the chat.
         let manifest = horizon_shader_api::Pack::read_manifest(path).ok();
-        let (key, title, options, pages) = manifest.map_or_else(
-            || (file.clone(), file.clone(), Vec::new(), Vec::new()),
-            |m| (format!("horizon:{}", m.id), m.name, m.options, m.pages),
+        let (key, title, options, pages, traces) = manifest.map_or_else(
+            || (file.clone(), file.clone(), Vec::new(), Vec::new(), false),
+            |m| {
+                let traces = m.ray_tracing.is_some();
+                (
+                    format!("horizon:{}", m.id),
+                    m.name,
+                    m.options,
+                    m.pages,
+                    traces,
+                )
+            },
         );
         return Some(Entry {
             key,
@@ -152,6 +140,7 @@ fn entry(path: &Path) -> Option<Entry> {
             options,
             values: Vec::new(),
             pages,
+            traces,
         });
     }
     let zip = path.is_file()
@@ -166,13 +155,16 @@ fn entry(path: &Path) -> Option<Entry> {
         options: Vec::new(),
         values: Vec::new(),
         pages: Vec::new(),
+        traces: false,
     })
 }
 
 /// Resolves a saved identity, migrating a legacy native filename when its manifest or the
 /// launcher's `<id>-<version>.hshader` name identifies it. Duplicate IDs use the first filename
 /// in lexical order, matching `scan`; versions are free-form strings, not ordered versions.
-/// An absent arbitrary old filename cannot be attributed to a manifest safely.
+/// An absent arbitrary old filename cannot be attributed to a manifest safely. A saved identity
+/// whose pack this build refuses (another API line) keeps that pack's path, so loading it says
+/// why; a pack that reads comes first.
 pub fn resolve(dir: &Path, picked: &str) -> (String, PathBuf) {
     if picked.is_empty() {
         return (String::new(), dir.join(picked));
@@ -181,23 +173,27 @@ pub fn resolve(dir: &Path, picked: &str) -> (String, PathBuf) {
     if direct.exists() && !horizon_shader_api::package::is_pack(&direct) {
         return (picked.to_owned(), direct);
     }
-    let mut native: Vec<_> = std::fs::read_dir(dir)
+    let mut files: Vec<_> = std::fs::read_dir(dir)
         .into_iter()
         .flatten()
         .flatten()
         .filter_map(|e| {
             let path = e.path();
             let file = path.file_name()?.to_str()?.to_owned();
-            if file.starts_with('.') || !horizon_shader_api::package::is_pack(&path) {
-                return None;
-            }
-            Some((file, horizon_shader_api::Pack::read_manifest(&path).ok()?))
+            (!file.starts_with('.') && horizon_shader_api::package::is_pack(&path)).then_some(file)
         })
         .collect();
-    native.sort_by(|a, b| a.0.cmp(&b.0));
+    files.sort();
+    let native: Vec<_> = files
+        .iter()
+        .filter_map(|file| {
+            let manifest = horizon_shader_api::Pack::read_manifest(&dir.join(file)).ok()?;
+            Some((file, manifest))
+        })
+        .collect();
     let id = native
         .iter()
-        .find(|(file, _)| file == picked)
+        .find(|(file, _)| *file == picked)
         .map(|(_, m)| m.id.as_str())
         .or_else(|| picked.strip_prefix("horizon:"))
         .or_else(|| {
@@ -221,6 +217,14 @@ pub fn resolve(dir: &Path, picked: &str) -> (String, PathBuf) {
         }
         migrate_values(&dir.join(file), &key);
         return (key, dir.join(file));
+    }
+    if let Some(id) = picked.strip_prefix("horizon:") {
+        let declares = |file: &&String| {
+            horizon_shader_api::Pack::declared_id(&dir.join(file)).as_deref() == Some(id)
+        };
+        if let Some(file) = files.iter().find(declares) {
+            return (picked.to_owned(), dir.join(file));
+        }
     }
     (picked.to_owned(), dir.join(picked))
 }
@@ -353,15 +357,36 @@ fn step_value(kind: &OptionKind, v: f64, back: bool) -> f64 {
     }
 }
 
-/// Where `v` sits between the option's minimum and maximum, 0 to 1; `None` for the options
-/// that are buttons.
+/// A float option's stops past its minimum: its steps, the last one cut short at the maximum
+/// when the range isn't a whole number of them.
+pub fn float_steps(min: f32, max: f32, step: f32) -> f64 {
+    let (min, max, step) = (f64::from(min), f64::from(max), f64::from(step));
+    ((max - min) / step - STEP_SLACK).ceil()
+}
+/// What a range a hair over a whole number of steps loses to rounding, short of another stop.
+const STEP_SLACK: f64 = 1e-6;
+
+/// Where `v` sits between the option's minimum and maximum, 0 to 1, as `slider_value` reads
+/// it back: a float at its stop (the maximum the last one), an int along its range. `None` for
+/// the options that are buttons.
 fn slider_position(kind: &OptionKind, v: f64) -> Option<f32> {
-    let (min, max) = match kind {
-        OptionKind::Float { min, max, .. } => (f64::from(*min), f64::from(*max)),
-        OptionKind::Int { min, max, .. } => (f64::from(*min), f64::from(*max)),
+    let position = match kind {
+        OptionKind::Float { min, max, step, .. } => {
+            let steps = float_steps(*min, *max, *step);
+            let stop = ((v - f64::from(*min)) / f64::from(*step)).round();
+            if v >= f64::from(*max) || steps <= 0.0 {
+                1.0
+            } else {
+                stop / steps
+            }
+        }
+        OptionKind::Int { min, max, .. } => {
+            let (min, max) = (f64::from(*min), f64::from(*max));
+            (v - min) / (max - min)
+        }
         _ => return None,
     };
-    Some(((v - min) / (max - min)).clamp(0.0, 1.0) as f32)
+    Some(position.clamp(0.0, 1.0) as f32)
 }
 
 /// The option's value nearest the slider position `at`: a float on its steps from the
@@ -371,8 +396,8 @@ fn slider_value(kind: &OptionKind, at: f32) -> Option<f64> {
     let at = f64::from(at.clamp(0.0, 1.0));
     match kind {
         OptionKind::Float { min, max, step, .. } => {
+            let steps = float_steps(*min, *max, *step);
             let (min, max, step) = (f64::from(*min), f64::from(*max), f64::from(*step));
-            let steps = ((max - min) / step - 1e-6).ceil();
             Some(on_f32((min + (at * steps).round() * step).min(max)))
         }
         OptionKind::Int { min, max, .. } => {
@@ -420,7 +445,7 @@ mod tests {
 
     fn install(dir: &Path, file: &str, version: &str) {
         let manifest = format!(
-            "schema = 1\nid = \"warm\"\nname = \"Warm\"\nversion = \"{version}\"\napi = \"0.1\"\n\
+            "schema = 1\nid = \"warm\"\nname = \"Warm\"\nversion = \"{version}\"\napi = \"0.2\"\n\
             [[post]]\nfile = \"p.wgsl\"\n[[options]]\nid = \"strength\"\nname = \"Strength\"\ntype = \"float\"\ndefault = 1.0\nmin = 0.0\nmax = 2.0\nstep = 0.5\n"
         );
         let files = [
@@ -492,6 +517,56 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
+    /// A saved identity whose pack is for a shader API line this build doesn't serve keeps
+    /// the pack's own path, where loading it says why it is refused; a pack with that id that
+    /// reads is the pick, whatever its file's name.
+    #[test]
+    fn a_saved_identity_keeps_the_path_of_a_pack_this_build_refuses() {
+        let dir =
+            std::env::temp_dir().join(format!("horizon-identity-retired-{}", std::process::id()));
+        let retired = dir.join("a-retired");
+        std::fs::create_dir_all(&retired).unwrap();
+        std::fs::write(
+            retired.join(horizon_shader_api::MANIFEST),
+            "schema = 1\nid = \"warm\"\nname = \"Warm\"\nversion = \"1\"\napi = \"0.1\"\n\
+             [[post]]\nfile = \"p.wgsl\"\n",
+        )
+        .unwrap();
+        let refusal = horizon_shader_api::Pack::read_manifest(&retired).unwrap_err();
+        assert!(refusal.contains("needs shader API 0.1"), "{refusal}");
+        assert_eq!(
+            resolve(&dir, "horizon:warm"),
+            ("horizon:warm".into(), retired.clone())
+        );
+        // Another id, and a manifest that isn't TOML, are nobody's identity.
+        assert_eq!(
+            resolve(&dir, "horizon:cold"),
+            ("horizon:cold".into(), dir.join("horizon:cold"))
+        );
+        // A pick by file name is that file, whatever else is installed: a pack whose manifest
+        // declares no id is not it.
+        let broken = dir.join("0-broken");
+        std::fs::create_dir_all(&broken).unwrap();
+        std::fs::write(broken.join(horizon_shader_api::MANIFEST), "not = [toml").unwrap();
+        assert_eq!(
+            resolve(&dir, "a-retired"),
+            ("a-retired".into(), retired.clone())
+        );
+        std::fs::remove_dir_all(broken).unwrap();
+        install(&dir, "z.hshader", "2");
+        assert_eq!(
+            resolve(&dir, "horizon:warm"),
+            ("horizon:warm".into(), dir.join("z.hshader"))
+        );
+        std::fs::remove_file(dir.join("z.hshader")).unwrap();
+        std::fs::write(retired.join(horizon_shader_api::MANIFEST), "not = [toml").unwrap();
+        assert_eq!(
+            resolve(&dir, "horizon:warm"),
+            ("horizon:warm".into(), dir.join("horizon:warm"))
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn migrates_a_removed_registry_filename_and_resolves_duplicates_deterministically() {
         let dir = std::env::temp_dir().join(format!(
@@ -521,7 +596,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let d = dir.as_path();
         let manifest = "schema = 1\nid = \"warm\"\nname = \"Warm Light\"\nversion = \"1\"\n\
-            api = \"0.1\"\n[[post]]\nfile = \"p.wgsl\"\n";
+            api = \"0.2\"\n[[post]]\nfile = \"p.wgsl\"\n";
         std::fs::create_dir(d.join("warm")).unwrap();
         std::fs::write(d.join("warm").join(horizon_shader_api::MANIFEST), manifest).unwrap();
         std::fs::create_dir_all(d.join("Classic Folder/shaders")).unwrap();
@@ -627,6 +702,7 @@ mod tests {
             ],
             values: vec![1.0, 2.0, 1.0, 0.0],
             pages: Vec::new(),
+            traces: false,
         };
         assert_eq!(entry.slider_position(0), Some(0.5));
         assert_eq!(entry.slider_position(1), Some(0.2));
@@ -649,17 +725,48 @@ mod tests {
         assert_eq!(entry.values[3], 1.0);
         entry.set_slider_position(3, 0.6);
         assert_eq!(entry.values[3], f64::from(0.6_f32));
+    }
 
-        // The arrow keys: a step at a time, not round past the ends.
-        entry.values[0] = 2.0;
-        assert!(!entry.nudge_option(0, false));
-        assert_eq!(entry.values[0], 2.0);
-        assert!(entry.nudge_option(0, true));
-        assert_eq!(entry.values[0], f64::from(1.95_f32));
-        entry.values[1] = 0.0;
-        assert!(!entry.nudge_option(1, true));
-        assert!(entry.nudge_option(1, false));
-        assert_eq!(entry.values[1], 1.0);
-        assert!(!entry.nudge_option(2, false));
+    /// The arrow keys step a slider through its stops (the shell's `slider_step`, by the stops
+    /// `float_steps` counts): a float whose range isn't a whole number of steps walks every one
+    /// both ways, its maximum included, and stops at the ends.
+    #[test]
+    fn the_arrow_keys_walk_a_floats_stops_both_ways() {
+        let kind = OptionKind::Float {
+            default: 0.0,
+            min: 0.0,
+            max: 1.0,
+            step: 0.3,
+        };
+        let mut entry = Entry {
+            file: "p".into(),
+            key: "horizon:p".into(),
+            title: "P".into(),
+            kind: Kind::Horizon,
+            options: vec![horizon_shader_api::PackOption {
+                id: "d".into(),
+                name: "D".into(),
+                description: String::new(),
+                kind,
+            }],
+            values: vec![0.0],
+            pages: Vec::new(),
+            traces: false,
+        };
+        let steps = float_steps(0.0, 1.0, 0.3) as u32;
+        let mut walk = |forward: bool| {
+            let mut seen = Vec::new();
+            for _ in 0..steps + 2 {
+                let at = entry.slider_position(0).unwrap();
+                let next = crate::settings_shell::slider_step(at, Some(steps), 100.0, forward);
+                entry.set_slider_position(0, next);
+                seen.push(entry.values[0]);
+            }
+            seen
+        };
+        // The `k`th stop, as the pack's f32 `override` gets it.
+        let stop = |k: u8| f64::from((f64::from(k) * f64::from(0.3_f32)) as f32);
+        assert_eq!(walk(true), [stop(1), stop(2), stop(3), 1.0, 1.0, 1.0]);
+        assert_eq!(walk(false), [stop(3), stop(2), stop(1), 0.0, 0.0, 0.0]);
     }
 }

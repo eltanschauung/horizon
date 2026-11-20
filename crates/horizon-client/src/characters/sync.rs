@@ -12,7 +12,7 @@ use std::{
     time::Duration,
 };
 
-pub const CHANNEL: &str = "lunatic:characters_v2";
+pub use horizon_protocol::lunatic_channels::CHARACTERS as CHANNEL;
 pub const LEGACY_CHANNEL: &str = "lunatic:characters_v1";
 pub const MAX_PEERS: usize = 1024;
 const ATTEMPTS: u8 = 4;

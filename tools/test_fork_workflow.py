@@ -20,17 +20,42 @@ class WorkflowTests(unittest.TestCase):
 
     def test_snapshot_tampering_stops_before_build_or_deploy(self):
         p=self.root/'manifest.json';launcher=self.root/'inputs/launcher';launcher.parent.mkdir();launcher.write_bytes(b'launcher')
-        pkg=self.root/'inputs/mod.hnmod';pkg.write_bytes(b'original')
-        w.write(p,{'schema':1,'game_revision':'a'*40,'launcher_sha256':w.digest(launcher),'packages':[{'id':'mod','path':'inputs/mod.hnmod','sha256':w.digest(pkg)}]})
+        pkg=self.root/'inputs/mod.hmod';pkg.write_bytes(b'original')
+        w.write(p,{'schema':w.SCHEMA,'game_revision':'a'*40,'launcher_sha256':w.digest(launcher),'packages':[{'id':'mod','path':'inputs/mod.hmod','sha256':w.digest(pkg)}]})
         w.load(p);pkg.write_bytes(b'changed')
         with self.assertRaisesRegex(ValueError,'Snapshot changed'):w.load(p)
 
     def test_partial_build_and_wrong_revision_are_rejected(self):
-        m={'game_revision':'a'*40,'toolchain':'1.99.1','profile':'performance','packages':[{'kind':'native','id':'lunatic','version':'1'}]}
-        about={'horizon':'a'*40,'rust':'1.99.1','profile':'performance','mods':[{'id':'lunatic','version':'1'}],'left_out':[]}
+        m={'game_revision':'a'*40,'toolchain':'1.99.1','profile':'optimized','base':'sdk-base','packages':[{'kind':'native','id':'lunatic','version':'1','source_sha256':'stable'}]}
+        about={'horizon':'a'*40,'rust':'1.99.1','profile':'optimized','base':'sdk-base','mods':[{'id':'lunatic','version':'1','sha256':'stable'}],'left_out':[]}
         self.assertEqual(w.verify_about(m,about),['lunatic'])
         for key,value in [('mods',[]),('left_out',[{'id':'lunatic'}]),('horizon','b'*40),('rust','other')]:
             with self.subTest(key=key),self.assertRaises(ValueError):w.verify_about(m,dict(about,**{key:value}))
+
+    def test_distribution_requires_every_frozen_default(self):
+        with self.assertRaisesRegex(ValueError, 'Missing native SDK packages:.*lunatic'):
+            w.collect_sdk_packages(self.root, 'a'*40)
+        distribution = w.read(w.ROOT/'tools/fork-distribution.json')
+        self.assertEqual(len(distribution['native']), 32)
+        self.assertEqual(len(distribution['content']), 20)
+        self.assertTrue(set(distribution['native']).isdisjoint(distribution['content']))
+
+    def test_runtime_libraries_and_package_trees_are_in_artifact_hashes(self):
+        source = self.root/'horizon-native-mods/lunatic'
+        source.mkdir(parents=True)
+        names = ['horizon-engine','horizon-server','native-mods.json','libmod_lunatic.so',
+                 'horizon-native-mods/lunatic/horizon-mod.toml']
+        for name in names:
+            (self.root/name).write_bytes(name.encode())
+        about = {'mods':[{'id':'lunatic'}],
+                 'libraries':[{'file':'libmod_lunatic.so', 'sha256':w.digest(self.root/'libmod_lunatic.so')}]}
+        hashes = w.runtime_files(self.root, 'server', about)
+        self.assertEqual(set(hashes), set(names))
+        self.assertTrue(all(remote.allowed('bin/'+name) for name in names))
+        self.assertFalse(remote.allowed('bin/horizon-native-mods/lunatic/../../playerdata'))
+        (self.root/'libmod_lunatic.so').write_bytes(b'changed')
+        with self.assertRaisesRegex(ValueError, 'library missing or changed'):
+            w.runtime_files(self.root, 'server', about)
 
     def test_sources_cannot_escape_extraction_folder(self):
         z=self.root/'bad.hnmod'
@@ -145,7 +170,7 @@ class WorkflowTests(unittest.TestCase):
         files={}
         for name in ['horizon-engine','horizon-server']:
             (r/'bin'/name).write_bytes(b'old-'+name.encode());(stage/'bin'/name).write_bytes(b'new-'+name.encode());files['bin/'+name]=w.digest(stage/'bin'/name)
-        return {'root':str(r),'stage':str(stage),'service':'test.service','apply':True,'files':files}
+        return {'schema':w.SCHEMA,'root':str(r),'stage':str(stage),'service':'test.service','apply':True,'files':files}
 
     @staticmethod
     def healthy(players=None):return {'phase':'running','crashes':0,'sample':{'game':{'players':players or[],'tps':20}}}

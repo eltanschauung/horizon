@@ -1,7 +1,10 @@
 use super::*;
 use horizon_core::geometry::{Axis, VoxelShape};
-use horizon_world::{collision::CachedCollisionRegistry, nbt::Tag, registry::BlockRegistry};
 use std::{collections::BTreeSet, sync::Arc};
+use {
+    horizon_core::nbt::Tag,
+    horizon_world::{collision::CachedCollisionRegistry, registry::BlockRegistry},
+};
 fn text(value: &str) -> Tag {
     Tag::String(value.into())
 }
@@ -161,6 +164,8 @@ fn run_in(
         facts: &facts,
         collision: &collision,
         fluids: &fluids,
+        loop_context: crate::test_resources::server_loop_context(),
+        mob_hooks: None,
         raining: &|_| false,
         mob_griefing: rules.mob_griefing,
         tnt_explodes: true,
@@ -251,6 +256,19 @@ fn an_arrow_owned_by_an_armor_stand_needs_mob_griefing_to_prime_tnt() {
     // An owner that isn't loaded is no owner (getOwner is null).
     assert!(primes_tnt(Some([9, 9, 9, 9]), false));
     assert!(primes_tnt(None, false));
+}
+
+#[test]
+fn client_arrow_tick_waits_for_a_non_self_move_to_leave_its_block() {
+    let steps = run_with(&[], 1, false, |p| {
+        let arrow = p.arrow.as_mut().unwrap();
+        arrow.in_ground = true;
+        arrow.last_state = Some(BlockStateId(1));
+    });
+    let p = &steps[0];
+    let arrow = p.arrow.as_ref().unwrap();
+    assert!(arrow.in_ground);
+    assert_eq!(p.velocity, Vec3::new(1.0, 0.2, 0.0));
 }
 
 #[test]
@@ -422,7 +440,14 @@ fn air_and_stuck_arrows_leave_no_water_bubbles() {
 #[test]
 fn remote_arrow_preserves_previous_rotation_as_it_turns_and_falls() {
     let steps = run_with(&[], 30, false, |p| {
-        p.shoot(&mut LegacyRandom::new(7), [0.0, 1.0, 0.0], 0.3, 0.0);
+        p.shoot(
+            &mut horizon_core::random::EntityRandom::own(horizon_core::random::LegacyRandom::new(
+                7,
+            )),
+            [0.0, 1.0, 0.0],
+            0.3,
+            0.0,
+        );
         assert_eq!(p.previous_pitch, p.pitch);
         assert_eq!(p.previous_yaw, p.yaw);
         assert!((p.pitch - 90.0).abs() < 1e-4);

@@ -26,7 +26,7 @@ impl Launcher {
                 disabled(play)
             } else {
                 play.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                    this.play_as(account::Player::Account(play_key.clone()));
+                    this.play_as(&Player::Account(play_key.clone()));
                     cx.notify();
                 }))
             };

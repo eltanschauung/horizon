@@ -333,7 +333,7 @@ pub trait PlacementContext {
     }
     /// Add an entity from its NBT (structure templates and pieces; `Pos` is
     /// absolute). Worlds without entity storage drop it.
-    fn add_entity(&mut self, _nbt: crate::nbt::Compound) -> Result<(), PlacementQueryError> {
+    fn add_entity(&mut self, _nbt: horizon_core::nbt::Compound) -> Result<(), PlacementQueryError> {
         Ok(())
     }
     /// Store block-entity data loaded at a just-placed block (structure
@@ -341,7 +341,7 @@ pub trait PlacementContext {
     fn set_block_entity(
         &mut self,
         _position: [i32; 3],
-        _nbt: crate::nbt::Compound,
+        _nbt: horizon_core::nbt::Compound,
     ) -> Result<(), PlacementQueryError> {
         Ok(())
     }

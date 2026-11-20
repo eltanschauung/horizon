@@ -8,10 +8,10 @@
 use crate::{
     font::Font,
     hud_layout::{Blend, GuiDraw, WHITE},
-    java_text::float_to_string,
     scoreboard::{Comp, NumberFormat, Objective, RenderType, Scoreboard, comp_text},
     text::Text,
 };
+use horizon_core::java_number::float_to_string;
 use std::{
     borrow::Cow,
     cmp::Ordering,
@@ -322,9 +322,15 @@ pub struct TabInputs<'a> {
     /// The player is in the level with an upside-down name
     /// (`AvatarRenderer.isPlayerUpsideDown`).
     pub upside_down: &'a dyn Fn(u128) -> bool,
-    /// The player plays Horizon: Horizon's mark after their head (`horizon_cosmetics::mark`).
-    pub horizon: &'a dyn Fn(u128) -> bool,
+    /// A mark after the player's head, or none: an extension point for what lives above the
+    /// engine (Horizon's mark, `horizon_cosmetics::mark`). Vanilla draws none.
+    pub mark: &'a dyn Fn(u128) -> Option<NameMark>,
 }
+
+/// A mark drawn after a player's head in the tab list: filled rectangles `(x, y, width, height,
+/// ARGB)` in an 8x8 box. Once any listed player has one, every row gets the column, so the names
+/// stay aligned.
+pub type NameMark = &'static [(u8, u8, u8, u8, u32)];
 
 /// `PlayerTabOverlay`: the header, footer, visibility and heart states.
 #[derive(Clone, Debug, Default)]
@@ -345,7 +351,7 @@ struct LayoutCache {
     footer: Option<Text>,
     language: Option<std::sync::Arc<crate::lang::Language>>,
     dimensions: (i32, bool, u32, u64),
-    flags: Vec<(bool, bool)>,
+    flags: Vec<bool>,
     draws: Vec<GuiDraw>,
     hearts: Vec<(usize, i32, i32, i32, u128, i32)>,
 }
@@ -401,11 +407,7 @@ impl TabList {
     pub fn layout(&mut self, i: &TabInputs, font: &Font) -> Vec<GuiDraw> {
         let language = crate::lang::current();
         let dimensions = (i.screen_width, i.online_mode, i.background, font.epoch());
-        let flags: Vec<_> = i
-            .players
-            .iter()
-            .map(|p| ((i.upside_down)(p.uuid), (i.horizon)(p.uuid)))
-            .collect();
+        let flags: Vec<_> = i.players.iter().map(|p| (i.upside_down)(p.uuid)).collect();
         let valid = self.cache.as_ref().is_some_and(|c| {
             c.players == i.players
                 && c.board == *i.board
@@ -518,10 +520,6 @@ impl TabList {
         };
         let sw = i.screen_width;
         let head = if show_head { 9 } else { 0 };
-        // Horizon: a column for the mark once anyone listed has it, so the names stay aligned.
-        let marked: Vec<bool> = players.iter().map(|p| (i.horizon)(p.uuid)).collect();
-        let mark = if marked.contains(&true) { 9 } else { 0 };
-        let head = head + mark;
         let slot_width = (cols * (head + max_name + width_for_score + 13)).min(sw - 50) / cols;
         let xxo = sw / 2 - (slot_width * cols + (cols - 1) * 5) / 2;
         let mut yyo = 10;
@@ -588,20 +586,6 @@ impl TabList {
                 );
                 xo += 9;
             }
-            if marked[n as usize] {
-                for (mx, my, w, h, color) in horizon_cosmetics::mark::MARK {
-                    let (x, y) = (xo + i32::from(mx), yo + i32::from(my));
-                    let (x1, y1) = (x + i32::from(w), y + i32::from(h));
-                    out.push(GuiDraw::Fill {
-                        x0: x,
-                        y0: y,
-                        x1,
-                        y1,
-                        color,
-                    });
-                }
-            }
-            xo += mark;
             let spectator = p.game_mode == SPECTATOR;
             out.push(GuiDraw::Text {
                 text: entry.name.clone(),
@@ -767,7 +751,9 @@ mod tests {
 
     #[test]
     fn cached_tab_layout_matches_rebuilt_layout_and_animated_health() {
-        let font = Font::metrics(std::path::Path::new("missing-tab-test-resources"));
+        let font = Font::metrics(&horizon_assets::resource_source::ResourceSource::directory(
+            std::path::PathBuf::from("missing-tab-test-resources"),
+        ));
         let mut board = Scoreboard::default();
         board.add_objective(
             "hp",
@@ -808,7 +794,7 @@ mod tests {
                 gui_ticks: frame,
                 background: 0x20ffffff,
                 upside_down: &|_| false,
-                horizon: &|_| false,
+                mark: &|_| None,
             };
             fresh.cache = None;
             assert_eq!(

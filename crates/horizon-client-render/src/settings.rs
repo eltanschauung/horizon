@@ -203,6 +203,9 @@ pub struct Settings {
     pub startup_api: crate::graphics::GraphicsApi,
     /// `Monitor.videoModes` of the window's monitor, for the Video page (set by the game).
     pub video_modes: Vec<crate::window::VideoMode>,
+    /// Fullbright is held off: this window plays on another's server (set by the game, not
+    /// saved). The graphics screen hides its row; `extras.fullbright` keeps the choice.
+    pub fullbright_held: bool,
     /// Controller settings (`horizon-controller.txt`, Horizon's own).
     pub controller: crate::gamepad::PadSettings,
     /// Horizon's optional extras (`horizon-extras.txt`), all off by default.
@@ -214,6 +217,9 @@ pub struct Settings {
     pub shader_packs: Vec<crate::shader_pack_list::Entry>,
     /// The picked pack's options while its Shader Options page is open.
     pub shader_options: Option<crate::shader_options::ShaderOptions>,
+    /// The name of the Horizon shader pack the renderer has loaded, from its manifest (set by
+    /// the game, not saved): `shader_packs` holds no titles until its page was opened.
+    pub running_pack: Option<String>,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -293,11 +299,13 @@ impl Default for Settings {
             horizon: Default::default(),
             startup_api: Default::default(),
             video_modes: Vec::new(),
+            fullbright_held: false,
             controller: Default::default(),
             extras: Default::default(),
             mods: Default::default(),
             shader_packs: Vec::new(),
             shader_options: None,
+            running_pack: None,
         }
     }
 }
@@ -337,6 +345,15 @@ impl Settings {
             .and_then(|mode| self.video_modes.iter().position(|m| *m == mode))
             .map_or(-1, |i| i as i32)
     }
+    /// Loads only the crates' settings stores (`horizon_hooks::settings`) from the files next to
+    /// `path`, into the seat whose turn it is (`horizon_hooks::seat`): a splitscreen player whose
+    /// settings were made from P1's rather than loaded.
+    pub fn load_stores(path: &Path) {
+        let dir = path.parent();
+        horizon_hooks::settings::engine::load(&mut |file| fs::read_to_string(dir?.join(file)).ok());
+        // The controller's lines end their load: the settings made from P1's already hold them.
+        crate::gamepad::store::loaded();
+    }
     pub fn load(path: &Path) -> Self {
         let mut horizon = path
             .parent()
@@ -353,15 +370,20 @@ impl Settings {
                 horizon.save(dir);
             }
         }
-        let controller = path
-            .parent()
-            .map(crate::gamepad::PadSettings::load)
-            .unwrap_or_default();
         let extras_text = path
             .parent()
             .and_then(|dir| fs::read_to_string(dir.join(crate::extras::FILE)).ok())
             .unwrap_or_default();
         let mut extras = crate::extras::Extras::parse(&extras_text);
+        // The settings stores of the crates above the engine: their lines of this file, or of
+        // their own (docs/layers.md, "Platform registries").
+        horizon_hooks::settings::engine::load(&mut |file| match path.parent() {
+            _ if file == crate::extras::FILE => Some(extras_text.clone()),
+            Some(dir) => fs::read_to_string(dir.join(file)).ok(),
+            None => None,
+        });
+        // `horizon-controller.txt`, through its store, as the seat whose turn it is.
+        let controller = crate::gamepad::store::loaded();
         // The enabled mods are the game folder's, shared by its players (`--player-dir`).
         let mods = path
             .parent()
@@ -371,12 +393,16 @@ impl Settings {
             Ok(bytes) => {
                 let text = String::from_utf8_lossy(&bytes);
                 extras.read_old_options(&extras_text, &text);
+                let parsed = Self::parse(&text);
+                if horizon.api == crate::graphics::GraphicsApi::Auto {
+                    horizon.api = parsed.horizon.api;
+                }
                 Self {
                     horizon,
                     controller,
                     extras,
                     mods,
-                    ..Self::parse(&text)
+                    ..parsed
                 }
             }
             Err(error) => Self {
@@ -394,6 +420,12 @@ impl Settings {
         // Horizon's own key bindings live in horizon-extras.txt, not in options.txt.
         let emote = settings.extras.emote_key.clone();
         settings.keys.set("key.emote", &emote);
+        // The loaded set is the active one: `keybind` text components show its keys.
+        settings.keys.sync_action_bindings();
+        // `Options.load`: `sharePresence` decides what the friends service posts.
+        crate::social::set_share_presence(crate::social::SharePresence::of(
+            settings.file.int("sharePresence").clamp(0, 2) as u8,
+        ));
         settings.describe_for_crashes();
         // Options.load: the backend asked for at startup, what a restart is measured from.
         Self {
@@ -497,14 +529,27 @@ impl Settings {
             operator_items_tab: f.bool("operatorItemsTab"),
             quit_shortcuts: f.bool("quitShortcuts"),
             ctrl_click_emulates_right_click: f.bool("ctrlClickEmulatesRightClick"),
-            horizon: Default::default(),
-            startup_api: Default::default(),
+            horizon: crate::graphics::Graphics {
+                api: match f.name("preferredGraphicsBackend").as_str() {
+                    "opengl" => crate::graphics::GraphicsApi::OpenGl,
+                    "vulkan" => crate::graphics::GraphicsApi::Vulkan,
+                    _ => crate::graphics::GraphicsApi::Auto,
+                },
+                ..Default::default()
+            },
+            startup_api: match f.name("preferredGraphicsBackend").as_str() {
+                "opengl" => crate::graphics::GraphicsApi::OpenGl,
+                "vulkan" => crate::graphics::GraphicsApi::Vulkan,
+                _ => crate::graphics::GraphicsApi::Auto,
+            },
             video_modes: Vec::new(),
+            fullbright_held: false,
             controller: Default::default(),
             extras: Default::default(),
             mods: Default::default(),
             shader_packs: Vec::new(),
             shader_options: None,
+            running_pack: None,
             auto_jump: f.bool("autoJump"),
             language: f.string("lang"),
             force_unicode: f.bool("forceUnicodeFont"),
@@ -581,6 +626,15 @@ impl Settings {
         put_b(&mut f, "entityShadows", self.entity_shadows);
         put_i(&mut f, "biomeBlendRadius", self.biome_blend);
         put_name(&mut f, "graphicsPreset", &self.graphics_preset);
+        put_name(
+            &mut f,
+            "preferredGraphicsBackend",
+            match self.horizon.api {
+                crate::graphics::GraphicsApi::OpenGl => "opengl",
+                crate::graphics::GraphicsApi::Vulkan => "vulkan",
+                _ => "default",
+            },
+        );
         put_i(&mut f, "mipmapLevels", self.mipmap_levels);
         put_i(&mut f, "weatherRadius", self.weather_radius);
         put_f(&mut f, "chunkSectionFadeInTime", self.chunk_fade);
@@ -668,13 +722,18 @@ impl Settings {
     pub fn with_option(&self, key: &str, value: &str) -> Result<Self, String> {
         let mut file = self.to_file();
         file.set_text(key, value)?;
+        let parsed = Self::from_file(file);
+        let mut horizon = self.horizon.clone();
+        if key == "preferredGraphicsBackend" {
+            horizon.api = parsed.horizon.api;
+        }
         let mut next = Self {
-            horizon: self.horizon.clone(),
+            horizon,
             controller: self.controller.clone(),
             extras: self.extras.clone(),
             mods: self.mods.clone(),
             video_modes: self.video_modes.clone(),
-            ..Self::from_file(file)
+            ..parsed
         };
         // Horizon's own bindings aren't in options.txt.
         next.keys.set("key.emote", self.keys.get("key.emote"));
@@ -691,10 +750,12 @@ impl Settings {
         }
         if let Some(dir) = path.parent() {
             self.horizon.save(dir);
-            self.controller.save(dir);
+            // Written by its store below, with the other stores' own files.
+            crate::gamepad::store::keep(&self.controller);
             let mut extras = self.extras.clone();
             extras.emote_key = self.keys.get("key.emote").to_owned();
             extras.save(dir);
+            horizon_hooks::settings::engine::save_own(dir, &[crate::extras::FILE]);
             self.mods.save(&crate::logging::shared_dir(dir));
         }
     }
@@ -763,6 +824,8 @@ pub enum Opt {
     InvertY,
     AllowCursorChanges,
     Volume(usize),
+    /// Setting `.1` of the native mod in row `.0` of Options > Mods, a range on a slider.
+    ModSetting(u16, u16),
     SoundDevice,
     GuiScale,
     ViewBobbing,
@@ -849,15 +912,24 @@ pub enum Opt {
     PadRepeatInterval,
     PadInvertX,
     PadInvertY,
+    PadCraftOnServers,
     PadToggleSneak,
     PadMoveDeadzone,
     PadLookDeadzone,
     PadTriggerThreshold,
     PadGlyphs,
+    /// A Nintendo pad's face buttons by place or by letter (`PadSettings::nintendo_letters`).
+    PadNintendoButtons,
     PadKeyboard,
     PadGameplayGuide,
+    /// The radial menu's opener held or pressed once (`PadSettings::radial_mode`).
+    PadRadialMode,
+    /// The stick the radial menu selects with (`PadSettings::radial_stick`).
+    PadRadialStick,
     /// `options.modelPart.*`: one skin layer (index into `options_file::MODEL_PARTS`).
     ModelPart(usize),
+    /// A slider of a page a crate registered (`horizon_hooks::pages`): (page, row).
+    Page(usize, usize),
     /// 3D skin layers: the player's outer layer as extruded slabs.
     SkinLayers3d,
     MainHand,
@@ -877,6 +949,16 @@ pub enum Opt {
     TextureFiltering,
     /// `Options.maxAnisotropyBit`.
     MaxAnisotropy,
+}
+
+impl Settings {
+    /// GUI scaling inputs for this settings owner.
+    pub fn gui_scale_inputs(&self) -> crate::hud::GuiScale {
+        crate::hud::GuiScale {
+            requested: self.gui_scale,
+            unicode: self.force_unicode,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -961,7 +1043,11 @@ mod tests {
             assert_eq!(sound_source(event), source, "{event}");
         }
         // Explicit sources still take precedence, including H331's arrow route.
-        let mut audio = crate::audio::Audio::silent(Path::new("/nonexistent/h068-audio"));
+        let mut audio = crate::audio::Audio::silent(
+            &horizon_assets::resource_source::ResourceSource::directory(
+                Path::new("/nonexistent/h068-audio").to_path_buf(),
+            ),
+        );
         audio.capture = Some(Vec::new());
         audio.play_on(6, "minecraft:entity.arrow.hit", Some([1.0; 3]), 1.0, 1.0);
         audio.play_on(4, "minecraft:entity.warden.hurt", Some([1.0; 3]), 1.0, 1.0);
@@ -1243,5 +1329,73 @@ mod tests {
         assert_eq!(again.sound_device, "Headphones");
         let empty = Settings::parse("");
         assert_eq!(empty.sound_device, "");
+    }
+    #[test]
+    fn options_txt_carries_the_graphics_api_and_the_launchers_graphics_file_wins_at_startup() {
+        use crate::graphics::GraphicsApi;
+        let version = horizon_world::DATA_VERSION;
+
+        // `Options.preferredGraphicsBackend`: written and read back through options.txt.
+        for (stored, expected_api) in [
+            ("opengl", GraphicsApi::OpenGl),
+            ("vulkan", GraphicsApi::Vulkan),
+            ("default", GraphicsApi::Auto),
+        ] {
+            let text = format!("version:{version}\npreferredGraphicsBackend:{stored}\n");
+            let s = Settings::parse(&text);
+            assert_eq!(s.horizon.api, expected_api, "{stored} is read back");
+            assert_eq!(
+                s.startup_api, expected_api,
+                "{stored} is what it started with"
+            );
+
+            let written = Settings::parse(&s.serialize());
+            assert_eq!(
+                written.file.name("preferredGraphicsBackend"),
+                stored,
+                "options.txt stores vanilla's name for {stored}"
+            );
+            assert_eq!(written.horizon.api, expected_api);
+        }
+
+        // Horizon's own page can also pick DirectX 12, which vanilla's option has no name for.
+        let mut s = Settings::default();
+        s.horizon.api = GraphicsApi::Dx12;
+        assert_eq!(
+            Settings::parse(&s.serialize())
+                .file
+                .name("preferredGraphicsBackend"),
+            "default"
+        );
+
+        // A change made through the option keeps the typed field with the file.
+        s.horizon.api = GraphicsApi::OpenGl;
+        s.file.set_name("preferredGraphicsBackend", "opengl");
+        assert_eq!(
+            Settings::parse(&s.serialize()).horizon.api,
+            GraphicsApi::OpenGl
+        );
+        let updated = s.with_option("preferredGraphicsBackend", "vulkan").unwrap();
+        assert_eq!(updated.horizon.api, GraphicsApi::Vulkan);
+
+        // At startup the launcher's `graphicsApi` picks the API; `auto` leaves it to options.txt.
+        let dir = std::env::temp_dir().join(format!("horizon-graphics-api-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let options = dir.join("options.txt");
+        fs::write(
+            &options,
+            format!("version:{version}\npreferredGraphicsBackend:opengl\n"),
+        )
+        .unwrap();
+        fs::write(dir.join(crate::graphics::FILE), "graphicsApi:auto\n").unwrap();
+        let loaded = Settings::load(&options);
+        assert_eq!(loaded.horizon.api, GraphicsApi::OpenGl);
+        assert_eq!(loaded.startup_api, GraphicsApi::OpenGl);
+        fs::write(dir.join(crate::graphics::FILE), "graphicsApi:vulkan\n").unwrap();
+        let loaded = Settings::load(&options);
+        assert_eq!(loaded.horizon.api, GraphicsApi::Vulkan);
+        assert_eq!(loaded.startup_api, GraphicsApi::Vulkan);
+        let _ = fs::remove_dir_all(&dir);
     }
 }

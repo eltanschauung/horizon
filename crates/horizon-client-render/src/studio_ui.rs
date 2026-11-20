@@ -227,22 +227,14 @@ impl StudioUi {
     }
 
     /// Draw the Studio Browser screen.
-    pub fn draw(
-        &mut self,
+    pub(crate) fn draw_background(
+        &self,
         batch: &mut HudBatch,
         atlas: &HudAtlas,
-        cursor: (f32, f32),
         in_world: bool,
-    ) {
+    ) -> [f32; 4] {
         let (w, h) = (batch.width, batch.height);
         ui::menu_background(batch, atlas, 0.0, 0.0, w, h, in_world);
-
-        // Header Title: centered at top
-        style::title(batch, atlas, &Text::tr("horizon.pages.studio", &[]));
-
-        // Subtitle strip: centered info text
-        let subtitle = Text::tr("horizon.studio.saved_recordings", &[]);
-        ui::centered_text(batch, atlas, &subtitle, 0.0, 26.0, w, style::GREY);
 
         // Main content area layout
         let panel_w = (w - 40.0).clamp(280.0, 440.0);
@@ -252,6 +244,22 @@ impl StudioUi {
 
         // Glass panel backdrop for recordings list
         style::panel(batch, atlas, [panel_x, panel_y, panel_w, panel_h]);
+        [panel_x, panel_y, panel_w, panel_h]
+    }
+    pub(crate) fn draw_contents(
+        &mut self,
+        batch: &mut HudBatch,
+        atlas: &HudAtlas,
+        cursor: (f32, f32),
+        [panel_x, panel_y, panel_w, panel_h]: [f32; 4],
+    ) {
+        let (w, h) = (batch.width, batch.height);
+        // Header Title: centered at top
+        style::title(batch, atlas, &Text::tr("horizon.pages.studio", &[]));
+
+        // Subtitle strip: centered info text
+        let subtitle = Text::tr("horizon.studio.saved_recordings", &[]);
+        ui::centered_text(batch, atlas, &subtitle, 0.0, 26.0, w, style::GREY);
 
         if self.recordings.is_empty() {
             // Empty state
@@ -304,19 +312,19 @@ impl StudioUi {
 
                 // Card background & highlight
                 if is_selected {
-                    style::fill(batch, atlas, rect, style::OPEN);
+                    style::fill(batch, atlas, rect, style::open());
                 } else if is_hovered {
-                    style::fill(batch, atlas, rect, style::HOVER);
+                    style::fill(batch, atlas, rect, style::hover());
                 } else {
                     style::well(batch, atlas, rect);
                 }
 
                 let border_color = if is_selected {
-                    style::ACCENT
+                    style::accent()
                 } else if is_hovered {
                     style::WHITE
                 } else {
-                    style::ROW_RULE
+                    style::row_rule()
                 };
                 style::ring(batch, atlas, rect, border_color);
 
