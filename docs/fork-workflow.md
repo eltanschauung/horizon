@@ -63,6 +63,15 @@ binaries/packages and restarts the previous service. World/config/account files 
 not deployment inputs. The JSON report records package agreement, selection, health,
 backup and log locations. Preview does not restart or upload server artifacts.
 
+## Linux releases
+
+Build Linux binaries intended for distribution on Ubuntu 22.04, matching upstream's
+glibc 2.35 baseline. Use the Ubuntu 22.04 Linux release job or an equivalent build
+environment. Run `python3 tools/check_glibc.py` with the launcher, client, preparation
+tools, server and any bundled shared libraries before distributing them. The public
+release and private portable packagers enforce this check. A build made locally on a
+newer distribution can still be used locally.
+
 ## Pruning
 
 `prune-builds` previews old managed installations; `--apply` removes candidates only.

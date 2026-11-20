@@ -6,12 +6,16 @@ from pathlib import Path
 import stat
 import zipfile
 
+from check_glibc import FLOOR_TEXT, check_binaries
+
 
 def package(build, resources, content, output, platform, native=None, defaults=None):
     suffix = '.exe' if platform == 'windows' else ''
     binary = build / ('horizon-client' + suffix)
     if not binary.is_file():
         raise ValueError(f'Missing binary: {binary}')
+    if platform == 'linux':
+        check_binaries([binary])
     metadata = build / 'native-mods.json'
     json.loads(metadata.read_text())
     json.loads((resources / 'horizon-resources.json').read_text())
@@ -54,7 +58,7 @@ def package(build, resources, content, output, platform, native=None, defaults=N
                 'Horizon portable (' + platform + ' x86-64)\n\n'
                 'Extract the entire ZIP to a writable folder. Run horizon-client' + suffix + '.\n'
                 'No launcher, Java, Rust build or Minecraft download is needed.\n'
-                'Linux requires glibc 2.44 or newer, a Vulkan-capable GPU/driver and desktop audio/window libraries.\n'
+                f'Linux requires glibc {FLOOR_TEXT} or newer, a Vulkan-capable GPU/driver and desktop audio/window libraries.\n'
                 'Windows requires a supported graphics driver.\n\n'
                 'Choose your character before playing. This copy starts with no saves or account credentials.\n'
                 'Player files stay in data/. The first multiplayer connection creates data/portable-identity.key.\n'

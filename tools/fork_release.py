@@ -7,6 +7,8 @@ import shutil
 import tarfile
 import zipfile
 
+from check_glibc import FLOOR_TEXT, check_binaries
+
 
 def copy(source, destination):
     if source.is_dir():
@@ -40,6 +42,12 @@ def main():
     suffix = ".exe" if windows else ""
     platform = "windows-x64" if windows else "linux-x86_64"
     extension = ".zip" if windows else ".tar.gz"
+    programs = ("horizon-client", "horizon-ctl", "horizon-prepare", "horizon-server")
+    if not windows:
+        try:
+            check_binaries([a.launcher, *(a.binaries / name for name in programs)])
+        except ValueError as error:
+            p.exit(1, f"{error}\n")
     a.out.mkdir(parents=True, exist_ok=True)
     game = a.out / ("horizon-" + platform)
     launcher = a.out / ("horizon-launcher-" + platform)
@@ -48,7 +56,7 @@ def main():
             shutil.rmtree(folder)
         folder.mkdir()
     # Explicit allowlist: never copy prepared assets, accounts, caches or worlds.
-    for name in ("horizon-client", "horizon-ctl", "horizon-prepare", "horizon-server"):
+    for name in programs:
         copy(a.binaries / (name + suffix), game / (name + suffix))
     if windows:
         # Runtime-loaded DLLs do not appear in the executable import table.
@@ -75,7 +83,8 @@ def main():
         "Minecraft files and player data are not distributed in this release.\n"
     )
     if not windows:
-        instructions += "\nLinux: x86-64, glibc 2.44 or newer, Vulkan-capable graphics, X11/Wayland, ALSA and libudev.\n"
+        instructions += (f"\nLinux: x86-64, glibc {FLOOR_TEXT} or newer, "
+                         "Vulkan-capable graphics, X11/Wayland, ALSA and libudev.\n")
     for folder in (game, launcher):
         (folder / "README.txt").write_text(instructions, encoding="utf-8")
     for folder in (game, launcher):
