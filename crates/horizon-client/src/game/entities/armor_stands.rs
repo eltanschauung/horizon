@@ -1009,7 +1009,7 @@ impl Game<'_> {
         self.audio
             .play("minecraft:entity.armor_stand.break", Some(at), 1.0, 1.0);
         self.armor_stand_death_drops(&a, "minecraft:player_attack", self.own_entity_id() as u32);
-        let (above, drops) = broken_armor_stand_equipment(a);
+        let (above, drops) = broken_armor_stand_equipment(a, &world_stations!(self).enchantments);
         for stack in drops {
             self.pop_resource(above, stack);
         }
@@ -1435,7 +1435,7 @@ impl Game<'_> {
         let source = self
             .level_entity(causing as i32)
             .or(Some(super::commands::Target::Stand(a.id)));
-        let (pos, drops) = broken_armor_stand_equipment(a);
+        let (pos, drops) = broken_armor_stand_equipment(a, &world_stations!(self).enchantments);
         for stack in drops {
             self.pop_resource(pos, stack);
         }
@@ -2405,7 +2405,10 @@ pub(super) fn spared_by_blast(a: &ArmorStand) -> bool {
 
 /// `ArmorStand.brokenByAnything`: the equipment, less what curse of vanishing
 /// keeps (`PREVENT_EQUIPMENT_DROP`), popped at `blockPosition().above()`.
-fn broken_armor_stand_equipment(a: ArmorStand) -> ([i32; 3], Vec<ItemStack>) {
+fn broken_armor_stand_equipment(
+    a: ArmorStand,
+    enchantments: &horizon_items::enchant::Enchantments,
+) -> ([i32; 3], Vec<ItemStack>) {
     let pos = [
         a.position.x.floor() as i32,
         a.position.y.floor() as i32 + 1,
@@ -2415,7 +2418,7 @@ fn broken_armor_stand_equipment(a: ArmorStand) -> ([i32; 3], Vec<ItemStack>) {
         .equipment
         .into_iter()
         .flatten()
-        .filter(|stack| stack.enchantment_level("minecraft:vanishing_curse") == 0)
+        .filter(|stack| !enchantments.prevents_equipment_drop(stack))
         .collect();
     (pos, drops)
 }
@@ -2509,7 +2512,7 @@ mod burn_drop_tests {
             .push(("minecraft:vanishing_curse".into(), 1));
         stand.equipment[0] = Some(kept.clone());
         stand.equipment[1] = Some(vanished);
-        let (pos, drops) = broken_armor_stand_equipment(stand);
+        let (pos, drops) = broken_armor_stand_equipment(stand, &Default::default());
         assert_eq!(pos, [-1, 5, 0]);
         assert_eq!(drops, vec![kept]);
     }
@@ -2526,7 +2529,7 @@ mod burn_drop_tests {
                 (slot, stack)
             })
             .collect();
-        let (_, drops) = broken_armor_stand_equipment(stand);
+        let (_, drops) = broken_armor_stand_equipment(stand, &Default::default());
         let order = |slots: [usize; 4]| {
             slots
                 .map(|s| {

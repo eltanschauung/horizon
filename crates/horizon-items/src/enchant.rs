@@ -993,6 +993,13 @@ impl Enchantments {
     pub fn prevents_armor_change(&self, stack: &ItemStack) -> bool {
         self.has_component(stack, "minecraft:prevent_armor_change")
     }
+    /// Whether an enchantment prevents this item from dropping with equipment. The
+    /// built-in curse still works when a resource fixture has no enchantment definitions.
+    pub fn prevents_equipment_drop(&self, stack: &ItemStack) -> bool {
+        stack.enchantment_level("minecraft:vanishing_curse") > 0
+            || self.has_component(stack, "minecraft:prevent_equipment_drop")
+    }
+
     /// `minecraft:attributes` contributions of `stack`: (attribute, id, amount, operation).
     pub fn attributes(&self, stack: &ItemStack) -> Vec<(String, String, f64, String)> {
         let mut out = Vec::new();
@@ -1737,6 +1744,16 @@ pub mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    #[test]
+    fn custom_enchantment_can_prevent_equipment_drops() {
+        let enchantments = sample();
+        let mut stack = ItemStack::new("minecraft:diamond_helmet", 1);
+        assert!(!enchantments.prevents_equipment_drop(&stack));
+        stack.data_mut().enchantments.push(("test:vanishes".into(), 1));
+        assert!(enchantments.prevents_equipment_drop(&stack));
+        assert!(!enchantments.prevents_armor_change(&stack));
+    }
+
     /// A small registry built from literal JSON matching the vanilla files.
     pub fn sample() -> Enchantments {
         let defs = [
@@ -1768,6 +1785,10 @@ pub mod tests {
             (
                 "test:clinging",
                 json!({"anvil_cost":8,"description":"Clinging","effects":{"minecraft:prevent_armor_change":{}},"max_cost":{"base":50,"per_level_above_first":0},"max_level":1,"min_cost":{"base":25,"per_level_above_first":0},"slots":["armor"],"supported_items":"#minecraft:enchantable/equippable","weight":1}),
+            ),
+            (
+                "test:vanishes",
+                json!({"anvil_cost":8,"description":"Vanishes","effects":{"minecraft:prevent_equipment_drop":{}},"max_cost":{"base":50,"per_level_above_first":0},"max_level":1,"min_cost":{"base":25,"per_level_above_first":0},"slots":["any"],"supported_items":"#minecraft:enchantable/vanishing","weight":1}),
             ),
         ];
         let list: Vec<Enchantment> = defs
