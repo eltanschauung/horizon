@@ -111,3 +111,14 @@ mod phase_tests {
         let _: &mut dyn Commands = guest.commands();
     }
 }
+
+/// Decode a complete, unnamed network NBT compound under the engine's normal size
+/// and depth limits. This also accepts the format older native mods used for saved
+/// item snapshots. A malformed or trailing payload is refused.
+pub fn decode_network_compound(bytes: &[u8]) -> Option<Compound> {
+    use horizon_core::nbt::{Limits, Tag};
+    match horizon_core::nbt::read_network(bytes, Limits::default()).ok()? {
+        (Tag::Compound(value), used) if used == bytes.len() => Some(value),
+        _ => None,
+    }
+}
