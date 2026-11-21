@@ -37,7 +37,9 @@ class WorkflowTests(unittest.TestCase):
             w.collect_sdk_packages(self.root, 'a'*40)
         distribution = w.read(w.ROOT/'tools/fork-distribution.json')
         self.assertEqual(len(distribution['native']), 32)
-        self.assertEqual(len(distribution['content']), 20)
+        self.assertEqual(len(distribution['content']), 19)
+        self.assertIn('emojiful', distribution['native'])
+        self.assertNotIn('emojiful_twemoji', distribution['content'])
         self.assertTrue(set(distribution['native']).isdisjoint(distribution['content']))
 
     def test_runtime_libraries_and_package_trees_are_in_artifact_hashes(self):
