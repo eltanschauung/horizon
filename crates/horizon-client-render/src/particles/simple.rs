@@ -39,6 +39,9 @@ pub(super) fn tick_simple(
     p: &mut Particle,
     level: &ParticleLevel,
 ) -> Simple {
+    if matches!(p.sprite, Sprite::Named(_)) && super::native_particles::tick(p) {
+        return Simple::Done;
+    }
     match p.behaviour {
         Behaviour::Base => p.base_tick(level),
         Behaviour::RisingSpore => {

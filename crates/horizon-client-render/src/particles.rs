@@ -3628,9 +3628,6 @@ impl ParticleEngine {
     }
     #[allow(clippy::too_many_lines)]
     fn tick_particle(&mut self, p: &mut Particle, level: &ParticleLevel) {
-        if native_particles::tick(p) {
-            return;
-        }
         match p.behaviour {
             Behaviour::Base
             | Behaviour::RisingSpore
