@@ -18,6 +18,7 @@ use horizon_core::{
     random::{LegacyRandom, RandomSource},
 };
 use horizon_world::block_collision::BlockCollisionRegistry;
+pub mod native_particles;
 mod options;
 use mod_api::{ParticleBlend, ParticleProvider};
 pub use options::ParticleOptions;
@@ -847,8 +848,10 @@ impl Particle {
         }
     }
     /// `getLightCoords(a)` from the world's smooth sky and block light (0..=240).
-    #[horizon_mod_api_macros::replaceable]
     fn light_coords(&self, partial: f32, sky: u32, block: u32) -> (u32, u32) {
+        if let Some(light) = native_particles::light(self, sky, block) {
+            return light;
+        }
         let t = ((self.age as f32 + partial) / self.lifetime as f32).clamp(0.0, 1.0);
         match self.light {
             Light::World => (sky, block),
@@ -1823,7 +1826,6 @@ impl ParticleEngine {
     #[allow(clippy::too_many_lines)]
     /// `ParticleProvider.createParticle`: provider draws use the engine's
     /// random, constructor and tick draws the particle's own (seeded `seed`).
-    #[horizon_mod_api_macros::replaceable]
     fn make(
         &mut self,
         o: &ParticleOptions,
@@ -1831,6 +1833,9 @@ impl ParticleEngine {
         v: [f64; 3],
         seed: i64,
     ) -> Option<Particle> {
+        if let Some(particle) = native_particles::make(o, p, v) {
+            return Some(particle);
+        }
         use ParticleType as T;
         let ty = o.ty;
         // A native mod's SimpleParticleType: vanilla's TextureSheetParticle with
@@ -3622,8 +3627,10 @@ impl ParticleEngine {
         true
     }
     #[allow(clippy::too_many_lines)]
-    #[horizon_mod_api_macros::replaceable]
     fn tick_particle(&mut self, p: &mut Particle, level: &ParticleLevel) {
+        if native_particles::tick(p) {
+            return;
+        }
         match p.behaviour {
             Behaviour::Base
             | Behaviour::RisingSpore

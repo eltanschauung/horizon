@@ -6,6 +6,8 @@
 //!
 //! Baked geometry lives in [`crate::item_bake`]; this module decides *which*
 //! model, tints, foil and transformation each layer gets.
+/// Native item model presentation overrides.
+pub mod native_model;
 use crate::{
     json::{DecodeError, error as err},
     math::{Mat4, normalize_quaternion, quaternion_from_axis_angle},
@@ -1432,8 +1434,10 @@ impl Resolve<'_> {
     fn component(&self, key: &str) -> Option<&Value> {
         self.components.get(key)
     }
-    #[horizon_mod_api_macros::replaceable]
     fn has_foil(&self) -> bool {
+        if let Some(foil) = native_model::foil(&self.components) {
+            return foil;
+        }
         if let Some(v) = self.component("minecraft:enchantment_glint_override") {
             return v.as_bool().unwrap_or(false);
         }

@@ -3,6 +3,7 @@
 //! powder snow's block-inside effects and freezing. Entity lifecycle, other
 //! block-inside effects and audiovisual event consumers remain separate work.
 mod player_init;
+pub mod native_motion;
 use crate::{
     Result, assets::Assets, collisions::SceneCollisions, living_attributes::attribute_error,
     world::World,
@@ -1091,12 +1092,12 @@ impl MotionWorld<'_, '_, '_> {
         self.fluid_base_tick()?;
         self.player_movement_tick_with_fluids(direction, jumping)
     }
-    #[horizon_mod_api_macros::replaceable]
     fn player_movement_tick_with_fluids(
         &mut self,
         direction: [f32; 2],
         jumping: bool,
     ) -> Result<()> {
+        native_motion::player_input(self, jumping);
         // Entity.baseTick
         self.player.was_in_powder_snow = self.player.in_powder_snow;
         self.player.in_powder_snow = false;
@@ -1450,8 +1451,8 @@ impl MotionWorld<'_, '_, '_> {
     /// is what a hurt sends the player (`ServerEntity.sendChanges`), and
     /// what the next knockback starts from; the client's next move places
     /// the player.
-    #[horizon_mod_api_macros::replaceable]
     pub fn server_travel(&mut self) -> Result<()> {
+        native_motion::server_travel(self);
         let p = &mut *self.player;
         let (position, ground, collision) = (p.position, p.ground, p.collision);
         let (history, fall_distance, steps) = (p.history.clone(), p.fall_distance, p.steps);
@@ -1980,21 +1981,15 @@ impl MotionWorld<'_, '_, '_> {
             .cause_food_exhaustion(if self.player.sprinting { 0.2 } else { 0.05 });
         Ok(())
     }
-    /// Resolve a native glide adjustment before applying vanilla steering.
-    #[horizon_mod_api_macros::replaceable]
-    fn native_glide_gravity(&self, gravity: f64) -> f64 {
-        gravity
-    }
-
     /// LivingEntity.travelFallFlying with updateFallFlyingMovement.
-    #[horizon_mod_api_macros::replaceable]
     fn travel_fall_flying(&mut self, gate: &mut MoveGate) -> Result<()> {
         let v = self.player.velocity;
         let move_h = (v.x * v.x + v.z * v.z).sqrt();
         let gravity = living_motion::effective_gravity(self)?;
-        let gravity = self.native_glide_gravity(gravity);
-        self.player.velocity = fall_flying_movement(v, self.player.pitch, self.player.yaw, gravity);
-        let movement = self.player.velocity;
+        let gravity = native_motion::glide_gravity(self, gravity);
+        let velocity = fall_flying_movement(v, self.player.pitch, self.player.yaw, gravity);
+        let movement = native_motion::glide_velocity(self, velocity);
+        self.player.velocity = movement;
         self.move_self(gate, movement)?;
         // LivingEntity.handleFallFlyingCollisions: the fall-damage sound plays
         // on both sides (a glider's own travel is client-side, and the sound
