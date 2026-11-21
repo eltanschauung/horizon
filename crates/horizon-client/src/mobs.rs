@@ -166,7 +166,6 @@ impl StoredEffect {
 }
 
 use crate::{
-    blocks::BlockFacts,
     health::{DamageContainer, DamageLevel, Reduction},
     mesher::Vertex,
     world::World,
@@ -176,6 +175,7 @@ use horizon_core::{
     geometry::{Aabb, Vec3},
     random::{EntityRandom, LegacyRandom, RandomSource},
 };
+use horizon_items::blocks::BlockFacts;
 use horizon_world::block_collision::BlockCollisionRegistry;
 use horizon_world::native_load_context::LoopContext;
 use serde_json::Value;

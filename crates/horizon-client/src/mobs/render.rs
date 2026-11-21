@@ -2,8 +2,9 @@
 //! variant/baby model and texture selection, setupRotations, per-species
 //! scale, and extra layers (sheep wool, spider eyes, drowned/stray outer
 //! layers, villager overlays, collars...).
+use super::ModelNormals;
 use super::{
-    Mob, MobData, ModelNormals, Part, Species,
+    Mob, MobData, Part, Species,
     anim::{self, Poses},
     living::wrap,
 };
@@ -2063,8 +2064,23 @@ fn report_unknown_hidden_part(kind: &str, name: &str) {
     }
 }
 
+/// Render character-specific geometry using the same light and visibility as the body.
 #[allow(clippy::too_many_arguments)]
 #[horizon_mod_api_macros::replaceable]
+fn render_character_details(
+    m: &Mob,
+    alpha: f32,
+    base: glam::Mat4,
+    atlas: Atlas,
+    light: u32,
+    data: &MobData,
+    paint: Option<u32>,
+    out: &mut Vec<Vertex>,
+) {
+    let _ = (m, alpha, base, atlas, light, data, paint, out);
+}
+
+#[allow(clippy::too_many_arguments)]
 fn render_visible(
     m: &Mob,
     alpha: f32,
@@ -2080,6 +2096,7 @@ fn render_visible(
     out: &mut Vec<Vertex>,
     skin: Option<&mut super::skin::Skin>,
 ) {
+    render_character_details(m, alpha, base, atlas, light, data, paint, out);
     // The armour is a layer: none for a spectator.
     let extra = if layers_shown(m) { extra } else { &[] };
     let overlay = u32::from(red_overlay(m));
