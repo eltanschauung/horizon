@@ -391,9 +391,17 @@ pub struct PlayerEffects {
     pub changes: u32,
 }
 impl PlayerEffects {
-    #[horizon_mod_api_macros::replaceable]
     pub fn get(&self, id: &str) -> Option<&EffectInstance> {
+        if let Some(effect) = self.native_effect_index(id).and_then(|index| self.list.get(index)) {
+            return Some(effect);
+        }
         self.list.iter().find(|e| e.id == id)
+    }
+
+    /// An active mod may resolve a visual effect to an instance already in the list.
+    #[horizon_mod_api_macros::replaceable]
+    fn native_effect_index(&self, _id: &str) -> Option<usize> {
+        None
     }
     /// Read by the registry identity already resolved at creation, without comparing names.
     pub fn get_registered(&self, index: usize) -> Option<&EffectInstance> {
