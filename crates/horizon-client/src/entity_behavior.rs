@@ -22,4 +22,9 @@ pub fn protect_dropped_item(_item: &str) -> bool {
 
 /// Lets a custom entity keep externally driven motion while its vanilla AI is disabled.
 #[horizon_mod_api_macros::replaceable]
-pub fn no_ai_travel(_mob: &mut Mob, _world: &MobWorld<'_>, _events: &mut Vec<crate::mobs::MobEvent>) {}
+pub fn no_ai_travel(
+    _mob: &mut Mob,
+    _world: &MobWorld<'_>,
+    _level: &mut crate::health::DamageLevel<'_>,
+    _events: &mut Vec<crate::mobs::MobEvent>,
+) {}

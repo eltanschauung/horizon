@@ -1201,7 +1201,7 @@ fn ai_and_finish_tick(
         // pushEntities still runs, so a NoAI mob pushes what it overlaps
         // (and is pushed back by its own push).
         drop_tiny_motion(m);
-        crate::entity_behavior::no_ai_travel(m, w, events);
+        crate::entity_behavior::no_ai_travel(m, w, level, events);
         push_entities(m, w, level, events);
         ageable_step(m, w, level, events);
         animal_step(m, events);
