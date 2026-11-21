@@ -46,7 +46,10 @@ fn engine_only_installation_has_no_mod_declarations_and_needs_no_mod_handler() {
     assert!(!local.has_mod_declarations());
     // A client receives the engine channel with no mod callback for it.
     let entries = accepted(&local, Some(&local.manifest));
-    assert_eq!(entries.len(), 1);
+    assert_eq!(entries.len(), engine::DECLARATIONS.len());
+    for declaration in engine::DECLARATIONS {
+        assert!(engine::is_engine(declaration.phase, declaration.id));
+    }
     assert!(local.freeze(&entries, Side::Client).is_ok());
 }
 

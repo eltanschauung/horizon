@@ -616,10 +616,13 @@ impl GameRules {
         let registry = rules.registry.clone();
         for r in registry.available_rules(rules.minecart_improvements) {
             let key = &r.name;
+            let legacy_key = match r.name.as_str() {
+                // Fork releases before the SDK stored this mod's world rule without a namespace.
+                "horizon_old_combat_mod:old_combat" => Some("old_combat"),
+                other => other.strip_prefix("minecraft:"),
+            };
             let value = data.get(&key.as_str().into()).or_else(|| {
-                r.name
-                    .strip_prefix("minecraft:")
-                    .and_then(|bare| data.get(&bare.into()))
+                legacy_key.and_then(|bare| data.get(&bare.into()))
             });
             match (r.default, value) {
                 (Value::Bool(_), Some(Tag::Byte(v))) => {
@@ -631,7 +634,7 @@ impl GameRules {
                 _ => {}
             }
             rules.unknown.remove(&key.as_str().into());
-            if let Some(bare) = r.name.strip_prefix("minecraft:") {
+            if let Some(bare) = legacy_key {
                 rules.unknown.remove(&bare.into());
             }
         }
@@ -709,6 +712,32 @@ mod tests {
             Tag::compound([("data", Tag::compound([("example:cap", Tag::Int(70))]))]);
         let loaded = GameRules::from_nbt_with_registry(&out_of_range, &[], registry);
         assert_eq!(loaded.int_slot(slot), Some(8));
+    }
+
+    #[test]
+    fn old_combat_rule_keeps_legacy_world_values() {
+        const NAME: &str = "horizon_old_combat_mod:old_combat";
+        let registry = Arc::new(RuleRegistry::with_mod_rules(&[], &[Rule {
+            name: NAME.into(),
+            category: "minecraft:player".into(),
+            default: Value::Bool(true),
+            min: 0,
+            max: 0,
+        }]).unwrap());
+        let legacy = Tag::compound([("data", Tag::compound([("old_combat", Tag::Byte(0))]))]);
+        let rules = GameRules::from_nbt_with_registry(&legacy, &[], registry.clone());
+        assert_eq!(rules.get(NAME), Some(Value::Bool(false)));
+        let saved = rules.to_nbt().tag;
+        let data = saved.get("data").unwrap();
+        assert_eq!(data.get(NAME), Some(&Tag::Byte(0)));
+        assert_eq!(data.get("old_combat"), None);
+
+        let both = Tag::compound([("data", Tag::compound([
+            ("old_combat", Tag::Byte(0)),
+            (NAME, Tag::Byte(1)),
+        ]))]);
+        let rules = GameRules::from_nbt_with_registry(&both, &[], registry);
+        assert_eq!(rules.get(NAME), Some(Value::Bool(true)));
     }
 
     #[test]
