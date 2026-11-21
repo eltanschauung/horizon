@@ -5,7 +5,7 @@
 mod player_init;
 pub mod native_motion;
 use crate::{
-    Result, assets::Assets, collisions::SceneCollisions, living_attributes::attribute_error,
+    Result, assets::Assets, collisions::SceneCollisions,
     world::World,
 };
 use crate::living_attributes::attribute_error;
