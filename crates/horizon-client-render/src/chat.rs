@@ -545,10 +545,19 @@ impl Chat {
             .enumerate()
         {
             if index == 0 {
-                let fields = ["lunatic_sender", "lunatic_skin"]
+                let mut fields: Vec<_> = ["lunatic_sender", "lunatic_skin"]
                     .into_iter()
                     .filter_map(|key| identity.get(key).cloned().map(|v| (key.to_owned(), v)))
                     .collect();
+                if message.source == ChatSource::Player {
+                    let speaker = whole
+                        .strip_prefix('<')
+                        .and_then(|message| message.split_once('>'))
+                        .or_else(|| whole.split_once(" : "));
+                    if let Some((speaker, _)) = speaker.filter(|(name, _)| !name.is_empty()) {
+                        fields.push(("horizon_chat_author".into(), speaker.into()));
+                    }
+                }
                 line = line.with_component_fields(fields);
             }
             count += 1;
@@ -996,6 +1005,20 @@ impl Chat {
         focused: bool,
         offset: [f32; 2],
     ) {
+        self.draw_at_with(batch, atlas, ticks, focused, offset, |_| {});
+    }
+
+    /// Draw chat with optional additions to the message layout, in its own coordinate system.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_at_with(
+        &self,
+        batch: &mut HudBatch,
+        atlas: &HudAtlas,
+        ticks: f32,
+        focused: bool,
+        offset: [f32; 2],
+        decorate: impl FnOnce(&mut Vec<GuiDraw>),
+    ) {
         let paint = |batch: &mut HudBatch, draws: Vec<GuiDraw>| {
             if offset == [0.0; 2] {
                 hud_layout::paint(batch, atlas, &draws);
@@ -1007,7 +1030,9 @@ impl Chat {
                 hud_layout::paint(batch, atlas, &moved);
             }
         };
-        paint(batch, self.layout(batch.height as i32, ticks, focused));
+        let mut messages = self.layout(batch.height as i32, ticks, focused);
+        decorate(&mut messages);
+        paint(batch, messages);
         let restricted = focused && self.abilities.any_restriction();
         if restricted {
             paint(

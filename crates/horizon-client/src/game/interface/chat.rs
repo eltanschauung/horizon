@@ -1718,8 +1718,14 @@ impl Game<'_> {
         let offset = [(x - home_x) as f32, (y - home_y) as f32];
         self.ui
             .chat
-            .draw_at(batch, &self.gui.atlas, now, focused, offset);
+            .draw_at_with(batch, &self.gui.atlas, now, focused, offset, |draws| {
+                self.decorate_chat_lines(draws);
+            });
     }
+
+    /// A native package can decorate the extracted chat rows before the HUD paints them.
+    #[horizon_mod_api_macros::replaceable]
+    fn decorate_chat_lines(&self, _draws: &mut Vec<horizon_client::hud_layout::GuiDraw>) {}
     /// `HoverEvent.EntityTooltipInfo.getTooltipLines`: the name when the
     /// event has one, the entity type and the UUID.
     fn entity_tooltip_lines(entity: &serde_json::Value) -> Vec<(Text, u32)> {
