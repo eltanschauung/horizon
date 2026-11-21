@@ -7,7 +7,8 @@ use horizon_world::{
     living_fluid::{LivingFluidWorld, TravelFluidTag},
 };
 impl MotionWorld<'_, '_, '_> {
-    pub(super) fn environment_hurt(&mut self, source: &str, damage: f32) -> Result<()> {
+    #[doc(hidden)]
+    pub fn environment_hurt(&mut self, source: &str, damage: f32) -> Result<()> {
         if self.player.invulnerable || self.player.spectator {
             return Ok(());
         }

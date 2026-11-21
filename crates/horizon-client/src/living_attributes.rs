@@ -28,7 +28,8 @@ use {
 /// An entity's attribute instances, as a player has them.
 pub type Live = LiveAttributes<Box<dyn Identities>>;
 
-pub(crate) fn attribute_error(error: impl fmt::Debug) -> io::Error {
+#[doc(hidden)]
+pub fn attribute_error(error: impl fmt::Debug) -> io::Error {
     io::Error::other(format!("movement attribute: {error:?}"))
 }
 
