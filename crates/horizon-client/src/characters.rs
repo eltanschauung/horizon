@@ -195,6 +195,7 @@ impl From<CharacterDefinition> for Character {
 
 impl Character {
     /// Character renderers may replace a model while preserving its posed bones.
+    #[horizon_mod_api_macros::replaceable]
     pub fn presentation_model(
         &self,
         _model: &crate::mobs::Part,

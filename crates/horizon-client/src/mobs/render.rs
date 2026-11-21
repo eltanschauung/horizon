@@ -2064,6 +2064,7 @@ fn report_unknown_hidden_part(kind: &str, name: &str) {
 }
 
 #[allow(clippy::too_many_arguments)]
+#[horizon_mod_api_macros::replaceable]
 fn render_visible(
     m: &Mob,
     alpha: f32,

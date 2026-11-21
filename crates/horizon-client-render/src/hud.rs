@@ -895,6 +895,7 @@ impl HudAtlas {
     /// renderer made again (another window, a lost device, another graphics
     /// API). They are compressed on a thread of their own; `pixels()` waits
     /// for it.
+    #[horizon_mod_api_macros::replaceable]
     pub fn pack_pixels(&mut self) {
         if self.pixels.is_empty() || self.packed.is_some() {
             return;

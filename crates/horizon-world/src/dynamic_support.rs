@@ -49,6 +49,7 @@ enum Kind {
 impl DynamicSupport {
     /// Select behavior from a validated registry descriptor. None requests a
     /// different implementation (usually the immutable cached-support branch).
+    #[horizon_mod_api_macros::replaceable]
     pub fn from_state(state: &BlockState) -> io::Result<Option<DynamicSupport>> {
         let property = |name: &str| {
             state
