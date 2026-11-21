@@ -1036,8 +1036,10 @@ pub fn generate(
     for module in &extras.modules {
         match support_module(&source, module) {
             Ok((path, tokens)) => {
-                let mut node = trees.entry("horizon_client".to_owned()).or_default();
-                for segment in path.split("::").skip(1) {
+                let mut segments = path.split("::");
+                let source_crate = segments.next().expect("a module's crate");
+                let mut node = trees.entry(source_crate.to_owned()).or_default();
+                for segment in segments {
                     node = node.children.entry(segment.to_owned()).or_default();
                 }
                 node.own.insert(module.name.clone());
@@ -1612,8 +1614,8 @@ fn support_module(
         .ok_or((
             "E_MIXIN_MODULE_DESTINATION",
             format!(
-                "{} is not a file of the game crate (`horizon_client`); a support module goes \
-                 into one of its files",
+                "{} is not an indexed game source file; a support module goes \
+                 into the game crate or a lower crate with replacement slots",
                 module.file
             ),
         ))?;
@@ -2186,6 +2188,29 @@ mod tests {
         assert!(crate_.patched.iter().any(|p| {
             p.id.starts_with("horizon_patch_client_lib::clock::<FixedStep as")
         }));
+    }
+
+    #[test]
+    fn support_module_stays_in_its_lower_crate() {
+        let extras = Extras {
+            modules: vec![SupportModule {
+                id: "clock-support".into(),
+                file: "crates/horizon-client/src/clock.rs".into(),
+                name: "clock_support".into(),
+                text: "pub fn ticks() -> usize { 42 }".into(),
+                public: false,
+            }],
+            ..Extras::default()
+        };
+        let result = generate_here(
+            &["horizon_client_lib::clock::FixedStep::advance".into()],
+            &extras,
+        )
+        .unwrap();
+        assert_eq!(result.libs.len(), 1);
+        let (name, source) = &result.libs[0];
+        assert_eq!(name, "horizon_patch_client_lib");
+        assert!(source.contains("pub(crate) mod clock_support"));
     }
 
     #[test]
