@@ -732,8 +732,9 @@ pub const DYE_COLORS: [&str; 16] = [
 /// the vanilla entity types a mod's type may copy: thrown item
 /// projectiles (`ThrowableItemProjectile`), then living mobs
 /// ([`LIVING_TEMPLATES`]).
-pub const ENTITY_TEMPLATES: [&str; 7] = [
+pub const ENTITY_TEMPLATES: [&str; 8] = [
     "minecraft:snowball",
+    "minecraft:allay",
     "minecraft:cat",
     "minecraft:parrot",
     "minecraft:villager",
@@ -749,7 +750,8 @@ pub const ENTITY_TEMPLATES: [&str; 7] = [
 /// which a native mod can replace (`register_goals`); a villager's is its
 /// brain. The cat, the parrot and the wolf are the tameable ones
 /// (`TamableAnimal`): a type copying one tames, sits and follows its owner.
-pub const LIVING_TEMPLATES: [&str; 6] = [
+pub const LIVING_TEMPLATES: [&str; 7] = [
+    "minecraft:allay",
     "minecraft:cat",
     "minecraft:parrot",
     "minecraft:villager",

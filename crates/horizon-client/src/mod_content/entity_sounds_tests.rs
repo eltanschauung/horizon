@@ -10,6 +10,8 @@ fn a_living_mod_types_row_is_its_templates_with_its_attributes() {
         template: "minecraft:zombie".into(),
         shadow_radius: Some(0.2),
         shadow_strength: Some(0.6),
+        body_size: Some([0.75, 1.5, 1.25]),
+        hostile: true,
         item: None,
         damage: 0.0,
         sounds: Default::default(),
@@ -22,6 +24,10 @@ fn a_living_mod_types_row_is_its_templates_with_its_attributes() {
     let mut expected: serde_json::Value = serde_json::from_str(zombie).unwrap();
     expected["attributes"]["minecraft:max_health"] = 40.0.into();
     expected["shadow_radius"] = serde_json::json!(0.2);
+    expected["width"] = serde_json::json!(0.75);
+    expected["height"] = serde_json::json!(1.5);
+    expected["eye_height"] = serde_json::json!(1.25);
+    expected["category"] = serde_json::json!("monster");
     expected["shadow_strength"] = serde_json::json!(0.6);
     expected["template"] = "minecraft:zombie".into();
     expected["passenger_attachments"] = serde_json::json!([[0.0, 0.7, -0.1]]);

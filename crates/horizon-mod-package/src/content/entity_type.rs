@@ -19,6 +19,12 @@ pub struct EntityType {
     pub shadow_radius: Option<f32>,
     #[serde(default, deserialize_with = "deserialize_shadow")]
     pub shadow_strength: Option<f32>,
+    /// Optional width, height and standing eye height, in blocks.
+    #[serde(default, deserialize_with = "deserialize_body_size")]
+    pub body_size: Option<[f32; 3]>,
+    /// Treat a living template as a monster for targeting and spawn rules.
+    #[serde(default)]
+    pub hostile: bool,
     /// a thrown type's: one of the mod's own items, which throws it. A
     /// living type has none.
     #[serde(default)]
@@ -92,6 +98,9 @@ impl EntityType {
 
 impl EntityType {
     pub(super) fn validate_thrown_attachments_and_sounds(&self, name: &str) -> Result<(), String> {
+        if self.body_size.is_some() || self.hostile {
+            return Err(format!("{name}: only a living type has body or category overrides"));
+        }
         if self.shadow_radius.is_some() || self.shadow_strength.is_some() {
             return Err(format!(
                 "{name}: only a living type has renderer shadow overrides"
@@ -111,6 +120,16 @@ impl EntityType {
         }
         Ok(())
     }
+}
+
+fn deserialize_body_size<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<[f32; 3]>, D::Error> {
+    let size = <[f32; 3]>::deserialize(d)?;
+    if size.iter().any(|n| !n.is_finite() || *n <= 0.0 || *n > 64.0) || size[2] > size[1] {
+        return Err(serde::de::Error::custom("invalid width, height or eye height"));
+    }
+    Ok(Some(size))
 }
 
 fn deserialize_shadow<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<f32>, D::Error> {
