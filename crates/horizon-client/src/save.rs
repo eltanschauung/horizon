@@ -763,11 +763,20 @@ pub fn decode_block_entity_for_block(
     valid.then_some(decoded)
 }
 
-#[horizon_mod_api_macros::replaceable]
+/// Saved native block entity identity normalization.
+pub mod native_block_entity_type {
+    use horizon_core::nbt::Tag;
+
+    #[horizon_mod_api_macros::replaceable]
+    pub(super) fn read(tag: &Tag) -> Option<String> {
+        horizon_client_core::nbt_value::text(tag.get("id"))
+    }
+}
+
 pub fn decode_block_entity(tag: &Tag) -> Option<((i32, i32, i32), crate::containers::BlockEntity)> {
     use crate::containers::BlockEntity;
     let int = |k: &str| tag.get(k).and_then(crate::nbt_path::int_value); // getIntOr
-    let id = text(tag.get("id"))?;
+    let id = native_block_entity_type::read(tag)?;
     let pos = (int("x")?, int("y")?, int("z")?);
     if id.contains(':') && !id.starts_with("minecraft:") {
         return Some((

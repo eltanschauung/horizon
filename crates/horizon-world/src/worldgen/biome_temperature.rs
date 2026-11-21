@@ -97,10 +97,9 @@ impl BiomeTemperatureSettings {
         })
     }
 
-    #[horizon_mod_api_macros::replaceable]
     pub fn height_adjusted(&self, position: BlockPos, sea_level: i32) -> f32 {
         let base = self.modifier.modify(position, self.base_temperature);
-        let start = sea_level.wrapping_add(17);
+        let start = super::native_terrain::temperature_start(sea_level.wrapping_add(17));
         if position.y > start {
             let variation = noises().height.get2(
                 f64::from(position.x as f32 / 8.0),

@@ -434,7 +434,6 @@ pub const HORIZONTAL: [Direction; 4] = [
 pub fn random_horizontal(random: &mut impl RandomSource) -> Direction {
     HORIZONTAL[random.next_int_bound(4).unwrap_or(0) as usize]
 }
-#[horizon_mod_api_macros::replaceable]
 pub fn make_bounding_box(
     x: i32,
     y: i32,
@@ -444,6 +443,7 @@ pub fn make_bounding_box(
     height: i32,
     depth: i32,
 ) -> BoundingBox {
+    let y = crate::worldgen::native_terrain::structure_start_y(y, width, height, depth);
     if matches!(direction, Direction::North | Direction::South) {
         BoundingBox::new([x, y, z], [x + width - 1, y + height - 1, z + depth - 1])
     } else {

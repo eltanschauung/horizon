@@ -371,8 +371,10 @@ impl WorldgenOverrides {
     /// preset's, whose type has the level's name), a pack's file for that
     /// type over the vanilla one. `None` when the packs give it a range the
     /// codec refuses.
-    #[horizon_mod_api_macros::replaceable]
     pub fn level_height(&self, level: &str) -> Option<LevelHeight> {
+        if let Some(height) = super::native_terrain::level_height(self, level) {
+            return Some(height);
+        }
         let none = BTreeMap::new();
         let types = self.entries.get(DIMENSION_TYPES).unwrap_or(&none);
         let ty = match self.entries.get(DIMENSIONS).and_then(|d| d.get(level)) {
@@ -514,12 +516,12 @@ impl WorldgenOverrides {
         dropped
     }
     /// `bundle` with the packs' entries over it.
-    #[horizon_mod_api_macros::replaceable]
     pub fn apply(
         &self,
         bundle: &str,
         mut base: BTreeMap<String, String>,
     ) -> BTreeMap<String, String> {
+        super::native_terrain::registry_defaults(self, bundle, &mut base);
         for (id, json) in self.entries(bundle) {
             base.insert(id.to_owned(), json.to_owned());
         }
