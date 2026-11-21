@@ -724,6 +724,19 @@ fn glint_padding(filtering: i32, bit: i32) -> usize {
     }
 }
 
+/// A resource-backed frame for the first model layer of an item in use.
+/// The caller verifies that the replacement is an available generated model.
+#[horizon_mod_api_macros::replaceable]
+fn item_use_animation_frame(
+    item: &str,
+    model: &str,
+    elapsed_ticks: i32,
+    has_food: bool,
+) -> Option<String> {
+    let _ = (item, model, elapsed_ticks, has_food);
+    None
+}
+
 impl ItemRenderer {
     /// Prepare GUI glint after the device exists; propagate packing failures to pack rollback.
     pub fn prepare_glint_atlas(&self, maximum: u32, filtering: (i32, i32)) -> crate::Result<()> {
@@ -1026,17 +1039,53 @@ impl ItemRenderer {
         };
         let resolved = self.models.resolve(stack, &ctx, env);
         let mut animated = false;
+        let use_frame = owner
+            .filter(|owner| owner.using_this_item && rule.is_none())
+            .and_then(|owner| {
+                let LayerContent::Model { model } = &resolved.layers.first()?.content else {
+                    return None;
+                };
+                if !resolved
+                    .layers
+                    .iter()
+                    .all(|layer| matches!(layer.content, LayerContent::Model { .. }))
+                {
+                    return None;
+                }
+                let frame = item_use_animation_frame(
+                    &stack.item,
+                    model,
+                    owner.use_duration.saturating_sub(owner.use_item_remaining_ticks),
+                    self.models.components_view(stack).contains_key("minecraft:food"),
+                )?;
+                if !self
+                    .library
+                    .resolve(&frame)
+                    .is_ok_and(|model| model.uses_item_generator())
+                {
+                    return None;
+                }
+                let baked = self.bake(&frame);
+                if baked.quads.is_empty() || self.sprites.mask(&baked.particle.sprite).is_none() {
+                    return None;
+                }
+                Some((frame, baked))
+            });
         let mut layers = Vec::with_capacity(resolved.layers.len());
-        for layer in resolved.layers {
+        for (index, layer) in resolved.layers.into_iter().enumerate() {
             let (geometry, baked, extents) = match layer.content {
                 LayerContent::Model { model } => {
-                    let (baked, extents) = rule
-                        .and_then(|rule| self.cit_layer(rule, &model))
-                        .unwrap_or_else(|| {
-                            let baked = self.bake(&model);
-                            let extents = self.quad_extents(&model, &baked);
-                            (baked, extents)
-                        });
+                    let frame = use_frame.as_ref().filter(|_| index == 0);
+                    let (baked, extents) = if let Some((frame, baked)) = frame {
+                        (baked.clone(), self.quad_extents(frame, baked))
+                    } else {
+                        rule.and_then(|rule| self.cit_layer(rule, &model))
+                            .unwrap_or_else(|| {
+                                let baked = self.bake(&model);
+                                let extents = self.quad_extents(&model, &baked);
+                                (baked, extents)
+                            })
+                    };
                     (LayerGeometry::Quads(baked.clone()), baked, extents)
                 }
                 LayerContent::Sprite { sprite, mask } => {
