@@ -103,6 +103,9 @@ horizon_world::registry::BlockRegistry::default_state
 horizon_client_lib::lan::playerdata::uuid_ints
 horizon_client_lib::lan::hub::Hub::guest
 
+# Dynamic support validates the properties of native plant states.
+horizon_world::compression::invalid
+
 # Fork terrain extensions: the Gensokyo template and biome placement algorithms.
 horizon_world::worldgen::block_feature::FeatureBlockBindings
 horizon_world::worldgen::block_feature::FeatureBlockBindings::tree_blocks

@@ -1,7 +1,8 @@
 //! 2D overlay: one atlas holding GUI sprites, the bitmap font, item and block
 //! textures, and a batch of textured quads in GUI pixels (vanilla's automatic
 //! GUI scale is applied when drawing).
-use crate::{Result, resource_source::ResourceSource};
+use crate::Result;
+use horizon_assets::resource_source::ResourceSource;
 use horizon_assets::animation::AnimationMetadata;
 use smallvec::SmallVec;
 use std::{
