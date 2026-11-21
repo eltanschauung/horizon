@@ -4,17 +4,58 @@ on:
     inputs:
       tag:
         description: Draft release containing the frozen sdk-packages.zip
-        required: true
+        required: false
+      sdk_commit:
+        description: Full commit for an SDK build and smoke test with no publication
+        required: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: fork-friends-${{ inputs.tag }}
+  group: fork-friends-${{ inputs.tag || inputs.sdk_commit }}
   cancel-in-progress: false
 
 jobs:
+  request:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check which artifact to build
+        env:
+          SDK_COMMIT: ${{ inputs.sdk_commit }}
+        shell: bash
+        run: |
+          if [[ -n "$RELEASE_TAG" && -z "$SDK_COMMIT" ]]; then
+            exit 0
+          fi
+          [[ -z "$RELEASE_TAG" && "$SDK_COMMIT" =~ ^[a-f0-9]{40}$ ]] || {
+            echo 'Supply a draft tag or a full SDK commit.' >&2
+            exit 1
+          }
+
+  sdk-build:
+    needs: request
+    if: inputs.sdk_commit != ''
+    uses: ./.github/workflows/prebuilt-game-build.yml
+    with:
+      commit: ${{ inputs.sdk_commit }}
+      dry_run: true
+
+  sdk-index:
+    needs: sdk-build
+    if: needs.sdk-build.outputs.needed == 'true'
+    permissions:
+      contents: write
+      actions: read
+      issues: read
+    uses: ./.github/workflows/sdk-publish.yml
+    with:
+      commit: ${{ inputs.sdk_commit }}
+      publish: false
+
   build:
+    needs: request
+    if: inputs.tag != ''
     strategy:
       fail-fast: false
       matrix:

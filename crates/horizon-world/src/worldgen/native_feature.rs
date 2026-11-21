@@ -69,6 +69,7 @@ pub trait NativeAlgorithm: std::fmt::Debug + Send + Sync {
 #[derive(Clone, Debug)]
 pub struct NativeFeature(pub Arc<dyn NativeAlgorithm>);
 /// Native bundles inject their own decoder here; a plain game has no extension algorithms.
+#[horizon_mod_api_macros::replaceable]
 pub fn decode(
     kind: &str,
     json: &str,

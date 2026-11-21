@@ -23,6 +23,7 @@ pub trait NativePlacement: std::fmt::Debug + Send + Sync {
         position: [i32; 3],
     ) -> Result<Vec<[i32; 3]>, PlacementQueryError>;
 }
+#[horizon_mod_api_macros::replaceable]
 pub fn decode_native_placement(
     json: &str,
 ) -> Option<Result<std::sync::Arc<dyn NativePlacement>, DecodeError>> {
