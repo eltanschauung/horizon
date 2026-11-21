@@ -880,6 +880,10 @@ impl Game<'_> {
                         Value::Item(hub.stack(&Some((**stack).clone()))),
                     ));
                 }
+                // Registered thrown projectiles carry their custom item components.
+                K::Thrown(_) if p.item.is_some() => {
+                    e.meta.push((8, serializer::ITEM_STACK, Value::Item(hub.stack(&p.item))));
+                }
                 // Fireball.DATA_ITEM_STACK: the item it is drawn as, which a
                 // guest has no other way of learning. A plain fire charge is
                 // the client's default and is not sent.

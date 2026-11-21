@@ -1095,11 +1095,13 @@ impl Projectile {
     /// puts the default fire charge back, anything else is kept as a single
     /// one (`copyWithCount(1)`); a kind that is no `Fireball` has no item.
     pub fn set_item(&mut self, stack: crate::items::ItemStack) {
-        if !self.kind.is_item_fireball() {
-            return;
-        }
+        let fallback = match self.kind {
+            ProjectileKind::Thrown(kind) => kind.item,
+            kind if kind.is_item_fireball() => "minecraft:fire_charge",
+            _ => return,
+        };
         let mut stack = if stack.count == 0 || &*stack.item == "minecraft:air" {
-            crate::items::ItemStack::new("minecraft:fire_charge", 1)
+            crate::items::ItemStack::new(fallback, 1)
         } else {
             stack
         };

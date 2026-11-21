@@ -5,6 +5,7 @@
 use super::{Game, commands::Target};
 use horizon_client::{
     arrows::Pickup,
+    items::ItemStack,
     lan::playerdata::{ints_uuid, uuid_ints},
     mobs::Who,
     projectiles::{OwnerFields, Projectile, ProjectileKind, Turn},
@@ -52,6 +53,30 @@ impl Game<'_> {
         self.creatures
             .projectiles
             .get(self.native_projectile_index(projectile)?)
+    }
+
+    pub(super) fn projectile_carried_item(&self, projectile: ProjectileRef) -> Option<ItemStack> {
+        let shot = self.native_projectile(projectile)?;
+        matches!(shot.kind, ProjectileKind::Thrown(_))
+            .then(|| shot.item.clone())
+            .flatten()
+    }
+
+    pub(super) fn projectile_set_carried_item(
+        &mut self,
+        projectile: ProjectileRef,
+        item: ItemStack,
+    ) -> bool {
+        let Some(index) = self.native_projectile_index(projectile) else {
+            return false;
+        };
+        if item.count == 0 || item.item.as_ref() == "minecraft:air"
+            || !matches!(self.creatures.projectiles[index].kind, ProjectileKind::Thrown(_))
+        {
+            return false;
+        }
+        self.creatures.projectiles.update(index, |shot| shot.set_item(item));
+        true
     }
 
     /// Narrows an entity to a projectile: one in the projectile list, a trident

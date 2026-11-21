@@ -62,6 +62,11 @@ pub trait ProjectilesBackend {
     #[access(WorldOnly)]
     fn projectile_owner(&self, projectile: ProjectileRef) -> Option<EntityRef>;
     /// Side: server.
+    /// The stack carried and synchronized by a registered thrown item projectile.
+    /// None for a stale handle, a different projectile kind or a missing stack.
+    #[access(WorldOnly)]
+    fn projectile_carried_item(&self, projectile: ProjectileRef) -> Option<ItemStack>;
+    /// Side: server.
     /// `AbstractArrow.pickup`, for an arrow or a mob's trident.
     #[access(WorldOnly)]
     fn projectile_pickup(&self, projectile: ProjectileRef) -> Option<ArrowPickup>;
@@ -127,6 +132,15 @@ pub trait ProjectilesBackendMut {
         by_attack: bool,
         power: [f64; 3],
     ) -> bool;
+    /// Side: server.
+    /// Replaces a registered thrown projectile's carried item. The resulting
+    /// count is one and its item components are synchronized to observers.
+    #[access(WorldOnly)]
+    fn projectile_set_carried_item(
+        &mut self,
+        projectile: ProjectileRef,
+        item: ItemStack,
+    ) -> Result<bool, StackWriteError>;
     /// Side: server.
     /// Sets `AbstractArrow.pickup`. False for a stale handle or a projectile
     /// that is not an arrow or a mob's trident.
