@@ -1761,7 +1761,7 @@ impl Entity for ItemEntity {
         ThunderHit::Item
     }
     fn ignores_explosion(&self, blast: &Blast) -> bool {
-        blast.items_ignore
+        blast.items_ignore || horizon_client::entity_behavior::protect_dropped_item(&self.stack.item)
     }
     fn explosion_eye_height(&self) -> f64 {
         0.2125

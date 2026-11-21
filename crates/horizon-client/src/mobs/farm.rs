@@ -79,7 +79,7 @@ pub fn chicken_ai_step(m: &mut Mob, _w: &MobWorld, events: &mut Vec<MobEvent>) {
 }
 /// `Chicken.aiStep`: the server's egg timer runs even when NoAI skips goals.
 pub fn chicken_egg_step(m: &mut Mob, events: &mut Vec<MobEvent>) {
-    if m.alive() && !m.is_baby() && !m.extra.jockey {
+    if m.alive() && !m.is_baby() && !m.extra.jockey && !crate::entity_behavior::suppress_chicken_eggs(m) {
         m.extra.egg_time -= 1;
         if m.extra.egg_time <= 0 {
             let pitch = (m.random.next_float() - m.random.next_float()) * 0.2 + 1.0;

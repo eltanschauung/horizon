@@ -889,6 +889,7 @@ pub fn register(m: &mut Mob) {
 }
 /// Mob.tick additions that run before the entity tick (cube/creeper fuses, puffing).
 fn pre_tick(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
+    crate::entity_behavior::before_mob_tick(m, w);
     if m.species() == Species::SulfurCube {
         // SulfurCube.tick calls tickFuse before super.tick, outside serverAiStep.
         super::sulfur_cube::tick_fuse(m, events);

@@ -4902,6 +4902,9 @@ impl Mob {
     }
     /// Mob.playSound with LivingEntity.getVoicePitch.
     pub fn voice(&mut self, event: &'static str, events: &mut Vec<MobEvent>) {
+        if crate::entity_behavior::silence_mob(self) {
+            return;
+        }
         // Java draws the pitch before `Entity.playSound` looks at isSilent, so a
         // silent entity draws it and then plays nothing.
         let pitch = self.voice_pitch();

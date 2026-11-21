@@ -519,6 +519,9 @@ impl ItemEntity {
     /// then `discard`), so what it held leaves it here. None while the item
     /// survives; the emptied stacks otherwise.
     pub fn hurt(&mut self, amount: i32) -> Option<Vec<ItemStack>> {
+        if crate::entity_behavior::protect_dropped_item(&self.stack.item) {
+            return None;
+        }
         self.health -= amount;
         if self.health > 0 {
             return None;
@@ -663,6 +666,9 @@ impl ItemEntity {
         }
         if self.velocity.subtract(step.old_velocity).length_squared() > 0.01 {
             self.needs_sync = true;
+        }
+        if crate::entity_behavior::protect_dropped_item(&self.stack.item) {
+            self.age = i16::MIN as i32;
         }
         if self.age != i16::MIN as i32 {
             self.age = self.age.wrapping_add(1);

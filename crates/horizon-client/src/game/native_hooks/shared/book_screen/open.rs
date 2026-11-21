@@ -39,32 +39,35 @@ impl Game<'_> {
     ) {
         self.clear_mod_book_placement_screen();
         self.mod_screen = None;
-        let Some(t) = target else {
+        let blockless = crate::game::menu_screens::blockless_menu_screen(menu);
+        let (block, screen) = if blockless.is_some() {
+            (menu.to_owned(), blockless)
+        } else if let Some(t) = target {
+            let block = self
+                .res
+                .facts()
+                .get(self.world.block(t.0, t.1, t.2))
+                .name
+                .to_string();
+            if block.starts_with("minecraft:") {
+                return;
+            }
+            // The last clicked block can outlive its menu. It may only supply a screen
+            // for the menu it opens itself.
+            let mut container = None;
+            self.native_block_entity_container(&block, &mut container);
+            let opens = container.and_then(|c| mod_menu(c.menu.as_deref()?).map(|(m, _)| m));
+            if opens != Some(menu) {
+                return;
+            }
+            let mut screen = mod_api::RecipeBookLayout::registered_screen(menu);
+            if screen.is_none() {
+                self.native_screen(&block, &mut screen);
+            }
+            (block, screen)
+        } else {
             return;
         };
-        let block = self
-            .res
-            .facts()
-            .get(self.world.block(t.0, t.1, t.2))
-            .name
-            .to_string();
-        if block.starts_with("minecraft:") {
-            return;
-        }
-        // Only when this is the menu the clicked block opens: `target` outlives the
-        // use that set it, so another menu opened later (a command's, another
-        // mod's) would otherwise get the last clicked machine's screen. Asked
-        // here, as the window's world has no mod containers.
-        let mut container = None;
-        self.native_block_entity_container(&block, &mut container);
-        let opens = container.and_then(|c| mod_menu(c.menu.as_deref()?).map(|(m, _)| m));
-        if opens != Some(menu) {
-            return;
-        }
-        let mut screen = mod_api::RecipeBookLayout::registered_screen(menu);
-        if screen.is_none() {
-            self.native_screen(&block, &mut screen);
-        }
         if let Some(screen) = screen {
             self.mod_screen = Some(OpenNativeScreen {
                 layout_revision: {
