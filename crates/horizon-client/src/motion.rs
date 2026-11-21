@@ -695,6 +695,7 @@ impl PlayerMotion {
         !self.spectator && !self.freeze_immune
     }
     /// What powder snow's contextual collision asks of the player.
+    #[horizon_mod_api_macros::replaceable]
     pub fn powder_snow_subject(&self) -> crate::collisions::PowderSnowSubject<'static> {
         crate::collisions::PowderSnowSubject {
             fall_distance: self.fall_distance,
@@ -1556,6 +1557,7 @@ impl MotionWorld<'_, '_, '_> {
         }
         Ok(())
     }
+    #[horizon_mod_api_macros::replaceable]
     fn effects_from_blocks(&mut self, pass: BlockPass) -> Result<()> {
         use horizon_world::entity_move::MovementRecord;
         let damage_only = pass != BlockPass::Client;

@@ -14,6 +14,7 @@ pub mod content_namespaces;
 pub mod cooldowns;
 pub mod durability;
 pub mod enchant;
+mod enchant_compatibility;
 pub mod equipment;
 pub mod firework;
 pub mod flowers;

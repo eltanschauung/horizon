@@ -20,6 +20,7 @@ impl OptionsLayout {
         (&self.widgets, self.top, self.bottom, self.content)
     }
 }
+
 impl OptionsUi {
     /// Something the page layout reads changed: make it again at the next
     /// read, once.
@@ -253,7 +254,11 @@ impl OptionsUi {
                     keybinds::all_mappings().map(|(n, _, c)| (*n, *c)).collect();
                 let query = self.settings_search.value.to_lowercase();
                 mappings.retain(|(name, _)| {
-                    query.is_empty() || lang::get(name).to_lowercase().contains(&query)
+                    crate::key_mapping_search::matches(
+                        &lang::get(name),
+                        s.keys.get(name),
+                        &query,
+                    )
                 });
                 mappings.sort_by(|a, b| {
                     let ca = CATEGORIES.iter().position(|c| *c == a.1).unwrap_or(99);

@@ -100,6 +100,7 @@ pub mod native_emissive;
 pub mod options_file;
 pub mod options_fixes;
 pub mod options_ui;
+mod key_mapping_search;
 pub mod overlay;
 pub mod pack_browser;
 pub mod pack_formats;

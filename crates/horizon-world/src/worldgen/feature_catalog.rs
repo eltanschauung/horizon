@@ -117,6 +117,7 @@ impl FeatureCatalog {
                 active: vec![],
             },
         )?;
+        let expanded = crate::worldgen_resources::expanded_feature(expanded);
         FeatureDefinition::from_catalog_json(&expanded, &self.empty_tags, blocks)
     }
     pub fn placed_feature(&self, json: &str) -> Result<PlacedFeatureDefinition, DecodeError> {
@@ -143,6 +144,7 @@ impl FeatureCatalog {
                 active: vec![],
             },
         )?;
+        let expanded = crate::worldgen_resources::expanded_feature(expanded);
         PlacedFeatureDefinition::from_catalog_json(&expanded, &self.empty_tags, blocks)
     }
     fn named(

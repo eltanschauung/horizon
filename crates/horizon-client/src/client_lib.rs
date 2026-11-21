@@ -119,6 +119,7 @@ pub mod menu;
 pub mod menu_extra_net;
 pub mod merchant;
 pub mod mobs;
+mod mob_variants;
 pub mod mod_content;
 pub mod mod_registry;
 pub mod modgen;

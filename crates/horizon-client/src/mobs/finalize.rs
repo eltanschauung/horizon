@@ -2461,7 +2461,7 @@ pub fn variant_index(s: Species, name: &str) -> u8 {
             .iter()
             .position(|v| *v == name),
     };
-    i.unwrap_or(0) as u8
+    crate::mob_variants::index(s, i.unwrap_or(0) as u8)
 }
 /// The variant data component a mob reports (`Entity.get`, e.g.
 /// `Wolf.get(DataComponents.WOLF_VARIANT)`): component id and registry entry.
@@ -2521,7 +2521,6 @@ pub fn sound_variants(s: Species) -> &'static [&'static str] {
 /// footsteps that every variant shares (not the cow's). None for a species
 /// without sound variants.
 pub fn variant_sound(m: &Mob, kind: &str) -> Option<&'static str> {
-    use std::{collections::HashMap, sync::Mutex};
     let species = m.species();
     let name = match species {
         Species::Pig => "pig",
@@ -2544,14 +2543,16 @@ pub fn variant_sound(m: &Mob, kind: &str) -> Option<&'static str> {
     } else {
         format!("entity.{name}_{variant}.{kind}")
     };
+    intern_variant_sound(crate::mob_variants::sound_id(species, kind, id))
+}
+
+fn intern_variant_sound(id: String) -> Option<&'static str> {
+    use std::{collections::HashMap, sync::Mutex};
     // A handful of ids in all: keep each one as a `&'static str`.
     static IDS: Mutex<Option<HashMap<String, &'static str>>> = Mutex::new(None);
     let mut ids = IDS.lock().ok()?;
     let ids = ids.get_or_insert_with(HashMap::new);
-    Some(
-        *ids.entry(id)
-            .or_insert_with_key(|k| Box::leak(k.clone().into_boxed_str())),
-    )
+    Some(*ids.entry(id).or_insert_with_key(|key| Box::leak(key.clone().into_boxed_str())))
 }
 /// The registry name of the game's variant index.
 pub fn variant_name(s: Species, index: u8) -> &'static str {

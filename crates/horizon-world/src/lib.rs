@@ -141,6 +141,7 @@ pub mod water_splash;
 pub mod world_movement;
 pub mod world_ray;
 pub mod worldgen;
+mod worldgen_resources;
 
 pub const DATA_VERSION: i32 = horizon_core::version::DATA_VERSION;
 

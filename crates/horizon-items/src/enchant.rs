@@ -668,7 +668,7 @@ impl Enchantments {
             return false;
         }
         let excl = |x: &str, y: &str| self.get(x).is_some_and(|e| e.exclusive.contains(y));
-        !excl(a, b) && !excl(b, a)
+        crate::enchant_compatibility::compatible(a, b, !excl(a, b) && !excl(b, a))
     }
     /// `Enchantment.getFullname` as plain text and whether it is a curse (red).
     pub fn full_name(&self, id: &str, level: u32) -> (String, bool) {

@@ -597,7 +597,7 @@ impl GeneratorData {
     /// The biome's resource JSON (climate, effects such as water/sky/foliage
     /// colors, attributes, carvers and features).
     pub fn biome_json(&self, id: BiomeId) -> &str {
-        &self.biome_json[id.0 as usize]
+        crate::worldgen_resources::biome_resource(&self.biome_json[id.0 as usize])
     }
     pub(in crate::worldgen) fn integers(&self) -> &BTreeSet<(String, String)> {
         &self.integers

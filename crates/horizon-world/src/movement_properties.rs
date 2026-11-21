@@ -107,6 +107,7 @@ impl<'r> MovementProperties<'r> {
         })
     }
     /// Bind again when tags reload; existing bindings retain their old snapshot.
+    #[horizon_mod_api_macros::replaceable]
     pub fn bind(&self, tags: &MovementTags) -> io::Result<BoundMovementProperties> {
         for name in tags
             .fences
