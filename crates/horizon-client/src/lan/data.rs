@@ -206,23 +206,6 @@ fn walk(dir: &Path, out: &mut BTreeMap<String, Value>, enchantment: bool) {
     }
 }
 
-/// Content entries join the base registry and carry their definitions even
-/// when a client acknowledges vanilla's known core pack.
-fn content_entries(resources: &Path, kind: &str, entries: &mut Vec<((String, String), Value, bool)>) {
-    let Ok(namespaces) = std::fs::read_dir(resources.join("data")) else {
-        return;
-    };
-    for namespace in namespaces.flatten() {
-        let ns = namespace.file_name().to_string_lossy().into_owned();
-        if ns == "minecraft" {
-            continue;
-        }
-        let mut found = BTreeMap::new();
-        walk(&namespace.path().join(kind), &mut found, kind == "enchantment");
-        entries.extend(found.into_iter().map(|(p, v)| ((ns.clone(), p), v, true)));
-    }
-}
-
 /// A synchronized registry's entries from the world's data packs (`<dir>/`
 /// files, the top pack's for each id) over the game's own. Each entry is
 /// ((namespace, path), JSON, from a pack); `file_order` sorts them.

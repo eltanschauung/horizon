@@ -222,17 +222,4 @@ impl Game<'_> {
         self.draw_pvp_hud(batch, corners);
         self.native_render_gui_post(batch, corners);
     }
-    /// The height the status effect icons take at the top right
-    /// (`Hud.extractEffects`: beneficial at y 1, harmful at y 26).
-    fn effect_rows_height(&self) -> f32 {
-        let effects = &self.potions.effects.list;
-        if effects.is_empty() || self.screen != Screen::Playing || self.pvp_effects_shown() {
-            return 0.0;
-        }
-        let harmful = effects.iter().any(|e| {
-            horizon_client::brewing::effect(e.id)
-                .is_some_and(|d| d.category != horizon_client::brewing::Category::Beneficial)
-        });
-        if harmful { 50.0 } else { 25.0 }
-    }
 }

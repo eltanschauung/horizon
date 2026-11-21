@@ -218,6 +218,7 @@ impl Hub {
     /// (`HostEvent::ChatSubmitted`) is relayed when the game reaches it, so
     /// the announcement then waits behind it: clients would check that
     /// message against the new session and mark the sender's chain broken.
+    #[cfg(test)]
     pub(super) fn announce_chat_session(
         &mut self,
         update: play::PlayerInfoUpdate,

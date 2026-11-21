@@ -51,20 +51,6 @@ fn ingredient(v: &Value) -> Option<Ingredient> {
     }
 }
 
-/// Every recipe file, by recipe id (the registry's order): read through
-/// `json_folder`, so a load holding the folder shares one read of it. A file
-/// that can't be read or doesn't parse is left out.
-fn recipes(dir: &Path, namespace: &str, out: &mut BTreeMap<String, Value>) {
-    let Ok(folder) = horizon_world::json_folder::read(dir) else {
-        return;
-    };
-    for file in &folder.files {
-        if let Ok(v) = serde_json::from_slice(file.bytes().unwrap_or_default()) {
-            out.insert(format!("{namespace}:{}", file.name), v);
-        }
-    }
-}
-
 /// Horizon's optional recipe viewer transfer. An empty clientbound payload
 /// advertises support. Requests carry a menu id and resource location.
 pub const TRANSFER_CHANNEL: &str = "horizon:recipe_transfer";

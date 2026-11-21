@@ -19,7 +19,6 @@ pub(super) struct State {
     saved: Option<Saved>,
     resolved: BTreeMap<u128, Character>,
     account_names: BTreeMap<String,u128>,
-    legacy_requests: BTreeMap<u128, Vec<u8>>,
     started: Instant,
     reported: Option<Rejection>,
 }
@@ -31,7 +30,6 @@ impl Default for State {
             saved: None,
             resolved: BTreeMap::new(),
             account_names: BTreeMap::new(),
-            legacy_requests: BTreeMap::new(),
             started: Instant::now(),
             reported: None,
         }
@@ -186,26 +184,6 @@ impl Game<'_> {
             self.remember_character(uuid);
         }
     }
-    pub(super) fn character_from_legacy_client(&mut self, uuid: u128, bytes: &[u8]) {
-        if bytes.len() > 256
-            || self
-                .character_sync
-                .legacy_requests
-                .get(&uuid)
-                .is_some_and(|old| old == bytes)
-        {
-            return;
-        }
-        self.character_sync
-            .legacy_requests
-            .insert(uuid, bytes.to_vec());
-        let Some(index) = self.pack.character_catalog.resolve_legacy(bytes) else {
-            return;
-        };
-        if self.character_sync.server.select_legacy(uuid, index) {
-            self.remember_character(uuid);
-        }
-    }
     fn resolve_character_name(&mut self, uuid:u128) {
         let Some(mut c) = self.character_sync.server.peers.get(&uuid).and_then(|i|self.pack.character_catalog.get(*i)).cloned() else{return;};
         let path=std::path::Path::new("character-name-reservations.json");
@@ -308,7 +286,6 @@ impl Game<'_> {
     }
     pub(super) fn character_logged_out(&mut self, uuid: u128) {
         self.character_sync.server.leave(uuid);
-        self.character_sync.legacy_requests.remove(&uuid);
     }
     pub(super) fn character_from_server(&mut self, bytes: &[u8]) {
         if let Ok(update) = Update::decode(bytes) {
@@ -325,7 +302,6 @@ impl Game<'_> {
             .server
             .reload(&old, &self.pack.character_catalog);
         self.character_sync.client.reload();
-        self.character_sync.legacy_requests.clear();
         self.character_sync.reported = None;
         self.character_sync.resolved.clear();
         for uuid in self.character_sync.server.peers.keys().copied().collect::<Vec<_>>() {self.resolve_character_name(uuid);}

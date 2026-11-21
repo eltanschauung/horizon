@@ -666,10 +666,6 @@ impl Game<'_> {
             .clone()
             .or_else(|| self.mob_main_hand_name(e.attacker.as_ref()?.0))
     }
-    /// `CombatTracker.getDeathMessage`.
-    pub(super) fn combat_death_message(&mut self) -> Text {
-        self.combat_death_message_for(self.player_display_text())
-    }
     /// `CombatTracker.getDeathMessage` for a player whose display name is
     /// `me`: a server's guest is not `PLAYER_NAME`.
     pub(super) fn combat_death_message_for(&mut self, me: Text) -> Text {
