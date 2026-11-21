@@ -2238,6 +2238,7 @@ version = "0.1.0"
 dependencies = [
  "horizon-client-core",
  "horizon-core",
+ "horizon-engine-slots",
  "horizon-mod-api-macros",
  "horizon-mod-package",
  "horizon-mod-vocab",
