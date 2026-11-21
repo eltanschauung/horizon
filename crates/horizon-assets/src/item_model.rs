@@ -1432,6 +1432,7 @@ impl Resolve<'_> {
     fn component(&self, key: &str) -> Option<&Value> {
         self.components.get(key)
     }
+    #[horizon_mod_api_macros::replaceable]
     fn has_foil(&self) -> bool {
         if let Some(v) = self.component("minecraft:enchantment_glint_override") {
             return v.as_bool().unwrap_or(false);

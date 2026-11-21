@@ -705,6 +705,7 @@ fn keys(input: u8) -> Keys {
 
 /// What the server decides about the player, from its own copy (its attributes and effects come
 /// with the changes the server sent): the rest is the client's.
+#[horizon_mod_api_macros::replaceable]
 fn sync(body: &mut PlayerMotion, server: &PlayerMotion) {
     // A player that may fly toggles its flight itself (LocalPlayer.aiStep: a double jump, and a
     // landing that ends it) and tells the server with ServerboundPlayerAbilitiesPacket before the

@@ -1091,6 +1091,7 @@ impl MotionWorld<'_, '_, '_> {
         self.fluid_base_tick()?;
         self.player_movement_tick_with_fluids(direction, jumping)
     }
+    #[horizon_mod_api_macros::replaceable]
     fn player_movement_tick_with_fluids(
         &mut self,
         direction: [f32; 2],
@@ -1449,6 +1450,7 @@ impl MotionWorld<'_, '_, '_> {
     /// is what a hurt sends the player (`ServerEntity.sendChanges`), and
     /// what the next knockback starts from; the client's next move places
     /// the player.
+    #[horizon_mod_api_macros::replaceable]
     pub fn server_travel(&mut self) -> Result<()> {
         let p = &mut *self.player;
         let (position, ground, collision) = (p.position, p.ground, p.collision);
@@ -1979,6 +1981,7 @@ impl MotionWorld<'_, '_, '_> {
         Ok(())
     }
     /// LivingEntity.travelFallFlying with updateFallFlyingMovement.
+    #[horizon_mod_api_macros::replaceable]
     fn travel_fall_flying(&mut self, gate: &mut MoveGate) -> Result<()> {
         let v = self.player.velocity;
         let move_h = (v.x * v.x + v.z * v.z).sqrt();

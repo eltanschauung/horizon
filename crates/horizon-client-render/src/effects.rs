@@ -391,6 +391,7 @@ pub struct PlayerEffects {
     pub changes: u32,
 }
 impl PlayerEffects {
+    #[horizon_mod_api_macros::replaceable]
     pub fn get(&self, id: &str) -> Option<&EffectInstance> {
         self.list.iter().find(|e| e.id == id)
     }

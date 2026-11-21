@@ -847,6 +847,7 @@ impl Particle {
         }
     }
     /// `getLightCoords(a)` from the world's smooth sky and block light (0..=240).
+    #[horizon_mod_api_macros::replaceable]
     fn light_coords(&self, partial: f32, sky: u32, block: u32) -> (u32, u32) {
         let t = ((self.age as f32 + partial) / self.lifetime as f32).clamp(0.0, 1.0);
         match self.light {
@@ -1822,6 +1823,7 @@ impl ParticleEngine {
     #[allow(clippy::too_many_lines)]
     /// `ParticleProvider.createParticle`: provider draws use the engine's
     /// random, constructor and tick draws the particle's own (seeded `seed`).
+    #[horizon_mod_api_macros::replaceable]
     fn make(
         &mut self,
         o: &ParticleOptions,
@@ -3620,6 +3622,7 @@ impl ParticleEngine {
         true
     }
     #[allow(clippy::too_many_lines)]
+    #[horizon_mod_api_macros::replaceable]
     fn tick_particle(&mut self, p: &mut Particle, level: &ParticleLevel) {
         match p.behaviour {
             Behaviour::Base

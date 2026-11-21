@@ -586,6 +586,7 @@ pub fn egg_chicken_variant(stack: &crate::items::ItemStack) -> u8 {
 impl Projectile {
     /// `Entity.getBoundingBox`: its type's square box standing on its position,
     /// a wind charge's 0.15 lower (`AbstractWindCharge.makeBoundingBox`).
+    #[horizon_mod_api_macros::replaceable]
     pub fn bounds(&self) -> Aabb {
         let (p, half) = (self.position, self.kind.size() / 2.0);
         let height = self.kind.size();
@@ -1714,7 +1715,17 @@ impl Projectile {
     fn hit_margin(&self) -> f64 {
         f64::from(((self.age as i32 - 2) as f32 / 20.0).clamp(0.0, 0.3))
     }
+    /// A native projectile family may take over its motion and collision. Vanilla
+    /// continues to use its specialized world queries for every ordinary projectile.
+    #[horizon_mod_api_macros::replaceable]
+    fn native_tick_override(&mut self, _world: &dyn ProjectileWorld) -> Option<(bool, Hit)> {
+        None
+    }
+
     fn tick_inner(&mut self, w: &impl ProjectileWorld, impact: bool) -> (bool, Hit) {
+        if let Some(result) = self.native_tick_override(w) {
+            return result;
+        }
         // `Entity.setOldPosAndRot` (the previous position and rotation the
         // renderer interpolates from), kept across the `impact` flag's arrival
         // from #6279.
