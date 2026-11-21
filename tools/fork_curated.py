@@ -22,7 +22,7 @@ def content_packages(root):
     if digest(path) != '2695c4885fedfe252271229cc33e771720c44b3c9b5f9230cb10b0b20e9da78f':
         raise ValueError('Gravestone assets differ from the pinned registry release')
     ports = [compatible_content(p) for p in release_packages(root, "content")]
-    return [path, *ports, emojiful_assets(root)]
+    return [path, *ports]
 
 
 def release_packages(root, kind):
@@ -97,31 +97,6 @@ def compatible_content(path):
         raise ValueError(f"Unexpected content manifest changes: {path.name}")
     files["horizon-mod.toml"] = (manifest + "\n").encode()
     return write_package(path.parent / "compatible" / path.name, files)
-
-
-def emojiful_assets(root):
-    pack, = release_packages(root, "font-pack")
-    output = pack.with_name("emojiful_twemoji.hmod")
-    manifest = '''id = "emojiful_twemoji"
-name = "Emojiful Twemoji"
-version = "0.1.1"
-description = "The Twemoji font and textures from the Emojiful 0.1.1 resource pack."
-authors = ["lavoide", "HorizonStudio", "Twemoji contributors"]
-api = "0.2"
-side = "client"
-namespaces = ["emojiful"]
-capabilities = ["registries"]
-'''
-    # Use the content update channel so glyphs arrive together with the native mod.
-    files = package_files(pack)
-    files["horizon-mod.toml"] = manifest.encode()
-    files["assets/emojiful_twemoji/font/horizon_default.json"] = files.pop(
-        "assets/minecraft/font/default.json"
-    )
-    files.pop("pack.mcmeta")
-    for notice in ("LICENSE-GRAPHICS.txt", "CREDITS.txt"):
-        files[f"assets/emojiful_twemoji/licenses/{notice.lower()}"] = files.pop(notice)
-    return write_package(output, files)
 
 
 def patch_content(root,source,destination,mod_id):

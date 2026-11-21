@@ -2895,18 +2895,6 @@ mod load_conditions;
 use load_conditions::{TagLayers, TagMerge, merge_tag, tag_list};
 pub use load_conditions::{build_with_conditions, resource_root_with_conditions};
 
-const DEFAULT_FONT: &str = "assets/minecraft/font/default.json";
-
-fn merge_default_font(mut vanilla: J, mut providers: Vec<J>) -> Result<J> {
-    let Some(J::Arr(base)) = vanilla.get_mut("providers") else {
-        return Err(format!("{DEFAULT_FONT}: no providers").into());
-    };
-    // The first provider with a glyph wins, as with a resource pack above vanilla.
-    providers.append(base);
-    *base = providers;
-    Ok(vanilla)
-}
-
 /// The block and item ids and tags a content root has, for tag entries.
 struct Known {
     blocks: std::collections::BTreeSet<String>,

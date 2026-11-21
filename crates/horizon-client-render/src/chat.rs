@@ -1431,6 +1431,14 @@ fn chars_to(s: &str, byte: usize) -> usize {
 fn clamp(v: i32, lo: i32, hi: i32) -> i32 {
     if v < lo { lo } else { v.min(hi) }
 }
+/// Local completions for the current word in ordinary chat. A native mod can
+/// fill this at the SDK's replacement point without editing the chat screen.
+#[horizon_mod_api_macros::replaceable]
+fn chat_word_completions(word: &str) -> Vec<String> {
+    let _ = word;
+    Vec::new()
+}
+
 /// `CommandSuggestions.getLastWordIndex`: after the last whitespace run.
 fn last_word_index(s: &str) -> usize {
     let mut out = 0;
@@ -1703,13 +1711,30 @@ impl ChatScreen {
             }
         } else if !command.chars().all(char::is_whitespace) {
             let partial = &command[..cursor_b];
-            let mut builder = SuggestionsBuilder::new(partial, last_word_index(partial));
+            let start = last_word_index(partial);
+            let mut builder = SuggestionsBuilder::new(partial, start);
             // ClientSuggestionProvider.getCustomTabSuggestions: the players
             // and the server's custom chat completions.
             builder.suggest_matching(c.registries.custom_tab_suggestions());
             let (range, list) = merge_suggestions(partial, builder.out);
             self.awaiting = None;
             self.pending = Some((range.0, list));
+            let completions = chat_word_completions(&partial[start..]);
+            if !completions.is_empty() {
+                self.pending = Some((
+                    start,
+                    completions
+                        .into_iter()
+                        .map(|text| Suggestion {
+                            range: (start, cursor_b),
+                            text,
+                            tooltip: None,
+                            int_value: None,
+                        })
+                        .collect(),
+                ));
+                self.show_suggestions(m, false);
+            }
             self.usage_width = 0;
             self.usage_position = 0;
             // CommandSuggestions.updateCommandInfo: the Chat option may take
