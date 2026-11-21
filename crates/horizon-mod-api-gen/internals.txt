@@ -102,3 +102,26 @@ horizon_world::registry::BlockRegistry::state
 horizon_world::registry::BlockRegistry::default_state
 horizon_client_lib::lan::playerdata::uuid_ints
 horizon_client_lib::lan::hub::Hub::guest
+
+# Fork terrain extensions: the Gensokyo template and biome placement algorithms.
+horizon_world::worldgen::block_feature::FeatureBlockBindings
+horizon_world::worldgen::block_feature::FeatureBlockBindings::tree_blocks
+horizon_world::worldgen::tree::TreeDecoder
+horizon_world::worldgen::tree::read
+horizon_world::worldgen::tree::sample_state
+horizon_world::worldgen::tree::write
+horizon_world::worldgen::tree_blocks::AIR
+horizon_world::worldgen::tree_blocks::ANY_FLUID
+horizon_world::worldgen::tree_blocks::FEATURES_CANNOT_REPLACE
+horizon_world::worldgen::tree_blocks::LEAVES
+horizon_world::worldgen::tree_blocks::LOGS
+horizon_world::worldgen::tree_blocks::REPLACEABLE
+horizon_world::worldgen::tree_blocks::REPLACEABLE_BY_TREES
+horizon_world::worldgen::tree_blocks::SOLID
+horizon_world::worldgen::tree_blocks::SOLID_RENDER
+horizon_world::worldgen::tree_blocks::WATER_FLUID
+horizon_world::worldgen::tree_blocks::TreeBlocks::has
+horizon_world::worldgen::tree_blocks::TreeBlocks::is_air
+horizon_world::worldgen::tree_blocks::TreeBlocks
+horizon_world::worldgen::tree_blocks::TreeBlocks::same_block
+horizon_world::worldgen::tree_blocks::TreeBlocks::with
