@@ -395,6 +395,7 @@ impl Decoration {
             .collect()
     }
     #[allow(clippy::too_many_arguments)]
+    #[horizon_mod_api_macros::replaceable]
     pub(super) fn decorate(
         &self,
         data: &Arc<GeneratorData>,

@@ -763,6 +763,7 @@ pub fn decode_block_entity_for_block(
     valid.then_some(decoded)
 }
 
+#[horizon_mod_api_macros::replaceable]
 pub fn decode_block_entity(tag: &Tag) -> Option<((i32, i32, i32), crate::containers::BlockEntity)> {
     use crate::containers::BlockEntity;
     let int = |k: &str| tag.get(k).and_then(crate::nbt_path::int_value); // getIntOr

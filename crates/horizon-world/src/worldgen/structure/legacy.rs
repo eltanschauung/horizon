@@ -434,6 +434,7 @@ pub const HORIZONTAL: [Direction; 4] = [
 pub fn random_horizontal(random: &mut impl RandomSource) -> Direction {
     HORIZONTAL[random.next_int_bound(4).unwrap_or(0) as usize]
 }
+#[horizon_mod_api_macros::replaceable]
 pub fn make_bounding_box(
     x: i32,
     y: i32,

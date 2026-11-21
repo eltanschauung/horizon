@@ -371,6 +371,7 @@ impl WorldgenOverrides {
     /// preset's, whose type has the level's name), a pack's file for that
     /// type over the vanilla one. `None` when the packs give it a range the
     /// codec refuses.
+    #[horizon_mod_api_macros::replaceable]
     pub fn level_height(&self, level: &str) -> Option<LevelHeight> {
         let none = BTreeMap::new();
         let types = self.entries.get(DIMENSION_TYPES).unwrap_or(&none);
