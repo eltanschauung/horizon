@@ -3623,6 +3623,7 @@ impl Game<'_> {
     /// before it saves, with them still listed and able to get a last message.
     /// Server-side.
     pub(in crate::game) fn native_player_logged_out(&mut self, player: u128, name: &str) {
+        self.magic_forget(player);
         self.fire_player_logged_out(player, name);
     }
     /// `PlayerRespawnPositionEvent`: where `player` respawns, once the server found it. The
@@ -3639,6 +3640,7 @@ impl Game<'_> {
     /// food and experience reset, with their state swapped in. Once for each
     /// death that ends in a respawn, on a server; not for the End-exit one.
     pub(in crate::game) fn native_player_respawned(&mut self, player: u128, name: &str) {
+        self.magic_discard_bat_save();
         self.fire_player_respawned(player, name);
     }
     /// A player was saved to the world's store (NeoForge's
@@ -3823,6 +3825,7 @@ impl Game<'_> {
     /// message it builds from the combat). It only hears. Server-side, for
     /// every player of the world, whether death messages are shown or not.
     pub(in crate::game) fn native_player_died(&mut self, player: u128, cause: Option<&str>) {
+        self.magic_forget(player);
         self.fire_player_died(player, cause);
     }
     /// A new mob of `kind` joined `dimension` at `pos`: `natural` when the
