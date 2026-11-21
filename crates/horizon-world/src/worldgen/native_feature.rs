@@ -78,6 +78,23 @@ pub fn decode(
     let _ = (kind, json, bindings);
     None
 }
+
+/// A native placement filter/point emitter; the host retains callback and work budgets.
+pub trait NativePlacement: std::fmt::Debug + Send + Sync {
+    fn positions(
+        &self,
+        context: &mut dyn PlacementContext,
+        position: [i32; 3],
+    ) -> Result<Vec<[i32; 3]>, PlacementQueryError>;
+}
+#[horizon_mod_api_macros::replaceable]
+pub fn decode_native_placement(
+    json: &str,
+) -> Option<Result<Arc<dyn NativePlacement>, DecodeError>> {
+    let _ = json;
+    None
+}
+
 struct WorldBridge<'a, W: FeatureWorld> {
     world: &'a mut W,
     error: Option<W::Error>,

@@ -4,9 +4,16 @@ mod chain;
 mod layer;
 use super::block_predicate::{BlockPredicate, PredicateBlockResolver};
 use super::{
-    DecodeError, Object, anchor::WorldGenerationContext, biome_temperature::biome_info_noise,
-    density::identifier, double, height_provider::HeightProvider, int_range, integer, number_text,
-    optional, required, value_provider::IntProvider,
+    DecodeError, Object,
+    anchor::WorldGenerationContext,
+    biome_temperature::biome_info_noise,
+    density::identifier,
+    double,
+    height_provider::HeightProvider,
+    int_range, integer,
+    native_feature::{NativePlacement, decode_native_placement},
+    number_text, optional, required,
+    value_provider::IntProvider,
 };
 use crate::heightmap::HeightmapType;
 pub use chain::{FeaturePlacementError, FeaturePlacer};
@@ -15,21 +22,6 @@ use serde_json::value::RawValue;
 mod context;
 pub use context::{LayerBlock, PlacementContext, PlacementQueryError};
 
-/// A native placement filter/point emitter; the host retains callback and work budgets.
-pub trait NativePlacement: std::fmt::Debug + Send + Sync {
-    fn positions(
-        &self,
-        context: &mut dyn PlacementContext,
-        position: [i32; 3],
-    ) -> Result<Vec<[i32; 3]>, PlacementQueryError>;
-}
-#[horizon_mod_api_macros::replaceable]
-pub fn decode_native_placement(
-    json: &str,
-) -> Option<Result<std::sync::Arc<dyn NativePlacement>, DecodeError>> {
-    let _ = json;
-    None
-}
 #[derive(Clone, Debug)]
 pub enum PlacementModifier {
     Native(std::sync::Arc<dyn NativePlacement>),
