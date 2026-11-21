@@ -8,6 +8,7 @@ use crate::{
     Result, assets::Assets, collisions::SceneCollisions, living_attributes::attribute_error,
     world::World,
 };
+use crate::living_attributes::attribute_error;
 use horizon_core::{
     geometry::{Aabb, Direction, Vec3, VoxelShape, traverse_blocks, trig},
     position::BlockPos,

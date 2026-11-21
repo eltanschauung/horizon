@@ -8,10 +8,8 @@
 //! model, tints, foil and transformation each layer gets.
 /// Native item model presentation overrides.
 pub mod native_model;
-use crate::{
-    json::{DecodeError, error as err},
-    math::{Mat4, normalize_quaternion, quaternion_from_axis_angle},
-};
+use crate::json::{DecodeError, error as err};
+use crate::math::{Mat4, normalize_quaternion, quaternion_from_axis_angle};
 use serde_json::{Map, Value};
 use std::{
     collections::BTreeMap,

@@ -5,12 +5,8 @@
 //! notes, redstone dust, totem, end rod, biome ash and spores, falling leaves,
 //! spells and dragon breath. Constructors, ticks, sizes, colours and light
 //! follow the vanilla classes; sprite sets come from `particles/*.json`.
-use crate::{
-    blocks::{BlockFacts, Fluid},
-    hud::Rect,
-    mesher::Vertex,
-    world::World,
-};
+use crate::{hud::Rect, mesher::Vertex, world::World};
+use horizon_items::blocks::{BlockFacts, Fluid};
 use glam::{DVec3, Quat, Vec3 as FVec3};
 use horizon_assets::resource_source::ResourceSource;
 use horizon_core::{
@@ -19,7 +15,7 @@ use horizon_core::{
 };
 use horizon_world::block_collision::BlockCollisionRegistry;
 pub mod native_particles;
-mod options;
+pub mod options;
 use mod_api::{ParticleBlend, ParticleProvider};
 pub use options::ParticleOptions;
 use std::{
