@@ -1980,12 +1980,19 @@ impl MotionWorld<'_, '_, '_> {
             .cause_food_exhaustion(if self.player.sprinting { 0.2 } else { 0.05 });
         Ok(())
     }
+    /// Resolve a native glide adjustment before applying vanilla steering.
+    #[horizon_mod_api_macros::replaceable]
+    fn native_glide_gravity(&self, gravity: f64) -> f64 {
+        gravity
+    }
+
     /// LivingEntity.travelFallFlying with updateFallFlyingMovement.
     #[horizon_mod_api_macros::replaceable]
     fn travel_fall_flying(&mut self, gate: &mut MoveGate) -> Result<()> {
         let v = self.player.velocity;
         let move_h = (v.x * v.x + v.z * v.z).sqrt();
         let gravity = living_motion::effective_gravity(self)?;
+        let gravity = self.native_glide_gravity(gravity);
         self.player.velocity = fall_flying_movement(v, self.player.pitch, self.player.yaw, gravity);
         let movement = self.player.velocity;
         self.move_self(gate, movement)?;
