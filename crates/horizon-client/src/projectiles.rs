@@ -1715,6 +1715,9 @@ impl Projectile {
         f64::from(((self.age as i32 - 2) as f32 / 20.0).clamp(0.0, 0.3))
     }
     fn tick_inner(&mut self, w: &impl ProjectileWorld, impact: bool) -> (bool, Hit) {
+        if let Some(result) = crate::projectile_behavior::custom_tick(self, w, impact) {
+            return result;
+        }
         // `Entity.setOldPosAndRot` (the previous position and rotation the
         // renderer interpolates from), kept across the `impact` flag's arrival
         // from #6279.
@@ -1912,7 +1915,7 @@ impl Projectile {
     /// the item a thrown potion or a mod's type is drawn as with its model
     /// (`ThrownItemRenderer`): the potion stack itself, or the type's item.
     pub fn drawn_item(&self) -> Option<crate::items::ItemStack> {
-        match &self.kind {
+        let vanilla = match &self.kind {
             ProjectileKind::Potion(stack, _) => Some((**stack).clone()),
             ProjectileKind::ExperienceBottle => Some(crate::items::ItemStack::new(
                 "minecraft:experience_bottle",
@@ -1920,7 +1923,8 @@ impl Projectile {
             )),
             ProjectileKind::Thrown(t) => Some(crate::items::ItemStack::new(t.item, 1)),
             _ => None,
-        }
+        };
+        crate::projectile_behavior::custom_drawn_item(self, vanilla)
     }
     /// The item sprite drawn for thrown projectiles (ThrownItemRenderer).
     pub fn item_sprite(&self) -> Option<&'static str> {

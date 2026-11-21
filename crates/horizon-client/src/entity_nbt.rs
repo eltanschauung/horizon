@@ -3300,6 +3300,7 @@ pub fn throwable_to_nbt(
             i.insert("count".into(), Tag::Int(1));
         }
     }
+    crate::projectile_behavior::save_custom_projectile(p, &mut tag);
     Some(tag)
 }
 
@@ -3331,6 +3332,7 @@ pub fn throwable_from_nbt(tag: &Tag, player: Option<[i32; 4]>) -> Option<Project
         // position, so it is gone once the projectile has moved.
         p.set_thrown_item(&item);
     }
+    crate::projectile_behavior::load_custom_projectile(&mut p, tag);
     Some(p)
 }
 

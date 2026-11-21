@@ -5287,6 +5287,11 @@ impl Game<'_> {
         self.settle_hurt_teleports()
     }
     fn projectile_hit_landed(&mut self, p: &Projectile, hit: Hit) -> Result<()> {
+        if let mod_api::HostSide::Server(host) = crate::game::execution_role::host_side(self)
+            && crate::game::projectile_dispatch::handle_custom_impact(host, p, hit)
+        {
+            return Ok(());
+        }
         // Projectile.onHitBlock: BlockState.onProjectileHit, for every
         // projectile (a wind charge out of the world's top has no face).
         if let Hit::Block { pos, at, face } = hit

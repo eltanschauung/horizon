@@ -146,6 +146,8 @@ pub mod portal_sections;
 pub mod pose;
 pub mod pregen;
 pub mod projectiles;
+#[doc(hidden)]
+pub mod projectile_behavior;
 pub mod raid;
 pub mod random_tick_sections;
 pub mod raw_payloads;
