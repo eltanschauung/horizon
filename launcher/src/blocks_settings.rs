@@ -213,6 +213,7 @@ impl Launcher {
                     .flex_col()
                     .child(group("Account", "user").mt_0())
                     .child(accounts)
+                    .child(self.ely_panel(cx))
                     .child(group("Updates", "reload"))
                     .child(index_row(n + 1, "Horizon", Some(plain(&horizon)), horizon_action, &t))
                     .child(index_row(

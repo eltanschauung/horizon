@@ -1,15 +1,35 @@
-//! The owner gate in the window (`horizon_launcher::account::launch`): the screen that asks for a
-//! Microsoft account that owns Minecraft: Java Edition. It covers the launcher once for players
-//! without one (those who played offline before the gate), and again whenever Play is refused.
-//! The sign-in runs on it, code and all.
+//! The sign-in screen for players who need an account to play.
 use super::*;
 
 impl Launcher {
+    fn offers_ely_sign_in(&self) -> bool {
+        self.selected_instance()
+            .is_none_or(|instance| instance.java.is_none())
+    }
+
+    fn play_sign_in_description(&self) -> &'static str {
+        if self.offers_ely_sign_in() {
+            "Sign in with Ely.by or a Microsoft account that owns Minecraft: Java Edition."
+        } else {
+            "Sign in with a Microsoft account that owns Minecraft: Java Edition."
+        }
+    }
+
+    fn open_ely_sign_in(&mut self) {
+        self.close_owner_screen();
+        self.go(Page::Settings);
+    }
+
     /// Whether the screen covers the window: no owner, and either Play was refused or the player
     /// hasn't read it yet. The data question comes first.
     pub(crate) fn asking_owner(&self) -> bool {
+        let access = if self.offers_ely_sign_in() {
+            self.horizon_preparation_access()
+        } else {
+            self.owner
+        };
         (!horizon_launcher::developer_offline::selected() || sign_in_preview())
-            && (self.owner == Some(false) || sign_in_preview())
+            && (access == Some(false) || sign_in_preview())
             && (self.owner_screen_open || !self.settings.owner_notice_seen || sign_in_preview())
             && !self.asking_consent()
             && self.opening.is_none()
@@ -66,7 +86,7 @@ impl Launcher {
             .child(
                 shell::text(theme::night::CAPTION, shell::c(n.muted))
                     .font_weight(FontWeight::SEMIBOLD)
-                    .child(tr("Microsoft account").to_string()),
+                    .child(tr("Account").to_string()),
             )
             .child(
                 shell::text(theme::night::TITLE, shell::c(n.ink))
@@ -74,7 +94,7 @@ impl Launcher {
                     .child(tr("Sign in to play").to_string()),
             )
             .child(line(
-                "Horizon needs a Microsoft account that owns Minecraft: Java Edition, like other launchers.",
+                self.play_sign_in_description(),
                 n.ink_soft,
             ))
             .child(line(
@@ -224,6 +244,14 @@ impl Launcher {
             .gap(px(10.))
             .mt(px(14.))
             .children(main)
+            .children(self.offers_ely_sign_in().then(|| {
+                shell::action("owner-ely", shell::Action::Quiet, &t)
+                    .child(shell::label(tr("Sign in with Ely.by").to_string()))
+                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                        this.open_ely_sign_in();
+                        cx.notify();
+                    }))
+            }))
             .child(
                 shell::action("owner-later", shell::Action::Quiet, &t)
                     .child(shell::label(tr("Not now").to_string()))
@@ -296,7 +324,7 @@ impl Launcher {
             .w(px(520.))
             .max_w_full()
             .p(px(32.))
-            .child(ui::text(13., FontWeight::MEDIUM, ink::QUIET).child(tr("Microsoft account")))
+            .child(ui::text(13., FontWeight::MEDIUM, ink::QUIET).child(tr("Account")))
             .child(
                 div()
                     .mt(px(8.))
@@ -314,7 +342,7 @@ impl Launcher {
                     .flex_col()
                     .gap(px(8.))
                     .child(ui::text(14., FontWeight::NORMAL, ink::BODY).child(tr(
-                        "Horizon needs a Microsoft account that owns Minecraft: Java Edition, like other launchers.",
+                        self.play_sign_in_description(),
                     )))
                     .child(ui::text(14., FontWeight::NORMAL, ink::BODY).child(tr(
                         "No Minecraft install needed: Horizon downloads it from Mojang for your account.",
@@ -482,6 +510,13 @@ impl Launcher {
                 .gap(px(8.))
                 .mt(px(24.))
                 .children(main)
+                .children(self.offers_ely_sign_in().then(|| {
+                    ui::button("owner-ely".into(), tr("Sign in with Ely.by").into(), Kind::Ghost, &t)
+                        .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                            this.open_ely_sign_in();
+                            cx.notify();
+                        }))
+                }))
                 .child(later),
         );
         if matches!(state, Shown::Code(..)) {
