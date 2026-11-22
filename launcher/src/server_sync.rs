@@ -555,7 +555,9 @@ pub fn sync(
     instance: &instances::Instance,
     current: Option<&str>,
     progress: impl Fn(Phase, String),
+    registry_consent: impl Fn(&native_mods::RegistryInventory) -> bool,
 ) -> Result<Outcome, String> {
+    native_mods::require_consent().map_err(String::from)?;
     if !manages_instance(instance) {
         return Err("This instance is not server-managed".into());
     }
@@ -655,6 +657,7 @@ pub fn sync(
                 };
                 progress(phase, step.label());
             },
+            &registry_consent,
         )
     })?;
     // The executable is selected only AFTER both package and build verification.

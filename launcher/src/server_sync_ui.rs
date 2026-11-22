@@ -79,6 +79,12 @@ impl Launcher {
         {
             return;
         }
+        if self.settings.native_mods_allowed_at.is_none() {
+            if play_after && self.pending_consent.is_none() {
+                self.pending_consent = Some(crate::native_consent::PendingConsent::ServerSync);
+            }
+            return;
+        }
         let id = instance.id.clone();
         let current = self.version_of(&instance).cloned();
         self.server_sync.failed.remove(&id);
@@ -98,7 +104,7 @@ impl Launcher {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 server_sync::sync(&instance, current.as_deref(), |phase, line| {
                     let _ = tx.send(Msg::ServerSyncProgress(id.clone(), phase, line));
-                })
+                }, |inventory| crate::native_registry_consent::request(&tx, inventory))
             }))
             .unwrap_or_else(|_| {
                 Err("The server update stopped unexpectedly; press Play to retry".into())

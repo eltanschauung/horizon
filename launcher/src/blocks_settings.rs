@@ -373,6 +373,7 @@ impl Launcher {
                                     let (base, back_up) = this.native_consent_build.take().unwrap_or_default();
                                     this.build_native_on(base, back_up)
                                 }
+                                PendingConsent::ServerSync => this.begin_server_sync(true),
                                 PendingConsent::Toggle(entry) => this.mods_switch(&entry),
                                 PendingConsent::Install(source, id, known) => this.mods_install(source, id, known),
                                 PendingConsent::Github(found, only) => this.github_install(found, only),

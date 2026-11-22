@@ -1353,7 +1353,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<i32, String> {
                 let result =
                     horizon_launcher::server_sync::sync(&i, current.as_deref(), |phase, line| {
                         eprintln!("{} {line}", phase.label())
-                    })?;
+                    }, registry_consent)?;
                 json(match result {
                     horizon_launcher::server_sync::Outcome::Ready(version) => {
                         serde_json::json!({"ready":true,"version":version})

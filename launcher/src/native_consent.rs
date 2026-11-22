@@ -8,6 +8,7 @@ use std::path::Path;
 
 pub(super) enum PendingConsent {
     Build(Vec<String>),
+    ServerSync,
     Toggle(Entry),
     Install(SourceId, String, Option<Project>),
     Github(Resolved, Option<String>),
@@ -18,6 +19,7 @@ impl PendingConsent {
     pub(super) fn name(&self) -> String {
         match self {
             Self::Build(ids) => ids.join(", "),
+            Self::ServerSync => "Dedicated server mods".into(),
             Self::Toggle(entry) => entry.title.clone(),
             Self::Install(_, id, _) | Self::Local(id) => id.clone(),
             Self::Github(found, _) => found.label(),
@@ -57,7 +59,7 @@ pub(super) fn resolve(
                 }
             }
             PendingConsent::Local(id) => java::set_enabled(home, &id, false)?,
-            PendingConsent::Install(..) | PendingConsent::Github(..) => {}
+            PendingConsent::Install(..) | PendingConsent::Github(..) | PendingConsent::ServerSync => {}
         }
     }
     Ok(None)
