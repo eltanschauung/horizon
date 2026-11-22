@@ -398,8 +398,10 @@ def deploy(args):
                 if code:raise RuntimeError('Upload archive failed')
             runner=ROOT/'tools/fork_remote.py'
             payload['stage']=remote
-            cmd='python3 - '+shlex.quote(json.dumps(payload))
-            text=subprocess.check_output(ssh+[cmd],input=runner.read_bytes(),timeout=240)
+            # The file manifest can exceed the OS limit for a single argument.
+            bootstrap = 'import sys\nsys.argv.append(' + repr(json.dumps(payload)) + ')\n'
+            command = bootstrap.encode() + runner.read_bytes()
+            text=subprocess.check_output(ssh+['python3 -'],input=command,timeout=240)
             result['server']=json.loads(text)
             # Promote only inputs whose exact binaries and packages are now healthy.
             # A skipped deployment with different inputs must never advance clients.
