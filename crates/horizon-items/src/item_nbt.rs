@@ -89,6 +89,7 @@ pub fn item_to_nbt_with_items(stack: &crate::items::ItemStack, items: &crate::it
 /// `Identifier`: `stone` is `minecraft:stone` (a summoned display's or a
 /// command's NBT often leaves the namespace out), and an id that is no valid
 /// identifier makes no stack.
+#[horizon_mod_api_macros::replaceable]
 pub fn item_from_nbt(tag: &Tag) -> Option<crate::items::ItemStack> {
     let (namespace, path) = horizon_world::datafix::identifier(&text(tag.get("id"))?)?;
     let id = format!("{namespace}:{path}");

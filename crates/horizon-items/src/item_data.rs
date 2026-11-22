@@ -811,6 +811,7 @@ impl ItemStack {
         self.extra.get_or_insert_with(Box::default)
     }
     /// Drops an all-default component box so equal stacks compare equal.
+    #[horizon_mod_api_macros::replaceable]
     pub fn tidy(&mut self) {
         if self.extra.as_ref().is_some_and(|d| d.is_empty()) {
             self.extra = None;
@@ -868,6 +869,7 @@ impl ItemStack {
     /// `ItemStack.enchant`: upgrade to the higher level. Vanilla's
     /// `EnchantmentHelper.updateEnchantments` returns EMPTY when the component
     /// is absent, so a removal patch makes this a no-op.
+    #[horizon_mod_api_macros::replaceable]
     pub fn enchant(&mut self, id: &str, level: u32) {
         let book = &*self.item == "minecraft:enchanted_book";
         let removal = if book {
@@ -896,6 +898,7 @@ impl ItemStack {
     /// component wins, then the item's default override (`item_glint`), then a
     /// `Item.isFoil` (enchantments, or a compass carrying a lodestone tracker).
     /// Stored book enchantments do not count.
+    #[horizon_mod_api_macros::replaceable]
     pub fn has_foil(&self, item_glint: Option<bool>) -> bool {
         let own = self
             .data()

@@ -5,12 +5,8 @@
 //! notes, redstone dust, totem, end rod, biome ash and spores, falling leaves,
 //! spells and dragon breath. Constructors, ticks, sizes, colours and light
 //! follow the vanilla classes; sprite sets come from `particles/*.json`.
-use crate::{
-    blocks::{BlockFacts, Fluid},
-    hud::Rect,
-    mesher::Vertex,
-    world::World,
-};
+use crate::{hud::Rect, mesher::Vertex, world::World};
+use horizon_items::blocks::{BlockFacts, Fluid};
 use glam::{DVec3, Quat, Vec3 as FVec3};
 use horizon_assets::resource_source::ResourceSource;
 use horizon_core::{
@@ -18,7 +14,8 @@ use horizon_core::{
     random::{LegacyRandom, RandomSource},
 };
 use horizon_world::block_collision::BlockCollisionRegistry;
-mod options;
+pub mod native_particles;
+pub mod options;
 use mod_api::{ParticleBlend, ParticleProvider};
 pub use options::ParticleOptions;
 use std::{
@@ -848,6 +845,9 @@ impl Particle {
     }
     /// `getLightCoords(a)` from the world's smooth sky and block light (0..=240).
     fn light_coords(&self, partial: f32, sky: u32, block: u32) -> (u32, u32) {
+        if let Some(light) = native_particles::light(self, sky, block) {
+            return light;
+        }
         let t = ((self.age as f32 + partial) / self.lifetime as f32).clamp(0.0, 1.0);
         match self.light {
             Light::World => (sky, block),
@@ -1829,6 +1829,9 @@ impl ParticleEngine {
         v: [f64; 3],
         seed: i64,
     ) -> Option<Particle> {
+        if let Some(particle) = native_particles::make(o, p, v) {
+            return Some(particle);
+        }
         use ParticleType as T;
         let ty = o.ty;
         // A native mod's SimpleParticleType: vanilla's TextureSheetParticle with

@@ -3,10 +3,12 @@
 //! powder snow's block-inside effects and freezing. Entity lifecycle, other
 //! block-inside effects and audiovisual event consumers remain separate work.
 mod player_init;
+pub mod native_motion;
 use crate::{
-    Result, assets::Assets, collisions::SceneCollisions, living_attributes::attribute_error,
+    Result, assets::Assets, collisions::SceneCollisions,
     world::World,
 };
+use crate::living_attributes::attribute_error;
 use horizon_core::{
     geometry::{Aabb, Direction, Vec3, VoxelShape, traverse_blocks, trig},
     position::BlockPos,
@@ -1097,6 +1099,7 @@ impl MotionWorld<'_, '_, '_> {
         direction: [f32; 2],
         jumping: bool,
     ) -> Result<()> {
+        native_motion::player_input(self, jumping);
         // Entity.baseTick
         self.player.was_in_powder_snow = self.player.in_powder_snow;
         self.player.in_powder_snow = false;
@@ -1451,6 +1454,7 @@ impl MotionWorld<'_, '_, '_> {
     /// what the next knockback starts from; the client's next move places
     /// the player.
     pub fn server_travel(&mut self) -> Result<()> {
+        native_motion::server_travel(self);
         let p = &mut *self.player;
         let (position, ground, collision) = (p.position, p.ground, p.collision);
         let (history, fall_distance, steps) = (p.history.clone(), p.fall_distance, p.steps);
@@ -1985,8 +1989,10 @@ impl MotionWorld<'_, '_, '_> {
         let v = self.player.velocity;
         let move_h = (v.x * v.x + v.z * v.z).sqrt();
         let gravity = living_motion::effective_gravity(self)?;
-        self.player.velocity = fall_flying_movement(v, self.player.pitch, self.player.yaw, gravity);
-        let movement = self.player.velocity;
+        let gravity = native_motion::glide_gravity(self, gravity);
+        let velocity = fall_flying_movement(v, self.player.pitch, self.player.yaw, gravity);
+        let movement = native_motion::glide_velocity(self, velocity);
+        self.player.velocity = movement;
         self.move_self(gate, movement)?;
         // LivingEntity.handleFallFlyingCollisions: the fall-damage sound plays
         // on both sides (a glider's own travel is client-side, and the sound

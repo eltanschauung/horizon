@@ -559,6 +559,7 @@ fn remove_non_curses(e: &Enchantments, mut item: ItemStack) -> ItemStack {
 }
 /// `GrindstoneMenu.computeResult`. `context` is the loop the menu runs in, which
 /// `can_grindstone_repair` is given.
+#[horizon_mod_api_macros::replaceable]
 pub fn grindstone_result(
     context: &LoopContext,
     e: &Enchantments,

@@ -59,6 +59,8 @@ pub mod mod_biome_sources;
 pub mod mod_density_functions;
 pub mod mod_generators;
 pub mod native_feature;
+/// Native replacement boundaries for terrain and surface structure generation.
+pub mod native_terrain;
 pub mod ore_feature;
 pub mod overrides;
 pub mod placement;

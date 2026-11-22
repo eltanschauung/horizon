@@ -127,9 +127,18 @@ fn remote_bullet_tick(p: &mut Projectile, w: &impl ProjectileWorld) {
 /// tracker's updates (10 to 20 ticks apart) with its own gravity and drag,
 /// and a block stops it there; only the server decides what it hits.
 pub(super) fn remote_projectile_tick(p: &mut Projectile, w: &impl ProjectileWorld) {
+    if native_remote_projectile_override(p, w) {
+        return;
+    }
     if !matches!(p.tick_remote(w).1, Hit::None) {
         p.velocity = Vec3::ZERO;
     }
+}
+
+/// Client-side extrapolation for a native projectile family.
+#[horizon_mod_api_macros::replaceable]
+fn native_remote_projectile_override(_projectile: &mut Projectile, _world: &dyn ProjectileWorld) -> bool {
+    false
 }
 
 /// `Entity.getRandomX(0.5)` / `getRandomY` / `getRandomZ(0.5)` for a shulker

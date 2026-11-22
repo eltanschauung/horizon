@@ -1774,6 +1774,8 @@ version = "0.1.0"
 dependencies = [
  "flate2",
  "horizon-core",
+ "horizon-engine-slots",
+ "horizon-mod-api-macros",
  "log",
  "miniz_oxide 0.8.9",
  "png",
@@ -2076,6 +2078,7 @@ dependencies = [
 name = "horizon-core"
 version = "0.1.0"
 dependencies = [
+ "horizon-mod-api-macros",
  "libm",
  "serde",
  "serde_json",

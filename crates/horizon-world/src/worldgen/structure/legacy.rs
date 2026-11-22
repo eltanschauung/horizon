@@ -443,6 +443,7 @@ pub fn make_bounding_box(
     height: i32,
     depth: i32,
 ) -> BoundingBox {
+    let y = crate::worldgen::native_terrain::structure_start_y(y, width, height, depth);
     if matches!(direction, Direction::North | Direction::South) {
         BoundingBox::new([x, y, z], [x + width - 1, y + height - 1, z + depth - 1])
     } else {

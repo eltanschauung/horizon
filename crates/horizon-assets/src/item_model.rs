@@ -6,10 +6,10 @@
 //!
 //! Baked geometry lives in [`crate::item_bake`]; this module decides *which*
 //! model, tints, foil and transformation each layer gets.
-use crate::{
-    json::{DecodeError, error as err},
-    math::{Mat4, normalize_quaternion, quaternion_from_axis_angle},
-};
+/// Native item model presentation overrides.
+pub mod native_model;
+use crate::json::{DecodeError, error as err};
+use crate::math::{Mat4, normalize_quaternion, quaternion_from_axis_angle};
 use serde_json::{Map, Value};
 use std::{
     collections::BTreeMap,
@@ -1433,6 +1433,9 @@ impl Resolve<'_> {
         self.components.get(key)
     }
     fn has_foil(&self) -> bool {
+        if let Some(foil) = native_model::foil(&self.components) {
+            return foil;
+        }
         if let Some(v) = self.component("minecraft:enchantment_glint_override") {
             return v.as_bool().unwrap_or(false);
         }

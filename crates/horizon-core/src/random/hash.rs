@@ -100,6 +100,7 @@ fn seed(digest: [u8; 16]) -> [u64; 2] {
         u64::from_be_bytes(digest[8..].try_into().unwrap()),
     ]
 }
+#[horizon_mod_api_macros::replaceable]
 pub fn seed_from_hash(name: &str) -> [u64; 2] {
     let mut digest = Md5::new();
     digest.update(name.as_bytes());

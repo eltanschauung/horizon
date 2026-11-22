@@ -421,6 +421,9 @@ impl Decoration {
         if region[4].is_decorated() {
             return Ok(DecorateStats::default());
         }
+        if !worker.structures_only {
+            super::native_terrain::decorate(data, seed, region)?;
+        }
         // The full chunks of the region, before their terrain moves into it.
         let full: Vec<ChunkPos> = region
             .iter()
