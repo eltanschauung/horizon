@@ -670,7 +670,7 @@ impl Launcher {
                 } else {
                     (ready, owner)
                 };
-                let press = play_press(ready || managed, owner, false);
+                let press = play_press(ready || (managed && owner == Some(true)), owner, false);
                 let build_first =
                     needs_build && update.is_none() && matches!(press, PlayPress::Play);
                 let (label, icon) = match &update {
