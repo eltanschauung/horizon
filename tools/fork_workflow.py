@@ -49,6 +49,18 @@ def git(*args):
     return subprocess.check_output(['git', *args], cwd=ROOT, text=True).strip()
 
 
+def workspace_root():
+    common_dir = Path(git('rev-parse', '--path-format=absolute', '--git-common-dir'))
+    return common_dir.parent.parent
+
+
+def source_commit(checkout, ref):
+    return subprocess.check_output(
+        ['git', '-C', checkout, 'rev-parse', '--verify', ref + '^{commit}'],
+        text=True,
+    ).strip()
+
+
 def safe_id(value):
     if not re.fullmatch(r'[a-z0-9_]{1,64}', value):
         raise ValueError('Invalid package id: '+value)
@@ -118,9 +130,9 @@ def snapshot(args):
         raise ValueError('Choose a fresh manifest directory')
     wanted = {safe_id(part) for part in args.mods.split(',')} if args.mods else None
     packages = collect_sdk_packages((args.packages_root or game).resolve(), revision, wanted)
-    workspace = Path(git('rev-parse', '--path-format=absolute', '--git-common-dir')).parent.parent
-    lunatic_revision = subprocess.check_output(['git','-C',workspace/'Lunatic','rev-parse','HEAD'],text=True).strip()
-    mods_revision = subprocess.check_output(['git','-C',workspace/'horizon-mods','rev-parse','HEAD'],text=True).strip()
+    workspace = workspace_root()
+    lunatic_revision = source_commit(workspace/'Lunatic', args.lunatic_ref)
+    mods_revision = source_commit(workspace/'horizon-mods', args.mods_ref)
     toolchain = git('show', provenance['revision']+':tools/ci/rust-version')
     if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', toolchain):
         raise ValueError('The launcher revision has no exact Rust compiler version')
@@ -307,7 +319,7 @@ def deploy(args):
     if 'local' in targets and 'client' not in a:raise ValueError('Build client artifacts first')
     if 'server' in targets:
         if args.apply:
-            require_current_lunatic(m, ROOT.parent/'Lunatic')
+            require_current_lunatic(m, workspace_root()/'Lunatic')
         if 'server' not in a:raise ValueError('Build server artifacts first')
         if not re.fullmatch(r'[A-Za-z0-9_.@-]+',args.host) or args.host.startswith('-'):raise ValueError('Invalid SSH host')
     result={'apply':args.apply,'revision':m['game_revision'],'native_mods':sorted(e['id']for e in m['packages']if e['kind']=='native')}
@@ -474,6 +486,8 @@ def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     commands=parser.add_subparsers(dest='command',required=True)
     p=commands.add_parser('manifest');p.add_argument('--output',type=Path);p.add_argument('--revision');p.add_argument('--mods');p.add_argument('--base');p.add_argument('--packages-root',type=Path);p.add_argument('--instance',default='horizon')
+    p.add_argument('--lunatic-ref',default='HEAD',help='Lunatic source commit that produced the frozen package')
+    p.add_argument('--mods-ref',default='HEAD',help='Horizon Mods source commit that produced the frozen packages')
     for name in ['build-plan','preflight']:
         p=commands.add_parser(name);p.add_argument('manifest',type=Path);p.add_argument('--target',choices=['client','server','both'],default='both')
     p=commands.add_parser('deploy');p.add_argument('manifest',type=Path);p.add_argument('--target',choices=['local','server','both'],default='local');p.add_argument('--host',default='telemazer@74.91.116.171');p.add_argument('--server-dir',default='/home/telemazer/lunatic-server');p.add_argument('--service',default='lunatic-horizon.service');p.add_argument('--apply',action='store_true');p.add_argument('--restart-occupied',action='store_true',help='Restart the dedicated server even if players are online')
