@@ -191,7 +191,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual((self.root/'bin/horizon-engine').read_bytes(),b'old-horizon-engine')
         self.assertEqual((self.root/'bin/server').read_bytes(),b'old-server')
         self.assertEqual((self.root/'bin/engine').read_bytes(),b'old-engine')
-        self.assertEqual([c.args[0][3]for c in run.call_args_list if c.args[0][0]=='sudo'],['stop','start','stop','start'])
+        self.assertEqual([c.args[0][3]for c in run.call_args_list if c.args[0][0]=='sudo'],['stop','start','stop','reset-failed','start'])
 
     def test_unknown_destination_never_written(self):
         p=self.payload();p['files']['../world/level.dat']='abc'
