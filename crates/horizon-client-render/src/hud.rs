@@ -2,8 +2,8 @@
 //! textures, and a batch of textured quads in GUI pixels (vanilla's automatic
 //! GUI scale is applied when drawing).
 use crate::Result;
-use horizon_assets::resource_source::ResourceSource;
 use horizon_assets::animation::AnimationMetadata;
+use horizon_assets::resource_source::ResourceSource;
 use smallvec::SmallVec;
 use std::{
     collections::{HashMap, HashSet},
@@ -1427,16 +1427,20 @@ impl HudAtlas {
                     maps.iter().any(Option::is_some).then(|| Box::new(maps))
                 })
                 .flatten();
-            (gw <= 1024
-                && (gh <= 512
-                    || matches!(
-                        name.as_str(),
-                        "gui/title/background/panorama_0"
-                            | "gui/title/background/panorama_2"
-                            | "gui/title/background/panorama_3"
-                            | "gui/presets/isles"
-                    )
-                    || name.starts_with("font/")))
+            let large_logo = matches!(name.as_str(), "gui/title/minecraft" | "gui/title/edition")
+                && w <= 2048
+                && h <= 512;
+            (large_logo
+                || (gw <= 1024
+                    && (gh <= 512
+                        || matches!(
+                            name.as_str(),
+                            "gui/title/background/panorama_0"
+                                | "gui/title/background/panorama_2"
+                                | "gui/title/background/panorama_3"
+                                | "gui/presets/isles"
+                        )
+                        || name.starts_with("font/"))))
             .then_some(((name, w, h, pixels), flags, gui_size, animated, maps))
         };
         let threads = std::thread::available_parallelism().map_or(2, |n| n.get());
@@ -3887,11 +3891,20 @@ mod tests {
         let gui = root.join("assets/minecraft/textures/gui");
         fs::create_dir_all(&gui).unwrap();
         write_strip(&gui.join("huge.png"), 2048, 64, &[[1, 2, 3, 255]], None);
+        fs::create_dir_all(gui.join("title")).unwrap();
+        write_strip(
+            &gui.join("title/minecraft.png"),
+            1096,
+            272,
+            &[[1, 2, 3, 255]],
+            None,
+        );
         let atlas = HudAtlas::build(&ResourceSource::directory(root.clone())).unwrap();
         let rect = atlas.sprites["mypack:particle/light_rays/02"];
         assert_eq!(rect.texels((atlas.width, atlas.height)), (1024, 1024));
         assert_eq!(texel_at(&atlas, rect, 512, 512), [250, 240, 200, 255]);
         assert!(!atlas.sprites.contains_key("gui/huge"));
+        assert!(atlas.sprites.contains_key("gui/title/minecraft"));
         fs::remove_dir_all(&root).unwrap();
     }
     /// OptiFine random entity variants outside `textures/` pack under the names

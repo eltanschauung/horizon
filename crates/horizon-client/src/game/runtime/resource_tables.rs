@@ -135,12 +135,18 @@ pub struct UiResources {
     pub panorama: Arc<horizon_client::gfx::panorama::Faces>,
     /// The title screen's splashes (`horizon_client::splashes::pool`).
     pub splashes: Arc<str>,
+    pub characters: Vec<horizon_client::characters::Character>,
 }
 
 impl Game<'_> {
     /// A title screen over the current resources and their splash pool.
     pub(crate) fn new_title(&self, saves: PathBuf) -> Title {
-        Title::new(saves, &self.options.resources, &self.gui.splashes)
+        Title::with_characters(
+            saves,
+            &self.options.resources,
+            &self.gui.splashes,
+            self.gui.characters.clone(),
+        )
     }
 }
 
@@ -175,6 +181,7 @@ impl UiResources {
                 atlas: atlas?,
                 panorama: Arc::new(panorama),
                 splashes: Arc::from(""),
+                characters: horizon_client::characters::roster_from_source(root),
             })
         })
     }
@@ -195,6 +202,7 @@ impl UiResources {
             atlas: HudAtlas::fonts(root)?,
             panorama: Arc::new(horizon_client::gfx::panorama::Faces::colour([0; 4])),
             splashes: Arc::from(""),
+            characters: Vec::new(),
         })
     }
 }
