@@ -165,7 +165,8 @@ pub(super) fn import_resource_packs(
     ui.update_pack_infos(pack_infos(vanilla, server, additional));
     ui.pack_configs = pack_configs(vanilla);
     if failed {
-        ui.resource_error = Some(horizon_client::text::Text::translate("pack.copyFailure", &[]).plain());
+        ui.resource_error =
+            Some(horizon_client::text::Text::translate("pack.copyFailure", &[]).plain());
     }
 }
 /// The player changed Pack Options: `chosen` replaces their choices for `entries`, kept in
@@ -720,6 +721,7 @@ pub(super) fn stage_pack(
         panorama: Arc::new(panorama.unwrap_or_else(|p| std::panic::resume_unwind(p))),
         // `Game::apply_staged_pack` fills it with the client's setting.
         splashes: Arc::from(""),
+        characters: horizon_client::characters::roster_from_source(resource_root.source()),
     };
     progress.set(2);
     let mut pack = PackResources::load(

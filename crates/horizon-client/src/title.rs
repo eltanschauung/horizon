@@ -884,6 +884,20 @@ impl Title {
     }
     /// `splashes` is the pool `crate::splashes::pool` built for the current resources.
     pub fn new(saves: PathBuf, resources: &Path, splashes: &str) -> Self {
+        Self::with_characters(
+            saves,
+            resources,
+            splashes,
+            crate::characters::roster(resources),
+        )
+    }
+
+    pub fn with_characters(
+        saves: PathBuf,
+        resources: &Path,
+        splashes: &str,
+        roster: Vec<crate::characters::Character>,
+    ) -> Self {
         use chrono::Datelike;
         let today = chrono::Local::now();
         // `SplashManager.RANDOM`: `RandomSource.create()`. `getSplash` rolls for
@@ -900,7 +914,7 @@ impl Title {
         Self {
             rule_registry: crate::gamerules::rule_registry(),
             mode,
-            characters: characters::Screen::new(resources, instance),
+            characters: characters::Screen::new(roster, instance),
             gated: false,
             requested: None,
             last_server: String::new(),

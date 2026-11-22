@@ -34,6 +34,7 @@ pub(super) fn show(looked_in: &std::path::Path, settings: &Settings) -> Result<(
             ))?,
             panorama: Arc::new(horizon_client::gfx::panorama::Faces::colour([0; 4])),
             splashes: Arc::from(""),
+            characters: Vec::new(),
         },
         screen: NoResources::new(looked_in, horizon_hooks::engine::get_the_game()),
         pointer: (0.0, 0.0),

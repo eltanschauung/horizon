@@ -115,7 +115,7 @@ impl StartupMenu {
         root: PathBuf,
         settings: &Settings,
         additional_data: Arc<[Arc<horizon_client::datapack::DataPack>]>,
-        splashes: &str,
+        gui: &UiResources,
     ) {
         horizon_client::ui::load_metadata(
             &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
@@ -128,10 +128,11 @@ impl StartupMenu {
         ));
         self.root = root;
         if self.title.is_none() {
-            let mut title = Title::new(
+            let mut title = Title::with_characters(
                 std::env::current_dir().unwrap_or_default().join("saves"),
                 &self.root,
-                splashes,
+                &gui.splashes,
+                gui.characters.clone(),
             );
             title.last_server = settings.file.string("lastServer");
             title.skip_multiplayer_warning = settings.file.bool("skipMultiplayerWarning");
@@ -1559,6 +1560,7 @@ mod tests {
                 96, 110, 111, 255,
             ])),
             splashes: Arc::from(""),
+            characters: horizon_client::characters::roster(root),
         }
     }
 

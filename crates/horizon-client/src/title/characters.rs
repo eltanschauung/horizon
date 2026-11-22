@@ -19,10 +19,9 @@ pub(super) struct Screen {
 }
 
 impl Screen {
-    pub fn new(root: &Path, instance: PathBuf) -> Self {
-        let roster = characters::roster(root);
-        let selected = characters::selected(root, &instance)
-            .and_then(|choice| roster.iter().position(|c| *c == choice));
+    pub fn new(roster: Vec<Character>, instance: PathBuf) -> Self {
+        let selected = characters::selected_id(&instance)
+            .and_then(|id| roster.iter().position(|character| character.id == id));
         Self {
             roster,
             selected,

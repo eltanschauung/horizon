@@ -254,7 +254,9 @@ pub fn roster(root: &Path) -> Vec<Character> {
     ))
 }
 
-fn roster_from_source(source: &horizon_assets::resource_source::ResourceSource) -> Vec<Character> {
+pub fn roster_from_source(
+    source: &horizon_assets::resource_source::ResourceSource,
+) -> Vec<Character> {
     #[derive(Deserialize)]
     struct Catalog {
         characters: Vec<Character>,
@@ -348,9 +350,14 @@ struct Choice {
 }
 
 pub fn selected(root: &Path, instance: &Path) -> Option<Character> {
+    let id = selected_id(instance)?;
+    roster(root).into_iter().find(|c| c.id == id)
+}
+
+pub(crate) fn selected_id(instance: &Path) -> Option<String> {
     let choice: Choice =
         serde_json::from_slice(&fs::read(instance.join(CHOICE_FILE)).ok()?).ok()?;
-    roster(root).into_iter().find(|c| c.id == choice.character)
+    Some(choice.character)
 }
 
 /// Save only this preference, atomically; never rewrite options or account files.
