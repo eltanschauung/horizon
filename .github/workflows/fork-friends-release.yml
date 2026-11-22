@@ -2,6 +2,9 @@ name: Fork friends release
 on:
   workflow_dispatch:
     inputs:
+      bootstrap_commit:
+        description: Exact commit for Linux and Windows base game and launcher build artifacts
+        required: false
       tag:
         description: Draft release containing the frozen sdk-packages.zip
         required: false
@@ -13,7 +16,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: fork-friends-${{ inputs.tag || inputs.sdk_commit }}
+  group: fork-friends-${{ inputs.tag || inputs.sdk_commit || inputs.bootstrap_commit }}
   cancel-in-progress: false
 
 jobs:
@@ -22,9 +25,15 @@ jobs:
     steps:
       - name: Check which artifact to build
         env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          BOOTSTRAP_COMMIT: ${{ inputs.bootstrap_commit }}
           SDK_COMMIT: ${{ inputs.sdk_commit }}
         shell: bash
         run: |
+          if [[ -n "$BOOTSTRAP_COMMIT" ]]; then
+            [[ "$BOOTSTRAP_COMMIT" =~ ^[a-f0-9]{40}$ && -z "$RELEASE_TAG" && -z "$SDK_COMMIT" ]]
+            exit
+          fi
           if [[ -n "$RELEASE_TAG" && -z "$SDK_COMMIT" ]]; then
             exit 0
           fi
@@ -145,3 +154,98 @@ jobs:
         run: |
           test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = true
           gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" dist/horizon-linux-x86_64.tar.gz dist/horizon-windows-x64.zip dist/horizon-launcher-linux-x86_64.tar.gz dist/horizon-launcher-windows-x64.zip
+
+  bootstrap:
+    needs: request
+    if: inputs.bootstrap_commit != ''
+    name: ${{ matrix.component }} ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [game, launcher]
+        platform: [linux, windows]
+        include:
+          - platform: linux
+            os: ubuntu-22.04
+            suffix: ''
+            flags: ''
+          - platform: windows
+            os: windows-latest
+            suffix: .exe
+            flags: -C target-feature=+crt-static
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 115
+    env:
+      SOURCE_REVISION: ${{ inputs.bootstrap_commit }}
+      HORIZON_VERSION: 0.3.7
+      HORIZON_LAUNCHER_VERSION: 0.3.7
+      HORIZON_LAUNCHER_TAG: launcher@0.3.7
+      HORIZON_MSA_CLIENT_ID: 331e08f8-172d-43b9-835a-3108c2fcdbf3
+      HORIZON_TELEMETRY_URL: off
+      RUSTFLAGS: ${{ matrix.flags }}
+      EXE: ${{ matrix.suffix }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.bootstrap_commit }}
+          persist-credentials: false
+      - id: rust
+        run: echo "version=$(cat tools/ci/rust-version)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
+        with:
+          toolchain: ${{ steps.rust.outputs.version }}
+          components: rust-src
+          targets: wasm32-unknown-unknown
+      - name: Linux build libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libfontconfig-dev
+      - name: Build and verify the base programs
+        if: matrix.component == 'game'
+        run: |
+          set -euo pipefail
+          cargo build --release --locked -p horizon-official --bin horizon-official \
+            -p horizon-client-lib --bin horizon-ctl -p horizon-prepare --bin horizon-prepare \
+            -p horizon-server --bin horizon-server
+          mkdir -p dist
+          cp "target/release/horizon-official$EXE" "dist/horizon-client$EXE"
+          for program in horizon-ctl horizon-prepare horizon-server; do
+            cp "target/release/$program$EXE" "dist/$program$EXE"
+          done
+          "dist/horizon-client$EXE" --help > game-help.txt
+          grep -q -- '--resources' game-help.txt
+          "dist/horizon-prepare$EXE" --launch-api
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            python3 tools/check_glibc.py dist/horizon-client dist/horizon-ctl dist/horizon-prepare dist/horizon-server
+            cargo run --locked -p cargo-horizon-mod -- wasm-std dist/horizon-wasm-std.wasm
+          else
+            python tools/check_pe_arch.py x64 dist/*.exe
+            python tools/ci/fetch_dxc.py dist
+          fi
+      - name: Build and verify the launcher
+        if: matrix.component == 'launcher'
+        run: |
+          set -euo pipefail
+          export HORIZON_FORK_SOURCE_REVISION="$SOURCE_REVISION"
+          export HORIZON_FORK_LAUNCHER_TREE=$(git rev-parse HEAD:launcher)
+          export HORIZON_FORK_SOURCE_DIRTY=0
+          cargo build --locked --profile fast --manifest-path launcher/Cargo.toml --bin horizon-launcher
+          mkdir -p dist
+          cp "launcher/target/fast/horizon-launcher$EXE" "dist/horizon-launcher$EXE"
+          "dist/horizon-launcher$EXE" fork-info > launcher-provenance.json
+          grep -F "$SOURCE_REVISION" launcher-provenance.json
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            python3 tools/check_glibc.py dist/horizon-launcher
+          else
+            python tools/check_pe_arch.py x64 dist/horizon-launcher.exe
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fork-bootstrap-${{ matrix.component }}-${{ matrix.platform }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
