@@ -50,6 +50,8 @@ struct Resolve {
 struct Node {
     id: String,
     deps: Vec<Dependency>,
+    #[serde(default)]
+    features: Vec<String>,
 }
 #[derive(Deserialize)]
 struct Dependency {
@@ -129,6 +131,64 @@ impl Metadata {
             .map(|ids| ids.into_iter().map(str::to_owned).collect())
     }
 
+    /// Direct registry libraries of the local runtime crates, with the resolved feature set.
+    /// Linking these once also shares their transitive Rust dependencies between the mod dylibs.
+    pub(super) fn shared_dependencies(&self) -> Result<toml::Table, String> {
+        let runtime = self.reachable(true)?;
+        let local: BTreeSet<_> = self
+            .packages
+            .iter()
+            .filter(|package| package.source.is_none() && runtime.contains(package.id.as_str()))
+            .map(|package| package.id.as_str())
+            .collect();
+        let direct: BTreeSet<_> = self
+            .resolve
+            .nodes
+            .iter()
+            .filter(|node| local.contains(node.id.as_str()))
+            .flat_map(|node| &node.deps)
+            .filter(|dependency| dependency.dep_kinds.iter().any(|kind| kind.kind.is_none()))
+            .map(|dependency| dependency.pkg.as_str())
+            .collect();
+        let features: std::collections::BTreeMap<_, _> = self
+            .resolve
+            .nodes
+            .iter()
+            .map(|node| (node.id.as_str(), &node.features))
+            .collect();
+        let mut dependencies: Vec<_> = self
+            .packages
+            .iter()
+            .filter(|package| {
+                package.source.is_some()
+                    && runtime.contains(package.id.as_str())
+                    && direct.contains(package.id.as_str())
+            })
+            .collect();
+        dependencies.sort_by(|left, right| left.id.cmp(&right.id));
+        let mut table = toml::Table::new();
+        for (index, package) in dependencies.into_iter().enumerate() {
+            let enabled = features
+                .get(package.id.as_str())
+                .ok_or("Cargo metadata: missing resolved features")?;
+            let default_features = enabled.iter().any(|name| name == "default");
+            let enabled: Vec<_> = enabled
+                .iter()
+                .filter(|name| name.as_str() != "default")
+                .cloned()
+                .collect();
+            let version = format!("={}", package.version);
+            let entry = toml::toml! {
+                package = (package.name.clone())
+                version = (version)
+                default-features = (default_features)
+                features = (enabled)
+            };
+            table.insert(format!("registry_{index}"), entry.into());
+        }
+        Ok(table)
+    }
+
     pub fn inventory(
         &self,
         game: &super::registry_lock::RegistryLock,
@@ -150,7 +210,10 @@ impl Metadata {
                 .filter(|_| runtime.contains(package.id.as_str()))
             {
                 if let Some(existing) = links.iter().find(|claim| &claim.library == library) {
-                    return Err(format!("Native library {library}: mod package {} {} would compile a second provider of SDK package {} {}; the prebuilt game cannot be relinked with a different provider", package.name, package.version, existing.name, existing.version));
+                    return Err(format!(
+                        "Native library {library}: mod package {} {} would compile a second provider of SDK package {} {}; the prebuilt game cannot be relinked with a different provider",
+                        package.name, package.version, existing.name, existing.version
+                    ));
                 }
             }
             if game

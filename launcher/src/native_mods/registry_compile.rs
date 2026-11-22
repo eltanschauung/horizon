@@ -95,6 +95,7 @@ pub(super) fn compile(
     let template = api::template(&game.join(super::api_route::TEMPLATE))?;
     let mut bindings = BTreeMap::new();
     let mut members = Vec::new();
+    let mut mod_libraries = Vec::new();
     let mut wrapper_deps = toml::Table::new();
     let deps = game.join("deps");
     let packages: BTreeMap<_, _> = projects
@@ -202,7 +203,8 @@ pub(super) fn compile(
                 let mut source = fs::read_to_string(&root).map_err(|e| e.to_string())?;
                 prebuilt::check_entry_root(&source, id)?;
                 source.push_str("\n#[allow(unsafe_code)]\n#[path = \"__horizon_entry.rs\"] mod __horizon_entry;\n");
-                fs::write(root, source).map_err(|e| e.to_string())?;
+                fs::write(&root, source).map_err(|e| e.to_string())?;
+                mod_libraries.push((path.clone(), root));
             }
             fs::write(path, manifest.to_string()).map_err(|e| e.to_string())?;
         }
@@ -405,11 +407,10 @@ pub(super) fn compile(
     )
     .map_err(|e| e.to_string())?;
     plan.fetch_with_patches(rust, out, &patches)?;
-    let metadata = super::registry_inventory::read(rust, out)
+    let mut metadata = super::registry_inventory::read(rust, out)
         .map_err(|error| plan.explain_resolution(error))?;
-    plan.check(&super::registry_lock::RegistryLock::parse(
-        &super::read_lock(out)?,
-    )?)?;
+    let approved = super::registry_lock::RegistryLock::parse(&super::read_lock(out)?)?;
+    plan.check(&approved)?;
     let mut game_names = plan.game.game_package_names();
     for registry in patches.values() {
         for name in registry.as_table().expect("validated SDK patches").keys() {
@@ -433,6 +434,23 @@ pub(super) fn compile(
     }
     if cfg!(target_os = "macos") {
         link_args.push("-Wl,-rpath,@executable_path".into());
+    }
+    if let Some(shared) =
+        stage_shared_registry(out, &mod_libraries, metadata.shared_dependencies()?)?
+    {
+        bindings.insert(
+            shared,
+            registry_rustc::Bindings {
+                externs: BTreeMap::new(),
+                link_args: link_args.clone(),
+            },
+        );
+        let mut resolve = super::cargo(rust, out, "update");
+        resolve.args(["--workspace", "--offline"]);
+        super::run(resolve, "Linking the validated registry graph", |_| {})?;
+        let linked = super::registry_lock::RegistryLock::parse(&super::read_lock(out)?)?;
+        approved.check_shared_registry(&linked)?;
+        metadata = super::registry_inventory::read(rust, out)?;
     }
     bindings.insert(
         out.to_path_buf(),
@@ -528,6 +546,57 @@ pub(super) fn compile(
 
 /// Gives each file under `staged` whose bytes equal the file at the same place under `previous`
 /// that file's modified time.
+/// Give the generated mod dylibs one shared copy of their registry dependencies.
+fn stage_shared_registry(
+    workspace: &Path,
+    mods: &[(PathBuf, PathBuf)],
+    dependencies: toml::Table,
+) -> Result<Option<PathBuf>, String> {
+    if dependencies.is_empty() {
+        return Ok(None);
+    }
+    const SHARED: &str = "horizon-registry-shared";
+    let directory = workspace.join(SHARED);
+    fs::create_dir_all(directory.join("src")).map_err(|error| error.to_string())?;
+    let exports: String = dependencies
+        .keys()
+        .map(|alias| format!("pub extern crate {alias};\n"))
+        .collect();
+    let mut manifest = toml::toml! {
+        [package]
+        name = (SHARED)
+        version = "0.0.0"
+        edition = "2024"
+        [lib]
+        crate-type = ["dylib"]
+    };
+    manifest.insert("dependencies".into(), dependencies.into());
+    fs::write(directory.join("Cargo.toml"), manifest.to_string())
+        .map_err(|error| error.to_string())?;
+    fs::write(directory.join("src/lib.rs"), exports).map_err(|error| error.to_string())?;
+    for (cargo, source) in mods {
+        let mut manifest: toml::Table = fs::read_to_string(cargo)
+            .map_err(|error| error.to_string())?
+            .parse()
+            .map_err(|error| format!("Cargo.toml: {error}"))?;
+        let dependencies = manifest
+            .entry("dependencies")
+            .or_insert_with(|| toml::Table::new().into())
+            .as_table_mut()
+            .ok_or("Invalid Cargo dependencies")?;
+        if dependencies.contains_key("horizon_registry_shared") {
+            return Err("horizon_registry_shared is reserved for the SDK linker".into());
+        }
+        let shared = toml::toml! { package = (SHARED) path = (format!("../../{SHARED}")) };
+        dependencies.insert("horizon_registry_shared".into(), shared.into());
+        fs::write(cargo, manifest.to_string()).map_err(|error| error.to_string())?;
+        let mut contents = fs::read_to_string(source).map_err(|error| error.to_string())?;
+        contents.push_str("\nextern crate horizon_registry_shared as _;\n");
+        fs::write(source, contents).map_err(|error| error.to_string())?;
+    }
+    Ok(Some(directory))
+}
+
 fn keep_unchanged_times(staged: &Path, previous: &Path) -> std::io::Result<()> {
     for entry in fs::read_dir(staged)? {
         let entry = entry?;

@@ -5,6 +5,10 @@ on:
       bootstrap_commit:
         description: Exact commit for Linux and Windows base game and launcher build artifacts
         required: false
+      launcher_only:
+        description: Build just the Linux and Windows launchers for the bootstrap commit
+        type: boolean
+        default: false
       tag:
         description: Draft release containing the frozen sdk-packages.zip
         required: false
@@ -162,7 +166,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        component: [game, launcher]
+        component: ${{ fromJSON(inputs.launcher_only && '["launcher"]' || '["game","launcher"]') }}
         platform: [linux, windows]
         include:
           - platform: linux

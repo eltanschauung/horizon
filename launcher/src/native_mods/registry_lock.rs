@@ -450,6 +450,19 @@ impl RegistryLock {
         Ok(())
     }
 
+    pub fn check_shared_registry(&self, linked: &Self) -> Result<(), String> {
+        let unchanged = self.packages.len() == linked.packages.len()
+            && self.packages.iter().all(|(id, before)| {
+                linked.packages.get(id).is_some_and(|after| {
+                    before.checksum == after.checksum && before.edges == after.edges
+                })
+            });
+        if !unchanged {
+            return Err("Adding the shared Rust library changed the validated Cargo registry graph".into());
+        }
+        Ok(())
+    }
+
     pub fn game_package_names(&self) -> std::collections::BTreeSet<String> {
         self.local.keys().map(|id| id.name.clone()).collect()
     }
