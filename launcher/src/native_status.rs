@@ -266,7 +266,7 @@ impl Installed {
     }
 
     /// Whether the file is in `horizon-native-mods/`; one in `horizon-mods/` is a wasm or
-    /// content mod, which needs no build.
+    /// content mod, which needs no build and no native permission.
     pub fn native(&self) -> bool {
         self.file
             .strip_prefix(native_mods::INSTALLED)
@@ -1077,6 +1077,7 @@ capabilities = ['registries']
         assert_eq!(Build::read("v0.1.0"), None, "not a native build");
     }
 
+    /// A build from before pins were recorded that compiled another commit than its Nightly's
     #[test]
     fn only_hmods_in_the_native_folder_are_native() {
         assert!(is_native_file("horizon-native-mods/veinminer.hmod"));
@@ -1085,13 +1086,14 @@ capabilities = ['registries']
         assert!(!is_native_file("resourcepacks/x.zip"));
     }
 
-    /// Read obsolete settings without persisting them.
+    /// Old switches and notices never count as native-code consent.
     #[test]
     fn old_settings_with_the_native_mods_switch_still_read() {
-        let s = backend::Settings::parse(
-            r#"{"native_mods":false,"native_mods_allowed_at":42,"mods_auto_update":false}"#,
-        );
-        assert!(!s.auto_updates_mods());
+        let s: backend::Settings =
+            serde_json::from_str(r#"{"native_mods": true, "native_mods_noticed": true}"#).unwrap();
+        assert!(s.native_mods_allowed_at.is_none());
+        let s: backend::Settings = serde_json::from_str(r#"{"native_mods": false}"#).unwrap();
+        assert!(s.native_mods_allowed_at.is_none());
         let saved = serde_json::to_string(&s).unwrap();
         assert!(!saved.contains("native_mods"), "{saved}");
     }

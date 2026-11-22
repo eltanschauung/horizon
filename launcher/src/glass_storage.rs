@@ -1,6 +1,7 @@
 //! Cached storage inventory; filesystem work never runs on the render thread.
 use super::*;
 use crate::glass_ui as ui;
+use horizon_launcher::browser;
 use storage::Category;
 
 /// What a Clear click asks to confirm, and what answering does: `Some(clear)` starts that
@@ -192,12 +193,197 @@ impl Launcher {
                 ),
             ));
         }
+        let breakdown = card;
+        let mut card = crate::glass::plate(horizon_theme::glass::radius::PANEL).p(px(8.));
+        if self.settings.native_mods_allowed_at.is_some() {
+            // Turn off asks first: it switches mods off in every instance, and each comes back
+            // only from its own instance. Counting and switching off read every instance's
+            // mods, so both run off the window's thread.
+            let (detail, actions) = match self.storage_revoke {
+                None => (
+                    tr(
+                        "Allowed: they run with access to your computer. Turn off takes the \
+                        permission back; Horizon asks again before the next build.",
+                    )
+                    .to_string(),
+                    div().child(match self.storage_counting {
+                        // Counting: the button waits, so a second press starts nothing.
+                        Some(_) => disabled(button(
+                            "storage-revoke",
+                            "Counting your native mods…",
+                            Kind::Secondary,
+                            &t,
+                        )),
+                        None => button("storage-revoke", "Turn off", Kind::Secondary, &t)
+                            .on_click(cx.listener(|this, _, _, cx| this.storage_count_native(cx))),
+                    }),
+                ),
+                Some((mods, instances_)) => (
+                    match (mods, instances_) {
+                        (0, _) => tr("No native mods are switched on. Turning off only takes \
+                                      the permission back; Horizon asks again before the next \
+                                      build.")
+                        .to_string(),
+                        (1, _) => tr("This takes the permission back and switches off your \
+                                      one native mod. Turn it back on from its instance's \
+                                      Installed mods.")
+                        .to_string(),
+                        (_, 1) => trf(
+                            "This takes the permission back and switches off {mods} native \
+                             mods. Turn them back on from the instance's Installed mods.",
+                            &[("mods", &mods.to_string())],
+                        ),
+                        _ => trf(
+                            "This takes the permission back and switches off {mods} native \
+                             mods in {instances} instances. Turn them back on from each \
+                             instance's Installed mods.",
+                            &[
+                                ("mods", &mods.to_string()),
+                                ("instances", &instances_.to_string()),
+                            ],
+                        ),
+                    },
+                    // Keeping them is the leading choice, as on the other questions.
+                    div()
+                        .flex()
+                        .gap(px(8.))
+                        .child(
+                            button("storage-revoke-yes", "Turn off", Kind::Secondary, &t).on_click(
+                                cx.listener(|this, _, _, cx| this.turn_off_native_mods(cx)),
+                            ),
+                        )
+                        .child(
+                            button(
+                                "storage-revoke-cancel",
+                                // With nothing switched on, what stays is the permission.
+                                match mods {
+                                    0 => "Keep the permission",
+                                    1 => "Keep it",
+                                    _ => "Keep them",
+                                },
+                                Kind::Primary,
+                                &t,
+                            )
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.storage_revoke = None;
+                                cx.notify();
+                            })),
+                        ),
+                ),
+            };
+            // A Turn off that didn't finish says so here, where it was pressed.
+            let detail = div().child(detail).children(
+                self.storage_revoke_error
+                    .clone()
+                    .map(|error| div().text_color(ui::danger()).child(error)),
+            );
+            card = card.child(ui::setting_row(
+                tr("Native mods"),
+                Some(detail.into_any_element()),
+                Some(actions.into_any_element()),
+            ));
+        } else {
+            card = card.child(ui::setting_row(
+                tr("Native mods"),
+                Some(
+                    div()
+                        .child(tr(
+                            "Not allowed: Horizon asks before it builds the first one.",
+                        ))
+                        .children(
+                            self.storage_revoke_error
+                                .clone()
+                                .map(|error| div().text_color(ui::danger()).child(error)),
+                        )
+                        .into_any_element(),
+                ),
+                None,
+            ));
+        }
         div()
             .flex()
             .flex_col()
             .gap(px(12.))
             .child(summary)
+            .child(breakdown)
             .child(card)
+    }
+
+    /// Counts the switched-on native mods and the instances holding them, on a worker, then
+    /// asks before Turn off.
+    fn storage_count_native(&mut self, cx: &mut Context<Self>) {
+        let visit = self.storage_visit;
+        self.storage_counting = Some(visit);
+        self.storage_revoke_error = None;
+        let task = cx.background_executor().spawn(async move {
+            let counts: Vec<usize> = instances::list()
+                .iter()
+                .map(|i| native_status::enabled(&i.home).len())
+                .filter(|n| *n > 0)
+                .collect();
+            (counts.iter().sum::<usize>(), counts.len())
+        });
+        cx.spawn(async move |this, cx| {
+            let counted = task.await;
+            let _ = this.update(cx, |this, cx| {
+                // A count from a visit the player has left asks nothing.
+                if this.storage_counting == Some(visit) {
+                    this.storage_counting = None;
+                    this.storage_revoke = Some(counted);
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Takes the permission back (saved first: nothing changes if it can't be), then switches
+    /// every native mod off, on a worker; a build card still open is cleared, so its buttons ask
+    /// again rather than fail.
+    fn turn_off_native_mods(&mut self, cx: &mut Context<Self>) {
+        self.storage_revoke = None;
+        if let Err(error) = self.settings.revoke_native_mods() {
+            self.storage_revoke_error = Some(error);
+            cx.notify();
+            return;
+        }
+        self.native_error = None;
+        self.native_worlds = None;
+        self.native_failed_mods.clear();
+        // A build waiting for a preparation is dropped now, not asked about later.
+        self.native_look_again(None, None);
+        let task = cx.background_executor().spawn(async move {
+            let mut failure = None;
+            for instance in instances::list() {
+                for (id, _, _) in native_status::enabled(&instance.home) {
+                    if let Err(error) = browser::java::set_enabled(&instance.home, &id, false) {
+                        failure.get_or_insert((id, instance.name.clone(), error));
+                    }
+                }
+            }
+            failure
+        });
+        cx.spawn(async move |this, cx| {
+            let failure = task.await;
+            let _ = this.update(cx, |this, cx| {
+                this.storage_revoke_error = failure.map(|(id, instance, error)| {
+                    trf(
+                        "The permission is off, but {mod} in {instance} couldn't be switched off \
+                         ({error}). Switch it off in {instance}'s Installed mods.",
+                        &[
+                            ("mod", &id),
+                            ("instance", &instance),
+                            ("error", error.trim_end_matches('.')),
+                        ],
+                    )
+                });
+                this.instance_mods_changed();
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
     }
 
     /// The question before a manual Clear: which files, and how much space they hold now.

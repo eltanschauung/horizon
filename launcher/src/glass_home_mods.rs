@@ -350,6 +350,10 @@ impl Launcher {
             Some(_) if mine && unbuilt && self.native_step.is_some() => {
                 (tr("Building"), ui::color(self.look.accent))
             }
+            // Native mods run as real code: nothing builds until the player allows them.
+            Some(_) if self.settings.native_mods_allowed_at.is_none() => {
+                (tr("Needs permission"), ui::warn())
+            }
             Some(id)
                 if self.native_routes(cx).mods.iter().any(|(m, route)| {
                     m == id && matches!(route, native_mods::Route::Invalid { .. })
@@ -372,8 +376,13 @@ impl Launcher {
                     .child(word),
             )
             .id(SharedString::from(format!("mod-status-{}", row.file)));
+        // Nothing here grants the permission: say where it is asked for.
         let shown = match left {
             Some(left) => self.with_reason(shown, &left.label()),
+            None if word == tr("Needs permission") => self.with_reason(
+                shown,
+                tr("Native mods need your permission before they build. Build asks you first."),
+            ),
             None => shown,
         };
         // A native mod's word opens what its chip says on the old look: how it reaches the game
@@ -425,8 +434,12 @@ impl Launcher {
         div().relative().child(button).children(menu)
     }
 
-    /// Toggles a local mod.
+    /// A local file's switch, with the native consent step for a native one.
     fn switch_native_mod(&mut self, native: &native_status::Installed, on: bool) {
+        if native.native() && !on && self.settings.native_mods_allowed_at.is_none() {
+            self.pending_consent = Some(PendingConsent::Local(native.id.clone()));
+            return;
+        }
         let home = self.mods.home();
         let Some(_lock) = horizon_launcher::browser::try_lock_home(&home) else {
             self.mods.message = Some(Err(tr("Wait for the current operation to finish.").into()));

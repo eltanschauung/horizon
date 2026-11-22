@@ -253,7 +253,7 @@ def build(args):
         log = p.parent/(args.command+'-'+target+'.log')
         out = p.parent/('server-check' if args.command=='preflight' else 'server-export')
         command = [str(p.parent/'inputs/launcher'),'native-build',str(source),'--version',m['base'],
-                   '--profile',m['profile']]
+                   '--trust-native-code','--profile',m['profile']]
         if target=='client':command+=['--instance',m['instance']]
         else:command+=['--server-output',str(out)]
         if target=='server' and out.exists():

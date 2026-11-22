@@ -690,7 +690,11 @@ impl Launcher {
                     (None, PlayPress::Play) if build_first => {
                         main.on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                             this.play_after_build = this.selected_instance().map(|i| i.id.clone());
-                            this.build_native();
+                            if this.settings.native_mods_allowed_at.is_some() {
+                                this.build_native();
+                            } else {
+                                this.request_native_build_consent();
+                            }
                             cx.notify();
                         }))
                     }

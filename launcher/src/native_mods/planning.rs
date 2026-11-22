@@ -3,6 +3,7 @@ use super::*;
 
 /// Plan enabled native mods for an instance. Worker-only filesystem and release reads.
 pub fn routes(home: &Path, base: Option<&str>) -> Result<Routes, Failed> {
+    require_consent()?;
     let lease = crate::native_cache::Cache::acquire(&backend::build_dir()).map_err(cache_error)?;
     let Some(folder) = stage_installed(home, root().join("installed.routes"))? else {
         return Ok(Routes::default());
@@ -129,6 +130,7 @@ pub struct UpdateCheck {
 /// [`UpdateCheck`] for the native mods turned on in game folder `home`, on the installed release
 /// or Nightly `to`. Worker-only: it reads releases.
 pub fn update_check(home: &Path, to: &str) -> Result<UpdateCheck, Failed> {
+    require_consent()?;
     let _lease = crate::native_cache::Cache::acquire(&backend::build_dir()).map_err(cache_error)?;
     let found = match stage_installed(home, root().join("installed.routes"))? {
         Some(folder) => scan_bundles(&folder)?,

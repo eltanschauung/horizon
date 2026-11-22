@@ -69,7 +69,9 @@ mod mods_page;
 mod mods_project;
 mod motion;
 mod multiplayer_page;
+mod native_consent;
 mod native_log_page;
+mod native_registry_consent;
 mod nav_strip;
 mod new_instance;
 mod notes_cache;
@@ -117,6 +119,7 @@ use horizon_launcher::native_mods;
 use horizon_launcher::native_status;
 use horizon_launcher::storage;
 use horizon_launcher::telemetry;
+use native_consent::PendingConsent;
 use scrollbar::Scrollbar;
 use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
@@ -310,6 +313,18 @@ struct Launcher {
     /// A Clear the player still has to confirm: `Some(None)` is Clear all.
     storage_confirm: Option<Option<storage::Category>>,
     storage_error: Option<String>,
+    /// Turn off for native mods was pressed once: how many switched-on native mods it would
+    /// switch off, and in how many instances, counted then (`glass_storage.rs`).
+    storage_revoke: Option<(usize, usize)>,
+    /// Storage is counting native mods for Turn off: the count of this Settings visit.
+    storage_counting: Option<u64>,
+    /// Each page switch: a count from an earlier visit is dropped when it arrives.
+    storage_visit: u64,
+    /// Why Turn off didn't finish, shown at the Native mods row.
+    storage_revoke_error: Option<String>,
+    /// The build asked for (its base and back-up choice) while the permission question is open:
+    /// Allow resumes it, not a plain build.
+    native_consent_build: Option<(Option<String>, bool)>,
     disk_for: Vec<String>,
     install_error: Option<(String, String)>,
     /// Import a game build (`build_import`, on the Versions page): whether one is being copied in,
@@ -339,6 +354,9 @@ struct Launcher {
     /// Mods the last build would have switched off that worlds were saved with: the choice
     /// between staying and backing those worlds up first, shown with `native_error`.
     native_worlds: Option<native_mods::AtStake>,
+    pending_consent: Option<PendingConsent>,
+    /// Why the last Allow or Cancel failed, shown inside the dialog that the page is behind.
+    consent_error: Option<String>,
     /// The instance (id) the build under way, or the last one's error, is for.
     native_for: Option<String>,
     /// The native mods the build under way (or the last one) was given (`native_build.rs`).

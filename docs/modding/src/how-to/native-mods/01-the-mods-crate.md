@@ -47,8 +47,10 @@ into the registry resolver. Registry dependencies remain native code: their buil
 proc macros execute during compilation, and the resulting mod runs with your rights. Trust their
 authors as well as the mod's author.
 
-The build log lists the number of added registry crates and the reachable build scripts and
-proc macros. The launcher validates the dependency graph before compilation.
+Before compiling these dependencies, the launcher shows how many registry crates the mod adds and
+names the reachable build scripts and proc macros. Declining stops before any mod dependency is
+compiled. Native-code permission is also required; downloading a checksummed crate
+does not make its code trusted.
 
 For native builds, Cargo compiles the mod's registry graph and the final wrapper
 against immutable SDK binaries. Registry dependencies never cause an automatic source rebuild.

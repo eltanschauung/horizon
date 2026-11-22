@@ -1,6 +1,7 @@
 //! "Add from GitHub" on the Mods page: a link to a repository, release, tag, branch or commit,
-//! resolved to an exact release file or commit (`horizon_launcher::github_mods`). Installed
-//! mods list where they came from, with "Check for updates".
+//! resolved to an exact release file or commit (`horizon_launcher::github_mods`), shown with the
+//! plain warning and a link to the exact source, and installed only after the player says they
+//! trust it. Mods installed that way list where they came from, with "Check for updates".
 use super::line_edit::{self, Key, LineEdit};
 use super::*;
 use horizon_launcher::github_mods::{self, Origin, Packed, Resolved};
@@ -17,6 +18,9 @@ enum Event {
 enum Stage {
     Idle,
     Working(String),
+    /// The warning and the source link, before anything is downloaded. `only`: the mod an update
+    /// is for.
+    Review(Resolved, Option<String>),
     Pick(Resolved, Vec<Packed>),
 }
 
@@ -96,7 +100,7 @@ impl Launcher {
                     self.github.stage = Stage::Idle;
                     self.github.message = Some(Err(e));
                 }
-                Event::Resolved(Ok(found), None) => self.github_install(found, None),
+                Event::Resolved(Ok(found), None) => self.github.stage = Stage::Review(found, None),
                 Event::Resolved(Ok(found), Some(id)) => {
                     self.github.stage = Stage::Idle;
                     let have = github_mods::origin(&self.mods.home(), &id);
@@ -156,8 +160,12 @@ impl Launcher {
         }
     }
 
-    /// Downloads and checks the resolved source, then installs it or offers a package choice.
+    /// Downloads and checks what the player agreed to; installs it unless there is a choice.
     pub(super) fn github_install(&mut self, found: Resolved, only: Option<String>) {
+        if self.settings.native_mods_allowed_at.is_none() {
+            self.pending_consent = Some(PendingConsent::Github(found, only));
+            return;
+        }
         self.github.stage =
             Stage::Working(trf("Downloading {source}…", &[("source", &found.label())]));
         let tx = self.github.tx.clone();
@@ -269,6 +277,10 @@ impl Launcher {
                 self.github.stage = Stage::Working(line.clone());
                 panel = panel.child(text(theme::CAPTION).text_color(t.ink_soft).child(line));
             }
+            Stage::Review(found, only) => {
+                panel = panel.child(self.github_review(&found, only.clone(), cx));
+                self.github.stage = Stage::Review(found, only);
+            }
             Stage::Pick(found, mods) => {
                 panel = panel.child(self.github_choice(&found, &mods, cx));
                 self.github.stage = Stage::Pick(found, mods);
@@ -282,6 +294,61 @@ impl Launcher {
             None => {}
         }
         panel
+    }
+
+    /// The warning, the exact source, and the only way forward: saying they trust it.
+    fn github_review(&self, found: &Resolved, only: Option<String>, cx: &mut Context<Self>) -> Div {
+        let t = self.theme;
+        let what = match &found.asset {
+            Some(asset) => trf(
+                "The release file {file} ({source}).",
+                &[("file", &asset.name), ("source", &found.label())],
+            ),
+            None => trf(
+                "The source at commit {commit}.",
+                &[("commit", &found.commit)],
+            ),
+        };
+        let (url, open) = (found.source_url(), found.source_url());
+        let install = found.clone();
+        plate(&t)
+            .flex()
+            .flex_col()
+            .gap(px(10.))
+            .p(px(16.))
+            .text_size(px(theme::UI.px))
+            .text_color(t.ink)
+            .child(caps(tr("Not reviewed by the Horizon registry")).text_color(t.danger))
+            .child(what)
+            .child(
+                tr("Native mods run with full access to this computer. Read the source before you install it."),
+            )
+            .child(text(theme::CAPTION).font_family(theme::MONO).text_color(t.ink_soft).child(url))
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap(px(8.))
+                    .child(
+                        button("github-source", "Open the source", Kind::Secondary, &t)
+                            .on_click(move |_, _, cx| cx.open_url(&open)),
+                    )
+                    .child(
+                        button("github-trust", "I read it and trust it: install", Kind::Primary, &t)
+                            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                this.github_install(install.clone(), only.clone());
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        button("github-cancel", "Cancel", Kind::Ghost, &t).on_click(cx.listener(
+                            |this, _: &ClickEvent, _, cx| {
+                                this.github.stage = Stage::Idle;
+                                cx.notify();
+                            },
+                        )),
+                    ),
+            )
     }
 
     /// A source with several mods: one, or all.
@@ -348,7 +415,7 @@ impl Launcher {
                 )
                 .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                     this.go(Page::Mods);
-                    this.github_install(latest.clone(), Some(only.clone()));
+                    this.github.stage = Stage::Review(latest.clone(), Some(only.clone()));
                     cx.notify();
                 }))
             }
@@ -414,6 +481,7 @@ impl Launcher {
         // backup that keeps its worlds' content.
         let named = self.stop_names(&id);
         let reason = tr("Choose what to do about your worlds first");
+        // A wasm or content `.hmod` copied into `horizon-mods/` by hand needs no native consent.
         let native = row.native();
         let flip = switch(format!("native-switch-{id}"), on, &t);
         // A retired file can't load: Remove is all its row offers. It can't be read, so it has
@@ -423,6 +491,11 @@ impl Launcher {
                 self.with_reason(disabled(flip), reason)
             } else {
                 flip.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    if native && !on && this.settings.native_mods_allowed_at.is_none() {
+                        this.pending_consent = Some(PendingConsent::Local(id.clone()));
+                        cx.notify();
+                        return;
+                    }
                     let home = this.mods.home();
                     // An update holds the folder: the window doesn't wait for it.
                     let Some(_lock) = horizon_launcher::browser::try_lock_home(&home) else {
@@ -442,6 +515,26 @@ impl Launcher {
         });
         if native {
             right = right.child(blocks::badge(tr("NATIVE"), t.muted, &t));
+        }
+        // Canceling its prompt turns `mod.<id>` off: only a row that may switch it asks.
+        if native && row.switch && self.settings.native_mods_allowed_at.is_none() {
+            let id = row.id.clone();
+            right = right
+                .child(blocks::badge(tr("Needs permission"), t.muted, &t))
+                .child(
+                    button(
+                        SharedString::from(format!("native-allow-{id}")),
+                        "Allow native mods",
+                        Kind::Secondary,
+                        &t,
+                    )
+                    .on_click(cx.listener(
+                        move |this, _: &ClickEvent, _, cx| {
+                            this.pending_consent = Some(PendingConsent::Local(id.clone()));
+                            cx.notify();
+                        },
+                    )),
+                );
         }
         let confirming = self.github.confirm_remove.as_deref() == Some(&row.file);
         let row = row.clone();

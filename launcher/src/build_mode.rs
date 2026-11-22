@@ -44,7 +44,7 @@ impl ModKind {
     /// What the badge means, for its tooltip.
     pub(super) fn hint(self) -> &'static str {
         match self {
-            Self::Native => tr("Has its own program code. It runs inside your game and is built on this computer."),
+            Self::Native => tr("Has its own program code. It runs inside your game and is built on this computer, so it needs your permission first."),
             Self::Wasm => tr("Has its own program code, run in a protected sandbox. It never needs a build."),
             Self::Content => tr("Only data and pictures, no program code. It never needs a build."),
         }
@@ -205,7 +205,7 @@ impl Launcher {
         if let Some(check) = self.mod_preview.update.clone() {
             return Some(self.update_panel(check, "nightly-2026-11-10", String::new(), pal, cx));
         }
-        if self.native_step.is_some() {
+        if self.native_step.is_some() || self.settings.native_mods_allowed_at.is_none() {
             return None;
         }
         let plays = self.version_of(instance)?.clone();
@@ -393,8 +393,11 @@ impl Launcher {
         cx: &mut Context<Self>,
     ) -> Div {
         let t = self.theme;
+        // Before permission the rows say "Needs permission": the header says the same.
+        let allowed = self.settings.native_mods_allowed_at.is_some();
         let needs = match state {
             State::NoMods | State::UpToDate => None,
+            _ if !allowed => Some(tr("Needs permission")),
             State::NotBuilt => Some(tr("Not built")),
             State::Outdated => Some(tr("Needs build")),
         };
@@ -405,7 +408,8 @@ impl Launcher {
         let remedy = failed && (!self.native_failed_mods.is_empty() || way_on.is_some());
         // The card's Try again is this same Build: one button for it.
         let retry_in_card = failed && way_on == Some(native_mods::sdk_cache::WayOn::Retry);
-        let can_build = !(self.native_step.is_some() && mine)
+        let can_build = self.pending_consent.is_none()
+            && !(self.native_step.is_some() && mine)
             // While worlds are at stake the choice row below is the only decision.
             && self.worlds_stop(mine).is_none()
             && !retry_in_card
@@ -423,15 +427,24 @@ impl Launcher {
             }
         }
         if can_build && self.native_step.is_none() {
+            // Build is where permission is asked for, so it says so until it was given.
+            let label = match self.settings.native_mods_allowed_at {
+                Some(_) => tr("Build"),
+                None => tr("Allow and build"),
+            };
             // Under a failure with its own way on, that is the main action: Build steps back.
             let kind = match remedy {
                 true => Kind::Secondary,
                 false => Kind::Primary,
             };
             right = right.child(
-                button("native-build", "Build", kind, &t).on_click(cx.listener(
+                button("native-build", label, kind, &t).on_click(cx.listener(
                     |this, _: &ClickEvent, _, cx| {
-                        this.build_native();
+                        if this.settings.native_mods_allowed_at.is_some() {
+                            this.build_native();
+                        } else {
+                            this.request_native_build_consent();
+                        }
                         cx.notify();
                     },
                 )),
@@ -750,7 +763,11 @@ impl Launcher {
             .selected_instance()
             .and_then(|instance| self.version_of(instance));
         let base = native_mods::base_for(plays.map(String::as_str), &self.installed, false);
-        let key = native_status::fingerprint(&home, base.as_deref());
+        let key = format!(
+            "{}{:?}",
+            native_status::fingerprint(&home, base.as_deref()),
+            self.settings.native_mods_allowed_at
+        );
         let mut memo = self.mods.native_routes.borrow_mut();
         if let Some(previous) = memo.as_ref() {
             let Some(result) = &previous.result else {
@@ -982,7 +999,11 @@ impl Launcher {
                 return;
             }
             this.mods.route_open = None;
-            this.build_native();
+            if this.settings.native_mods_allowed_at.is_some() {
+                this.build_native();
+            } else {
+                this.request_native_build_consent();
+            }
             cx.notify();
         }));
         let log = ui::menu_item(
@@ -1002,6 +1023,23 @@ impl Launcher {
         } else {
             ui::color(0x16112b).opacity(0.94)
         };
+        // Native mods run as real code: until the player allows them, the menu offers the
+        // trust notice (the glass rows have no button of their own for it).
+        let allow = (t.glass && self.settings.native_mods_allowed_at.is_none()).then(|| {
+            let id = id.clone();
+            ui::menu_item(
+                "route-allow",
+                tr("Allow native mods").into(),
+                tr("Native mods have access to your computer.").to_string(),
+                false,
+                &t,
+            )
+            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                this.mods.route_open = None;
+                this.pending_consent = Some(PendingConsent::Local(id.clone()));
+                cx.notify();
+            }))
+        });
         let menu = ui::popover(280.)
             .bg(backing)
             .id("route-menu")
@@ -1030,7 +1068,8 @@ impl Launcher {
             )
             .child(off)
             .child(build_now)
-            .child(log);
+            .child(log)
+            .children(allow);
         menu
     }
 

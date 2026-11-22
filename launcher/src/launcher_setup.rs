@@ -132,6 +132,11 @@ impl Launcher {
             storage_pending: false,
             storage_confirm: None,
             storage_error: None,
+            storage_revoke: None,
+            storage_counting: None,
+            storage_visit: 0,
+            storage_revoke_error: None,
+            native_consent_build: None,
             disk_for: Vec::new(),
             install_error: None,
             importing_build: false,
@@ -145,6 +150,8 @@ impl Launcher {
             native_error: None,
             native_failed_mods: Vec::new(),
             native_worlds: None,
+            pending_consent: None,
+            consent_error: None,
             native_for: None,
             native_built_mods: Vec::new(),
             rooms: Default::default(),
@@ -432,6 +439,14 @@ impl Launcher {
             self.load_auth_statuses(false);
         }
         self.load_profile_heads();
+        // A Turn off question left open isn't still asked the next time Settings opens.
+        self.storage_revoke = None;
+        // A Turn off error is read on the visit it shows in: leaving Settings settles it.
+        if self.page == Page::Settings && page != Page::Settings {
+            self.storage_revoke_error = None;
+        }
+        self.storage_counting = None;
+        self.storage_visit += 1;
         self.wardrobe_reload |= matches!(page, Page::Wardrobe | Page::Shop);
         // The glass look's Settings is a dialog over the page: opening or closing it keeps the
         // page under it as it was (its scroll, no fade).

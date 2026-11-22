@@ -81,7 +81,7 @@ def build_client(launcher, scratch, source, manifest):
             or info.get("dirty")):
         raise ValueError("The installed SDK or launcher differs from the frozen build")
     command = [launcher, "native-build", source, "--instance", "horizon",
-               "--version", base, "--profile", manifest["profile"]]
+               "--version", base, "--profile", manifest["profile"], "--trust-native-code"]
     subprocess.run(command, env={**env, "HORIZON_FORK_PREFLIGHT": "1"}, check=True)
     subprocess.run(command, env=env, check=True)
     instances = json.loads((launch_home / "instances.json").read_text())

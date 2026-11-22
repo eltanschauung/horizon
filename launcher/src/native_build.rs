@@ -26,6 +26,15 @@ impl Launcher {
         if self.native_step.is_some() {
             return;
         }
+        // Every way to a build asks first while native mods aren't allowed (permission taken
+        // back in Storage, say, with a card still open): the question, never a refusal.
+        // The card stays under the question: Cancel goes back to it.
+        if self.settings.native_mods_allowed_at.is_none() {
+            self.request_native_build_consent();
+            self.native_consent_build = Some((base, back_up));
+            return;
+        }
+        self.pending_consent = None;
         self.native_error = None;
         self.native_failed_mods.clear();
         self.native_worlds = None;
@@ -117,7 +126,8 @@ impl Launcher {
         back_up: bool,
     ) -> Snapshot {
         let plays = self.version_of(instance).cloned();
-        Snapshot::of(instance, plays, base, back_up)
+        let consent = self.settings.native_mods_allowed_at.is_some();
+        Snapshot::of(instance, plays, base, back_up, consent)
     }
 
     /// The build card shows Prepare's first words while the build waits for it.
@@ -165,6 +175,7 @@ impl Launcher {
                         |step| {
                             let _ = tx.send(Msg::NativeProgress(step.shown(), step.progress()));
                         },
+                        |inventory| native_registry_consent::request(&tx, inventory),
                         deliver,
                     )
                 },

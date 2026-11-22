@@ -52,7 +52,7 @@ impl ModRow {
         self.error.as_deref() == Some(native_status::legacy_note())
     }
 
-    /// Its mod id when it is a native mod: one that builds and has
+    /// Its mod id when it is a native mod: one that builds, needs the native permission and has
     /// a build log. A hand-copied `.hmod` in `horizon-mods/` is not one.
     pub(super) fn native_id(&self) -> Option<&str> {
         match (&self.kind, &self.native) {
@@ -898,7 +898,7 @@ mod tests {
         assert!(!native_status::asks_for_build(
             rows.iter().filter_map(|r| r.native.as_ref())
         ));
-        // No switch or route menu: each could switch `mod.teem_client-0.1.0`.
+        // No switch, permission prompt or route menu: each could switch `mod.teem_client-0.1.0`.
         assert!(!rows[0].has_switch());
     }
 

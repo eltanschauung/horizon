@@ -112,12 +112,13 @@ pub(super) struct Mods {
     pub(super) picked: Option<String>,
     /// The project the glass detail card showed last.
     pub(super) shown: Option<Project>,
+    /// An install awaiting explicit native-code consent, before any download.
     /// The selected instance's native build state, the mods it would build again
     /// (`native_status::unbuilt`), and the `native_status::fingerprint` they were read for: read
     /// again only when that changes.
     pub(super) native_state:
         std::cell::RefCell<Option<(String, native_status::State, Vec<String>)>>,
-    /// Native routes read by a worker for this instance's files and game version.
+    /// Native routes read by a worker for this instance's files, consent and game version.
     pub(super) native_routes: std::cell::RefCell<Option<crate::build_mode::RouteMemo>>,
     /// What updating the native mods to a newer installed game would do, read in the background.
     pub(super) native_update: std::cell::RefCell<Option<crate::build_mode::UpdateMemo>>,
@@ -660,6 +661,13 @@ impl Launcher {
             return;
         };
         let on = !java::is_enabled(&home, id);
+        if on
+            && native_status::is_native_file(&e.file)
+            && self.settings.native_mods_allowed_at.is_none()
+        {
+            self.pending_consent = Some(PendingConsent::Toggle(e.clone()));
+            return;
+        }
         let revoked = horizon::known_index().and_then(|index| {
             let hash = e.checksum.trim_start_matches("SHA-256:");
             index.revoked(&e.project, hash).map(|r| r.reason.clone())
@@ -841,9 +849,14 @@ impl Launcher {
     }
 
     /// Installs version `version` of registry native mod `id` as the player picked it on its
-    /// Versions tab ([`horizon::install_chosen`]).
+    /// Versions tab ([`horizon::install_chosen`]). The first native mod goes through the trust
+    /// notice and the recommended version instead.
     pub(super) fn mods_install_version(&mut self, id: String, version: String) {
         if self.mods.busy.is_some() {
+            return;
+        }
+        if self.settings.native_mods_allowed_at.is_none() {
+            self.mods_install(SourceId::Horizon, id, None);
             return;
         }
         self.mods.message = None;
@@ -872,6 +885,17 @@ impl Launcher {
     /// Modpacks. `known` is the project when the page has it; else it is asked for first.
     pub(super) fn mods_install(&mut self, source: SourceId, id: String, known: Option<Project>) {
         if self.mods.busy.is_some() {
+            return;
+        }
+        // The first native mod: the trust notice, before anything is installed.
+        let first_native = source == SourceId::Horizon
+            && self.settings.native_mods_allowed_at.is_none()
+            && horizon::is_native_mod(&id);
+        if first_native {
+            self.pending_consent = Some(PendingConsent::Install(source, id, known));
+            self.content_scroll
+                .handle
+                .set_offset(gpui::point(px(0.), px(0.)));
             return;
         }
         self.mods.message = None;
@@ -1613,6 +1637,25 @@ impl Launcher {
             }
             if is_native {
                 right = right.child(blocks::badge(tr("NATIVE"), t.muted, &t));
+            }
+            if is_native && self.settings.native_mods_allowed_at.is_none() {
+                let entry = e.clone();
+                right = right
+                    .child(blocks::badge(tr("Needs permission"), t.muted, &t))
+                    .child(
+                        button(
+                            SharedString::from(format!("native-permission-{}", e.project)),
+                            "Allow native mods",
+                            Kind::Secondary,
+                            &t,
+                        )
+                        .on_click(cx.listener(
+                            move |this, _: &ClickEvent, _, cx| {
+                                this.pending_consent = Some(PendingConsent::Toggle(entry.clone()));
+                                cx.notify();
+                            },
+                        )),
+                    );
             }
             if is_native {
                 let folder = self.mods.home().join(native_mods::INSTALLED);

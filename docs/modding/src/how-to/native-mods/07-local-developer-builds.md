@@ -41,7 +41,7 @@ published SDK, build it from the same checkout and name its folder; one folder h
 
 ```sh
 python3 tools/prebuilt_game.py build SDK_FOLDER            # add --server for a dedicated server
-HORIZON_LAUNCHER_DEVELOPER_SDK=SDK_FOLDER horizon-launcher native-build MODS --version DEVELOPER_TAG
+HORIZON_LAUNCHER_DEVELOPER_SDK=SDK_FOLDER horizon-launcher native-build MODS --version DEVELOPER_TAG --trust-native-code
 ```
 
 The variable is read for developer bases only, and the folder is used where it is. It must be

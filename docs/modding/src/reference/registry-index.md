@@ -148,7 +148,7 @@ Run these commands in your native mod’s project folder.
 | Command | Behaviour |
 | --- | --- |
 | `cargo horizon-mod internals sync` | Explicitly checks a native mod's library through the launcher against an isolated copy of its pinned game source, then replaces top-level `internals` with compiler-discovered paths, kinds and hashes. Handles globs and macros, removes unused declarations, preserves retained entries and prints additions/removals. Requires a trusted mod and `horizon-launcher` on `PATH` (or `HORIZON_LAUNCHER` set to its executable). Never runs automatically on build. |
-| `cargo horizon-mod internals add <path>…` | Adds each declared internal and its tool-written hash to top-level `internals` in your mod's `horizon-mod.toml`. Without support modules, reads `internals.json` from the build data of the native mod's pinned SDK; with `[[native.module]]` tables it asks the launcher for a discovery catalog of the pinned source with those modules applied. Unknown paths, shape-only entries and paths available only under a `cfg` are refused before the manifest is changed. Existing declarations are refreshed, not duplicated. |
+| `cargo horizon-mod internals add <path>…` | Adds each declared internal and its tool-written hash to top-level `internals` in your mod's `horizon-mod.toml`. Without support modules, reads `internals.json` from the build data of the native mod's pinned SDK; with `[[native.module]]` tables it asks the launcher for a discovery catalog of the pinned source with those modules applied (trusted native code required). Unknown paths, shape-only entries and paths available only under a `cfg` are refused before the manifest is changed. Existing declarations are refreshed, not duplicated. |
 | `cargo horizon-mod update [--horizon <build>]` | Moves the mod's pin to the current Nightly's build (or the build given: `nightly-<date>` or a sha): a native mod's `[native] horizon`, a wasm mod's `sdk` under `[package.metadata.horizon]`. The next command fetches that build's SDK into `.horizon/sdk/`. `Cargo.toml` names the SDK by path, so its dependency does not change. For a native mod, for every declared internal, prints `missing`, `changed` (old signature → new signature), or `unchanged`, then refreshes the available hashes. Missing or gated declarations keep their old hash and must be removed or replaced before building. Build names: [the pin](sdk/03-in-a-project.md#the-pin). |
 
 The native-mod commands run in the mod's project folder and preserve the manifest's comments and
@@ -166,7 +166,7 @@ Without support modules, `internals add`, `inject add`, `inject update` and `upd
 `points.json` from the build data (`build-data.tar.xz`) of each pin's SDK release, `sdk-<build id>`, fetched and
 checked against its signed `SHA256SUMS` as every SDK is, from `HORIZON_SDK_BASE` when it is set. A build with no
 SDK release is refused by name; there is no other source. No game or mod code is run. With support modules, they run
-`horizon-launcher native-build --catalog`, stage the pinned source with the
+`horizon-launcher native-build --catalog` (which needs trusted native code), stage the pinned source with the
 modules, and keep the discovery catalog under `target/horizon-mod/catalog-snapshots/`; the game and the mod do not
 run. Each build's data is kept in
 `.horizon/cache/<build id>/build-data/`, so `update` can show the old signatures after that release expires.

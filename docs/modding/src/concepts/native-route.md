@@ -56,7 +56,8 @@ the game's own types, such as `Game` and its fields, and these change between bu
 ## Building
 
 Build as for any native mod: the launcher's **Build**, or
-`horizon-launcher native-build path/to/mod`.
+`horizon-launcher native-build path/to/mod --trust-native-code`. The flag says you trust the mod's code to
+run with your rights.
 
 A build with a `[[native.mixin]]` row obtains the horizon-mixins tool for your `mixins` commit.
 
