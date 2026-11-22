@@ -3467,7 +3467,13 @@ pub use update_selection::select_after_update;
 /// Installs `tag` (or with "latest" the newest release, pre-releases left out), then updates the selection as
 /// `select_after_update` says when `as_update`, or always selects it otherwise.
 pub fn install_tag(tag: &str, as_update: bool, progress: impl Fn(f32)) -> Result<String, String> {
-    let releases = [releases()?, release_selection::snapshot(tag)?].concat();
+    let releases = if horizon_release_sign::Channel::of(tag)
+        == Some(horizon_release_sign::Channel::Snapshot)
+    {
+        release_selection::snapshot(tag)?
+    } else {
+        releases()?
+    };
     let release = if tag == "latest" {
         releases
             .iter()
