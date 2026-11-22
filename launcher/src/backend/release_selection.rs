@@ -15,7 +15,9 @@ pub(super) fn snapshot(tag: &str) -> Result<Vec<Release>, String> {
             "{tag} is not a snapshot's snapshot-<date>-<commit>."
         ));
     }
-    let release = crate::github::json_optional(&format!(
+    // Installations need the current title for signature verification. A cached
+    // title can predate a release metadata correction even after a restart.
+    let release = crate::github::json_from_network(&format!(
         "{}/repos/{}/releases/tags/{tag}",
         crate::github::API,
         super::REPO
