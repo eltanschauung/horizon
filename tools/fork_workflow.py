@@ -368,6 +368,12 @@ def deploy(args):
                 (staging/Path(dest).parent).mkdir(parents=True, exist_ok=True)
                 shutil.copy2(runtime/name,staging/dest)
                 payload['files'][dest] = sha
+            for wrapper, executable in [('server', 'horizon-server'), ('engine', 'horizon-engine')]:
+                dest = 'bin/' + wrapper
+                entry = staging / dest
+                entry.write_text('#!/bin/sh\nexec "$(dirname -- "$0")/' + executable + '" "$@"\n')
+                entry.chmod(0o755)
+                payload['files'][dest] = digest(entry)
             # Retain the channel publisher's root-level build record as well.
             shutil.copy2(runtime/'native-mods.json', staging/'native-mods.json')
             payload['files']['native-mods.json'] = server['files']['native-mods.json']
@@ -396,7 +402,7 @@ def deploy(args):
                 finally:
                     archive.stdout.close();code=archive.wait()
                 if code:raise RuntimeError('Upload archive failed')
-            runner=ROOT/'tools/fork_remote.py'
+            runner=Path(__file__).with_name('fork_remote.py')
             payload['stage']=remote
             # The file manifest can exceed the OS limit for a single argument.
             bootstrap = 'import sys\nsys.argv.append(' + repr(json.dumps(payload)) + ')\n'

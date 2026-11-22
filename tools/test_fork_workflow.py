@@ -170,7 +170,7 @@ class WorkflowTests(unittest.TestCase):
     def payload(self):
         r=self.root;stage=r/'.workflow-stage/test';(stage/'bin').mkdir(parents=True);(r/'bin').mkdir()
         files={}
-        for name in ['horizon-engine','horizon-server']:
+        for name in ['engine','server','horizon-engine','horizon-server']:
             (r/'bin'/name).write_bytes(b'old-'+name.encode());(stage/'bin'/name).write_bytes(b'new-'+name.encode());files['bin/'+name]=w.digest(stage/'bin'/name)
         return {'schema':w.SCHEMA,'root':str(r),'stage':str(stage),'service':'test.service','apply':True,'files':files}
 
@@ -189,6 +189,8 @@ class WorkflowTests(unittest.TestCase):
         with patch.object(remote.subprocess,'check_output',side_effect=[json.dumps(s).encode()for s in states]),patch.object(remote.subprocess,'run')as run:
             with self.assertRaisesRegex(RuntimeError,'rolled back'):remote.execute(p)
         self.assertEqual((self.root/'bin/horizon-engine').read_bytes(),b'old-horizon-engine')
+        self.assertEqual((self.root/'bin/server').read_bytes(),b'old-server')
+        self.assertEqual((self.root/'bin/engine').read_bytes(),b'old-engine')
         self.assertEqual([c.args[0][3]for c in run.call_args_list if c.args[0][0]=='sudo'],['stop','start','stop','start'])
 
     def test_unknown_destination_never_written(self):

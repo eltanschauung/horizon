@@ -19,7 +19,7 @@ def sha(path):
 
 
 def allowed(name):
-    fixed = {'bin/horizon-engine', 'bin/horizon-server', 'bin/horizon-wasm-std.wasm',
+    fixed = {'bin/engine', 'bin/server', 'bin/horizon-engine', 'bin/horizon-server', 'bin/horizon-wasm-std.wasm',
              'bin/native-mods.json', 'native-mods.json'}
     if name in fixed:
         return True
@@ -95,7 +95,7 @@ def execute(payload):
         if (root/name).is_symlink():raise ValueError('Refusing symlink destination: '+name)
     # Check loader/library compatibility before stopping the working service.
     env=dict(os.environ,HORIZON_HOME=str(stage/'probe'),HORIZON_NO_AUDIO='1')
-    for name,flag in [('horizon-engine','--help'),('horizon-server','--version')]:
+    for name,flag in [('engine','--help'),('server','--version')]:
         path=stage/'bin'/name;path.chmod(0o755)
         cmd=[str(path)]
         subprocess.run(cmd+[flag],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,check=True,timeout=30)
