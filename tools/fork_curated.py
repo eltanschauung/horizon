@@ -22,7 +22,24 @@ def content_packages(root):
     if digest(path) != '2695c4885fedfe252271229cc33e771720c44b3c9b5f9230cb10b0b20e9da78f':
         raise ValueError('Gravestone assets differ from the pinned registry release')
     ports = [compatible_content(p) for p in release_packages(root, "content")]
-    return [path, *ports]
+    return [content_with_companion(root, package) for package in [path, *ports]]
+
+
+def content_with_companion(root, package):
+    with zipfile.ZipFile(package) as archive:
+        original = tomllib.loads(archive.read("horizon-mod.toml").decode())
+    mod_id = original["id"]
+    patch = root.parent / "horizon-mods" / "content-fixes" / mod_id
+    override = patch / "horizon-mod.toml"
+    if not override.is_file():
+        return package
+    repaired = tomllib.loads(override.read_text())
+    if (repaired["id"], repaired["version"]) != (mod_id, original["version"]):
+        raise ValueError(f"Companion manifest does not match the pinned {mod_id} package")
+    files = package_files(package)
+    files["horizon-mod.toml"] = override.read_bytes()
+    destination = root / ".local" / "distribution-packages" / "companions" / (mod_id + ".hmod")
+    return write_package(destination, files)
 
 
 def release_packages(root, kind):
