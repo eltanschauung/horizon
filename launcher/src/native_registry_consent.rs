@@ -3,6 +3,13 @@ use gpui::{AnyWindowHandle, AppContext, Context, PromptLevel};
 use horizon_launcher::{i18n::tr, native_mods::RegistryInventory};
 use std::sync::mpsc::Sender;
 
+pub fn request(tx: &Sender<crate::Msg>, inventory: &RegistryInventory) -> bool {
+    let (reply, answer) = std::sync::mpsc::channel();
+    tx.send(crate::Msg::NativeRegistryConsent(inventory.clone(), reply))
+        .is_ok()
+        && answer.recv().unwrap_or(false)
+}
+
 pub fn show(
     window: AnyWindowHandle,
     inventory: RegistryInventory,

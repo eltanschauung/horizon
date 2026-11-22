@@ -2611,14 +2611,13 @@ pub fn build_then<R>(
 
 /// Build the exact signed SDK used by the server. The caller owns the update
 /// transaction and selects the executable after it has committed the packages.
-pub fn build_pinned(
+pub(crate) fn build_pinned(
     base: &str,
     home: &Path,
     revision: &str,
     profile: Profile,
     progress: impl Fn(Step),
 ) -> Result<String, String> {
-    require_consent().map_err(String::from)?;
     if let Some(error) = backend::native_mod_architecture_error() {
         return Err(error);
     }
@@ -2637,7 +2636,7 @@ pub fn build_pinned(
             profile,
             Target::Client,
             BuildOptions {
-                worlds: Some(home),
+                registry_consent: Some(&|_| true),
                 ..BuildOptions::default()
             },
             &progress,

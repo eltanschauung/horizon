@@ -269,13 +269,17 @@ impl Launcher {
                 Some(step) if self.starting_client.is_some() => step.to_owned(),
                 _ => tr(if running { "Running" } else { "Play" }).to_string(),
             }));
+        let owner = if horizon_launcher::developer_offline::selected() {
+            Some(true)
+        } else {
+            self.owner
+        };
+        let managed = self
+            .selected_instance()
+            .is_some_and(horizon_launcher::server_sync::manages_instance);
         match play_press(
-            ready,
-            if horizon_launcher::developer_offline::selected() {
-                Some(true)
-            } else {
-                self.owner
-            },
+            ready || (managed && owner == Some(true)),
+            owner,
             self.preparing || running,
         ) {
             PlayPress::Nothing => play = disabled(play),

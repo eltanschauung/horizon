@@ -136,6 +136,7 @@ def execute(payload):
         for name in names:
             if existed[name]:shutil.copy2(backup/name,root/name)
             else:(root/name).unlink(missing_ok=True)
+        control('reset-failed')
         control('start')
         raise RuntimeError('Deployment rolled back: '+str(error))from error
 

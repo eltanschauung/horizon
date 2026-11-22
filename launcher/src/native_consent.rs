@@ -1,7 +1,7 @@
 //! One deferred native-code action. Declining never invokes its installer or builder.
 use horizon_launcher::{
     backend::Settings,
-    browser::{installed::Entry, java, Project, SourceId},
+    browser::{Project, SourceId, installed::Entry, java},
     github_mods::Resolved,
 };
 use std::path::Path;

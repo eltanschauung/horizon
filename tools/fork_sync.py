@@ -153,14 +153,38 @@ def upload_assets(manifest,assets,tag):
 def promote(manifest,output):
     # Promote the pointer ONLY after all immutable assets exist. Reusing this
     # function after a failed publication is safe and never overwrites an asset.
-    check=subprocess.run(['gh','api',f'repos/{REPO}/git/ref/heads/{BRANCH}'],capture_output=True,text=True)
-    if check.returncode:
-        head=json.loads(gh('api',f'repos/{REPO}/git/ref/heads/main'))['object']['sha']
-        gh('api',f'repos/{REPO}/git/refs',body={'ref':'refs/heads/'+BRANCH,'sha':head})
-    check=subprocess.run(['gh','api',f'repos/{REPO}/contents/manifest.json?ref={BRANCH}'],capture_output=True,text=True)
-    body={'message':'Match launcher updates to the healthy dedicated server','branch':BRANCH,'content':base64.b64encode((output/'manifest.json').read_bytes()).decode()}
-    if check.returncode==0:body['sha']=json.loads(check.stdout)['sha']
-    gh('api','--method','PUT',f'repos/{REPO}/contents/manifest.json',body=body)
+    import os
+    project = Path(__file__).resolve().parent.parent
+    ref = f"repos/{REPO}/git/ref/heads/{BRANCH}"
+    parent = json.loads(gh('api', ref))['object']['sha']
+    with tempfile.TemporaryDirectory(prefix='sign-server-sync-') as tmp:
+        stage = Path(tmp)
+        manifest_file = stage / 'manifest.json'
+        shutil.copyfile(output / 'manifest.json', manifest_file)
+        env = os.environ.copy()
+        if not env.get('RELEASE_SIGNING_KEY'):
+            key = Path.home() / '.config/horizon-fork/release-signing-key.der'
+            env['RELEASE_SIGNING_KEY'] = base64.b64encode(key.read_bytes()).decode()
+        subprocess.run(['bash', str(project / 'tools/ci/sign_release.sh'),
+                        'server-sync', str(manifest_file)], env=env, check=True,
+                       stdout=sys.stderr)
+        files = {'manifest.json': manifest_file, 'manifest.json.sig': stage / 'SHA256SUMS.sig'}
+        entries = []
+        for name, path in files.items():
+            blob = json.loads(gh('api', f'repos/{REPO}/git/blobs', body={
+                'content': base64.b64encode(path.read_bytes()).decode(), 'encoding': 'base64',
+            }))['sha']
+            entries.append({'path': name, 'mode': '100644', 'type': 'blob', 'sha': blob})
+    base_tree = json.loads(gh('api', f'repos/{REPO}/git/commits/{parent}'))['tree']['sha']
+    tree = json.loads(gh('api', f'repos/{REPO}/git/trees', body={
+        'base_tree': base_tree, 'tree': entries,
+    }))['sha']
+    commit = json.loads(gh('api', f'repos/{REPO}/git/commits', body={
+        'message': 'Match launcher updates to the healthy dedicated server',
+        'tree': tree, 'parents': [parent],
+    }))['sha']
+    gh('api', '--method', 'PATCH', ref.replace('/git/ref/', '/git/refs/'),
+       body={'sha': commit, 'force': False})
     return {'generation':manifest['generation'],'revision':manifest['game_revision'],'packages':len(manifest['packages']),'channel':f'https://raw.githubusercontent.com/{REPO}/{BRANCH}/manifest.json'}
 
 def publish(manifest,assets,tag,output):
