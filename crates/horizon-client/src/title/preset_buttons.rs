@@ -22,13 +22,15 @@ impl Title {
             Mode::Main => {
                 let cx = (w / 2.0).floor();
                 let y = (h / 4.0).floor() + 48.0;
+                let character_selected = self.characters.selected.is_some();
+                let multiplayer = self.allows_multiplayer && character_selected;
                 let mut buttons = vec![
                     b(
                         cx - 100.0,
                         y,
                         200.0,
                         &lang::get_or("menu.singleplayer", "Singleplayer"),
-                        true,
+                        character_selected,
                         1,
                     ),
                     b(
@@ -36,19 +38,10 @@ impl Title {
                         y + 24.0,
                         200.0,
                         &lang::get_or("menu.multiplayer", "Multiplayer"),
-                        self.allows_multiplayer,
+                        multiplayer,
                         4,
                     ),
-                    b(
-                        cx - 100.0,
-                        y + 48.0,
-                        200.0,
-                        &lang::get_or("menu.online", "Minecraft Realms"),
-                        // TitleScreen.createNormalMenuOptions: Realms is off when
-                        // multiplayer is.
-                        self.allows_multiplayer,
-                        8,
-                    ),
+                    b(cx - 100.0, y + 48.0, 200.0, "Character Select", true, 0),
                     b(
                         cx - 100.0,
                         y + 96.0,
@@ -89,7 +82,7 @@ impl Title {
                         y + 72.0,
                         20.0,
                         &lang::get_or(key, plain),
-                        id != 5 || crate::net::joins_friends(),
+                        id != 5 || (multiplayer && crate::net::joins_friends()),
                         id,
                     );
                     button.icon = Some((icon, 15.0));
