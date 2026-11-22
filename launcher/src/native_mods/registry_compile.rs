@@ -11,7 +11,6 @@ use std::{
 };
 
 pub(super) struct Options<'a> {
-    pub consent: Option<&'a dyn Fn(&super::RegistryInventory) -> bool>,
     pub adapter: &'a Path,
 }
 
@@ -419,8 +418,8 @@ pub(super) fn compile(
     }
     super::crates::check_game_graph_names(out, &super::read_lock(out)?, &game_names)?;
     let inventory = metadata.inventory(&super::registry_lock::RegistryLock::default(), links)?;
-    if inventory.added_crates > 0 && !options.consent.is_some_and(|ask| ask(&inventory)) {
-        return Err(crate::i18n::tr("Registry dependency compilation was not approved").into());
+    if inventory.added_crates > 0 {
+        let _ = super::append_log(&format!("{}\n{}", inventory.label(), inventory.detail()));
     }
     let mut externs = prebuilt::wrapper_externs(&deps)?;
     externs.insert("mod_vocab".into(), prebuilt::library(&deps, "mod_vocab")?);
@@ -908,7 +907,6 @@ mod tests {
         }];
         let resolution = dependencies::resolve(&inputs).unwrap();
         let rust = crate::rust_toolchain::install(|_| {}).unwrap();
-        let approve = std::env::var_os("HORIZON_TEST_REGISTRY_DECLINE").is_none();
         let result = compile(
             &rust,
             &game,
@@ -918,24 +916,11 @@ mod tests {
             &declared,
             &resolution,
             Options {
-                consent: Some(&|inventory| {
-                    eprintln!("{}\n{}", inventory.label(), inventory.detail());
-                    approve
-                }),
                 adapter: &adapter,
             },
         );
-        if approve {
-            let (binary, _) = result.unwrap();
-            assert!(binary.is_file());
-            eprintln!("compiled wrapper {}", binary.display());
-        } else {
-            assert!(result.unwrap_err().contains("not approved"));
-            assert!(!out.join("cargo-messages.jsonl").exists());
-            assert!(!out.join("target").exists());
-            eprintln!(
-                "detailed consent declined before target compilation or Cargo build messages"
-            );
-        }
+        let (binary, _) = result.unwrap();
+        assert!(binary.is_file());
+        eprintln!("compiled wrapper {}", binary.display());
     }
 }

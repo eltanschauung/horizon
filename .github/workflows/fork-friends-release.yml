@@ -182,8 +182,8 @@ jobs:
     env:
       SOURCE_REVISION: ${{ inputs.bootstrap_commit }}
       HORIZON_VERSION: 0.3.7
-      HORIZON_LAUNCHER_VERSION: 0.3.10
-      HORIZON_LAUNCHER_TAG: launcher@0.3.10
+      HORIZON_LAUNCHER_VERSION: 0.3.11
+      HORIZON_LAUNCHER_TAG: launcher@0.3.11
       HORIZON_MSA_CLIENT_ID: 331e08f8-172d-43b9-835a-3108c2fcdbf3
       HORIZON_TELEMETRY_URL: off
       RUSTFLAGS: ${{ matrix.flags }}
@@ -237,6 +237,7 @@ jobs:
           export HORIZON_FORK_SOURCE_REVISION="$SOURCE_REVISION"
           export HORIZON_FORK_LAUNCHER_TREE=$(git rev-parse HEAD:launcher)
           export HORIZON_FORK_SOURCE_DIRTY=0
+          cargo test --locked --profile fast --manifest-path launcher/Cargo.toml --lib native_permissions_regression
           cargo build --locked --profile fast --manifest-path launcher/Cargo.toml --bin horizon-launcher
           mkdir -p dist
           cp "launcher/target/fast/horizon-launcher$EXE" "dist/horizon-launcher$EXE"

@@ -3,11 +3,11 @@
 Build a dedicated-server runtime with your native mods:
 
 ```sh
-horizon-launcher native-build FOLDER --server-output DIR --version TAG --trust-native-code
+horizon-launcher native-build FOLDER --server-output DIR --version TAG
 ```
 
-`--trust-native-code` saves your consent to run unsandboxed native code. You can omit it when
-consent is saved. Optional flags include `--profile PROFILE` and `--allow-jar-downloads`.
+The launcher fetches declared, checksum-pinned JAR dependencies into its local cache.
+Use `--profile PROFILE` to select a build profile.
 
 The command exports a standalone dedicated-server engine into `DIR`, which must not exist. `FOLDER` (a mod folder or a
 folder of them) is required. The export does not select, edit or launch an instance.

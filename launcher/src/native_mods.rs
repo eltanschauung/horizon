@@ -47,7 +47,6 @@ pub mod sdk_cache;
 pub use isolate::{LeftOut, Why};
 pub use picker::{Route, Routes};
 pub use prebuilt::{Refusal, compiling as compiling_mod};
-pub use registry_inventory::Inventory as RegistryInventory;
 
 // Settings and logs are shared by native-build and diagnostics tests.
 #[cfg(test)]
@@ -455,7 +454,6 @@ pub fn internals_rustc_wrapper() -> Option<i32> {
 pub fn sync_internals(
     folder: &Path,
 ) -> Result<Vec<horizon_platform::mod_package::internals::ListedInternal>, Failed> {
-    require_consent()?;
     internals_sync::check(folder).map_err(|error| Failed::Other(error.to_string()))
 }
 
@@ -1695,8 +1693,6 @@ struct Built {
 /// Why a native build or internals check stopped.
 #[derive(Debug)]
 pub enum Failed {
-    /// No native-code permission has been recorded for this install.
-    NoConsent,
     /// These mods stopped it (`error` says how), while `compiling` or before: it can run again
     /// without them.
     Mods {
@@ -1728,7 +1724,6 @@ impl std::fmt::Display for Failed {
             Self::Worlds(stake) => f.write_str(&stake.text),
             Self::NotPrepared(tag) => f.write_str(&backend::prepare_hint(tag)),
             Self::Nothing => f.write_str(tr("There are no mods to build: the folder has none, or every mod was left out.")),
-            Self::NoConsent => f.write_str(tr("Native mods run inside your game with your rights; mixins compile code into the game. Allow native mods in Settings, Storage, or pass --trust-native-code.")),
         }
     }
 }
@@ -1768,21 +1763,9 @@ impl From<Failed> for String {
     }
 }
 
-/// Refuse before staging, fetching a prebuilt game or downloading a compiler.
-pub fn require_consent() -> Result<(), Failed> {
-    if backend::Settings::load().native_mods_allowed_at.is_some() {
-        Ok(())
-    } else {
-        Err(Failed::NoConsent)
-    }
-}
-
-/// Isolation and jar-download choices for an explicit build.
 #[derive(Default)]
 struct BuildOptions<'a> {
-    allow_jar_downloads: bool,
     skip: &'a [LeftOut],
-    registry_consent: Option<&'a dyn Fn(&RegistryInventory) -> bool>,
     check_only: bool,
     /// The game folder whose worlds a mod switched off for this build must not be lost from:
     /// the instance's ([`guard_worlds`]).
@@ -2181,7 +2164,7 @@ fn pipeline(
         crate::jars::prepare(
             &backend::game_home(),
             &jars,
-            crate::jars::Permission::headless(options.allow_jar_downloads),
+            crate::jars::Permission::Allow,
         )
         .map_err(|error| error.to_string())?;
     }
@@ -2387,7 +2370,6 @@ fn pipeline(
             &projects,
             &declared,
             &resolution,
-            options.registry_consent,
             &|id, done, total| {
                 progress(Step::Mod {
                     id: id.to_owned(),
@@ -2477,7 +2459,6 @@ pub fn build(
     profile: Option<Profile>,
     asked: Asked,
     progress: impl Fn(Step),
-    registry_consent: impl Fn(&RegistryInventory) -> bool,
 ) -> Result<String, Failed> {
     build_then(
         base,
@@ -2487,7 +2468,6 @@ pub fn build(
         profile,
         asked,
         progress,
-        registry_consent,
         |result| result,
     )
 }
@@ -2515,7 +2495,6 @@ fn build_turn(progress: &impl Fn(Step)) -> Result<std::sync::MutexGuard<'static,
         check_cancelled()?;
         std::thread::sleep(std::time::Duration::from_millis(100));
     };
-    require_consent()?;
     Ok(turn)
 }
 
@@ -2534,13 +2513,9 @@ pub fn build_then<R>(
     profile: Option<Profile>,
     asked: Asked,
     progress: impl Fn(Step),
-    registry_consent: impl Fn(&RegistryInventory) -> bool,
     deliver: impl FnOnce(Result<String, Failed>) -> R,
 ) -> R {
     let Asked { caller, back_up } = asked;
-    if let Err(error) = require_consent() {
-        return deliver(Err(error));
-    }
     CANCEL.store(false, Ordering::Relaxed);
     let _turn = match build_turn(&progress) {
         Ok(turn) => turn,
@@ -2569,7 +2544,6 @@ pub fn build_then<R>(
             profile,
             Target::Client,
             BuildOptions {
-                registry_consent: Some(&registry_consent),
                 worlds: Some(&instance.home),
                 back_up,
                 ..BuildOptions::default()
@@ -2635,10 +2609,7 @@ pub(crate) fn build_pinned(
             &folder,
             profile,
             Target::Client,
-            BuildOptions {
-                registry_consent: Some(&|_| true),
-                ..BuildOptions::default()
-            },
+            BuildOptions::default(),
             &progress,
         )
         .map_err(String::from)?;
@@ -2673,11 +2644,8 @@ pub fn preflight(
     base: &str,
     folder: &Path,
     target: Target,
-    allow_jar_downloads: bool,
     progress: impl Fn(Step),
-    registry_consent: impl Fn(&RegistryInventory) -> bool,
 ) -> Result<(), Failed> {
-    require_consent()?;
     CANCEL.store(false, Ordering::Relaxed);
     let _turn = build_turn(&progress)?;
     logged_then(
@@ -2692,8 +2660,6 @@ pub fn preflight(
                 target,
                 BuildOptions {
                     check_only: true,
-                    allow_jar_downloads,
-                    registry_consent: Some(&registry_consent),
                     ..BuildOptions::default()
                 },
                 &progress,
@@ -2720,11 +2686,8 @@ pub fn build_server(
     folder: &Path,
     output: &Path,
     profile: Option<Profile>,
-    allow_jar_downloads: bool,
     progress: impl Fn(Step),
-    registry_consent: impl Fn(&RegistryInventory) -> bool,
 ) -> Result<PathBuf, Failed> {
-    require_consent()?;
     CANCEL.store(false, Ordering::Relaxed);
     // Only the command line exports a server: its errors are already the command line's words.
     logged(String::clone, |cache| {
@@ -2763,8 +2726,6 @@ pub fn build_server(
             profile,
             Target::Server,
             BuildOptions {
-                allow_jar_downloads,
-                registry_consent: Some(&registry_consent),
                 ..BuildOptions::default()
             },
             &progress,
@@ -4216,7 +4177,6 @@ mod tests {
     #[test]
     fn a_server_build_refuses_an_existing_output_before_building() {
         let _guard = scratch_state();
-        backend::Settings::load().allow_native_mods().unwrap();
         let output = dir("server-output");
         let folder = dir("server-mods");
         write_bundle(&folder, "hello", "fn hook() {}");
@@ -4227,9 +4187,7 @@ mod tests {
             &folder,
             &output,
             Some(Profile::Optimized),
-            false,
             |_| {},
-            |_| false,
         )
         .unwrap_err();
         let err = String::from(err);
@@ -4241,9 +4199,7 @@ mod tests {
             &folder,
             &managed,
             Some(Profile::Optimized),
-            false,
             |_| {},
-            |_| false,
         )
         .unwrap_err();
         let err = String::from(err);
@@ -4264,7 +4220,6 @@ mod tests {
     fn automatic_build_does_not_save_its_effective_profile() {
         let _guard = scratch_state();
         let original = backend::Settings::load();
-        backend::Settings::load().allow_native_mods().unwrap();
         let file = backend::data_dir().join("instances.json");
         let previous = fs::read(&file).ok();
         let stored = br#"{"instances":{"horizon":{"native_profile":"balanced"}}}"#;
@@ -4281,7 +4236,6 @@ mod tests {
                 back_up: false,
             },
             |_| {},
-            |_| false,
         )
         .unwrap_err();
         assert!(String::from(error).contains("is not prepared yet"));
@@ -4299,7 +4253,6 @@ mod tests {
     fn folder_planning_reuses_the_build_snapshot_without_restaging_packages() {
         let _guard = scratch_state();
         let original = backend::Settings::load();
-        backend::Settings::load().allow_native_mods().unwrap();
         let folder = dir("profile-snapshot");
         write_bundle(&folder, "snapshot", "");
         fs::write(
@@ -4325,76 +4278,68 @@ mod tests {
     }
 
     #[test]
-    fn missing_consent_blocks_all_build_routes_before_http_or_staging() {
-        use std::net::TcpListener;
+    fn native_permissions_regression_fresh_and_existing_clients_reach_staging() {
         let _guard = scratch_state();
-        let original = backend::Settings::load();
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        listener.set_nonblocking(true).unwrap();
-        fs::create_dir_all(backend::data_dir()).unwrap();
-        fs::write(backend::data_dir().join("settings.json"), serde_json::json!({"native_warning": true, "proxy": format!("http://{}", listener.local_addr().unwrap())}).to_string()).unwrap();
-        let folder = dir("consent-missing");
-        let output = folder.join("export");
-        let log_before = fs::read(log_path()).ok();
-        fn denied<T>(result: Result<T, Failed>) {
-            assert!(matches!(result, Err(Failed::NoConsent)));
-        }
-        let profile = Profile::Optimized;
-        let base = "uninstalled";
-        denied(build_server(
-            base,
-            &folder,
-            &output,
-            Some(profile),
-            false,
-            |_| {},
-            |_| false,
-        ));
-        for choice in [Some(profile), None] {
-            denied(build(
-                base,
-                &folder,
-                &instances::selected(),
-                choice,
+        let scratch = tempfile::tempdir().unwrap();
+        let mut instance = instances::selected();
+        instance.home = scratch.path().to_owned();
+        let settings = backend::data_dir().join("settings.json");
+        let saved = fs::read(&settings).ok();
+        fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        for legacy in [
+            None,
+            Some(br#"{"native_mods_allowed_at":null,"native_mods":false}"#.as_slice()),
+            Some(br#"{"native_mods_allowed_at":42}"#.as_slice()),
+        ] {
+            match legacy {
+                Some(contents) => fs::write(&settings, contents).unwrap(),
+                None => {
+                    let _ = fs::remove_file(&settings);
+                }
+            }
+            let result = build_then(
+                "test-base",
+                || Err("reached native staging".into()),
+                false,
+                &instance,
+                None,
                 Asked {
-                    caller: Caller::CommandLine,
+                    caller: Caller::Window,
                     back_up: false,
                 },
                 |_| {},
-                |_| false,
-            ));
+                |result| result,
+            );
+            assert!(matches!(result, Err(Failed::Other(error)) if error == "reached native staging"));
+            assert_eq!(fs::read(&settings).ok().as_deref(), legacy);
         }
-        denied(sync_internals(&folder));
-        let expected = require_consent().unwrap_err().to_string();
-        assert_eq!(
-            pinned_catalog_with_modules(&folder).err().unwrap(),
-            expected
+        if let Some(contents) = saved {
+            fs::write(settings, contents).unwrap();
+        } else {
+            let _ = fs::remove_file(settings);
+        }
+    }
+
+    #[test]
+    fn native_permissions_regression_server_sync_reaches_build_turn() {
+        let _guard = scratch_state();
+        let scratch = tempfile::tempdir().unwrap();
+        let current = BUILD_TURN
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let result = build_pinned(
+            "test-base",
+            scratch.path(),
+            &"a".repeat(40),
+            Profile::Optimized,
+            |step| {
+                assert!(matches!(step, Step::Waiting));
+                cancel();
+            },
         );
-        let preview = root().join("installed.routes");
-        fs::create_dir_all(&preview).unwrap();
-        let marker = preview.join("permission-sentinel");
-        fs::write(&marker, b"unchanged").unwrap();
-        denied(routes(&folder, None));
-        assert_eq!(
-            fs::read(&marker).unwrap(),
-            b"unchanged",
-            "preview never stages before consent"
-        );
-        fs::remove_file(marker).unwrap();
-        assert!(
-            matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock),
-            "zero HTTP requests"
-        );
-        assert!(!output.exists());
-        assert_eq!(
-            fs::read(log_path()).ok(),
-            log_before,
-            "no build staging or log writes"
-        );
-        backend::Settings::load().allow_native_mods().unwrap();
-        assert!(backend::Settings::load().native_mods_allowed_at.is_some());
-        require_consent().unwrap();
-        original.save().unwrap();
+        drop(current);
+        CANCEL.store(false, Ordering::Relaxed);
+        assert_eq!(result.unwrap_err(), CANCELLED);
     }
 
     /// The build log ([`clear_log`], [`append_log`]): fresh for every attempt, and an early
@@ -4403,7 +4348,6 @@ mod tests {
     #[test]
     fn the_log_is_fresh_per_attempt_and_keeps_early_failures() {
         let _guard = scratch_state();
-        backend::Settings::load().allow_native_mods().unwrap();
         clear_log().unwrap();
         append_log("the last build's output").unwrap();
         clear_log().unwrap();
@@ -4420,9 +4364,7 @@ mod tests {
             &folder,
             &out.join("server"),
             Some(Profile::Optimized),
-            false,
             |_| {},
-            |_| false,
         )
         .unwrap_err();
         let err = String::from(err);
@@ -4504,7 +4446,6 @@ mod tests {
     fn a_build_waits_for_the_last_cleanup_and_stop_ends_the_wait() {
         let _guard = scratch_state();
         let original = backend::Settings::load();
-        backend::Settings::load().allow_native_mods().unwrap();
         let cleaning = BUILD_TURN
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -4525,7 +4466,6 @@ mod tests {
                 }
                 steps.borrow_mut().push(step.label());
             },
-            |_| false,
             |result| result,
         );
         drop(cleaning);
@@ -4539,57 +4479,6 @@ mod tests {
         assert_eq!(*steps.borrow(), [Step::Waiting.label()]);
     }
 
-    /// #18669: native mods turned off in Storage while a build waits for the last cleanup stop
-    /// that build once it takes its turn, before any build step.
-    #[test]
-    fn a_waiting_build_checks_consent_again_once_it_takes_its_turn() {
-        let _guard = scratch_state();
-        let original = backend::Settings::load();
-        backend::Settings::load().allow_native_mods().unwrap();
-        let (release, released) = std::sync::mpsc::channel::<()>();
-        let (held, holding) = std::sync::mpsc::channel();
-        // The last build's cleanup, holding the turn until it is told to end.
-        let cleanup = std::thread::spawn(move || {
-            let _turn = BUILD_TURN
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            held.send(()).unwrap();
-            let _ = released.recv();
-        });
-        holding.recv().unwrap();
-        let steps = std::cell::RefCell::new(Vec::new());
-        let result = build_then(
-            "v0.0.0-not-installed",
-            || -> Result<PathBuf, String> { panic!("staged without consent") },
-            false,
-            &instances::selected(),
-            None,
-            Asked {
-                caller: Caller::Window,
-                back_up: false,
-            },
-            |step| {
-                if matches!(step, Step::Waiting) {
-                    let mut settings = backend::Settings::load();
-                    settings.native_mods_allowed_at = None;
-                    settings.save().unwrap();
-                    release.send(()).unwrap();
-                }
-                steps.borrow_mut().push(step.label());
-            },
-            |_| false,
-            |result| result,
-        );
-        cleanup.join().unwrap();
-        original.save().unwrap();
-        assert!(
-            matches!(result, Err(Failed::NoConsent)),
-            "{:?}",
-            result.map_err(String::from)
-        );
-        assert_eq!(*steps.borrow(), [Step::Waiting.label()]);
-    }
-
     /// #18669 with #18659: a window build that waited for its base's Prepare then waits for the
     /// last build's cleanup, and builds the instance and base its request captured.
     #[test]
@@ -4597,11 +4486,10 @@ mod tests {
         use prepare_first::{Next, Now, Snapshot, Waiting};
         let _guard = scratch_state();
         let original = backend::Settings::load();
-        backend::Settings::load().allow_native_mods().unwrap();
         let instance = instances::selected();
         let base = "v0.0.0-captured-base";
         let waiting = Waiting {
-            snapshot: Snapshot::of(&instance, None, base.into(), false, true),
+            snapshot: Snapshot::of(&instance, None, base.into(), false),
             needs: base.into(),
             started: true,
         };
@@ -4654,7 +4542,6 @@ mod tests {
                 }
                 steps.borrow_mut().push(step.label());
             },
-            |_| false,
             |result| result,
         );
         cleanup.join().unwrap();
@@ -4674,7 +4561,6 @@ mod tests {
     fn a_failed_lease_still_warns_of_old_format_installed_mods() {
         let _guard = scratch_state();
         let original = backend::Settings::load();
-        backend::Settings::load().allow_native_mods().unwrap();
         let home = dir("legacy-lease-home");
         fs::create_dir_all(home.join(INSTALLED)).unwrap();
         write_legacy_hmod(&home.join(INSTALLED).join("fps_counter.hmod"));
@@ -4702,7 +4588,6 @@ mod tests {
                 back_up: false,
             },
             |_| {},
-            |_| false,
         );
         drop(lock);
         original.save().unwrap();

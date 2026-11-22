@@ -32,7 +32,7 @@ cargo horizon-mod check target/horizon-mod/my_mod.hmod   # the registry's checks
   `HORIZON_SDK_BASE` (a URL or a folder) reads the releases from a mirror instead. When that Nightly has no SDK,
   `new` says so and asks for `--horizon`. `update` repins a native mod the same way
   ([the SDK in a mod project](../reference/sdk/03-in-a-project.md)). Its root `impl Hooks` uses
-  `#[mod_api::horizon_mod]`. Compile it with `horizon-launcher native-build <path> --trust-native-code`
+  `#[mod_api::horizon_mod]`. Compile it with `horizon-launcher native-build <path>`
   ([writing hooks](../start/writing-hooks.md)). Any other `--template` is refused.
 - `build` packs the checked project into `target/horizon-mod/<id>.hmod`: `horizon-mod.toml`, `assets/`,
   `data/`, optional `icon.png` and, for code, the root Cargo project. It validates content with the same

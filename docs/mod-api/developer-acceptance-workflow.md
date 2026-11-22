@@ -14,7 +14,7 @@ export HORIZON_LAUNCHER_DESKTOP="$SCRATCH/desktop"
 
 Install and prepare the base release in that scratch launcher home first, then test your own licensed bundle:
 
-1. `horizon-launcher native-build bundle/ --server-output $ENGINE --version TAG --trust-native-code` (scratch homes,
+1. `horizon-launcher native-build bundle/ --server-output $ENGINE --version TAG` (scratch homes,
    `HORIZON_NO_AUDIO=1`, `HORIZON_LAUNCHER_NO_SELF_UPDATE=1`).
 2. `horizon-server --dir SERVER config set engine.path=$ENGINE/horizon-engine`; `horizon-server --dir SERVER run`.
 3. Join with the same mod's client half where the hook needs one; test lifecycle, tick, command and net hooks.

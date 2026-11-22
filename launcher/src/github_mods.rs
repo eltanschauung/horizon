@@ -8,7 +8,6 @@
 //! kept beside the file (`horizon-native-mods/<id>.origin.json`) for "check for updates".
 //!
 //! Nothing here runs the mod's code, and nothing here trusts it: the registry has not reviewed it.
-//! Callers show [`WARNING`] and ask first (`--trust-native-code`).
 use crate::backend;
 use crate::browser::java;
 use crate::native_mods::{self, Bundle, INSTALLED};

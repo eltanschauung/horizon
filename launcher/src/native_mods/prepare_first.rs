@@ -19,8 +19,6 @@ pub struct Snapshot {
     pub plays: Option<String>,
     pub base: String,
     pub back_up: bool,
-    /// Whether native mods are allowed.
-    pub consent: bool,
 }
 
 impl Snapshot {
@@ -29,7 +27,6 @@ impl Snapshot {
         plays: Option<String>,
         base: String,
         back_up: bool,
-        consent: bool,
     ) -> Self {
         Self {
             instance: instance.id.clone(),
@@ -38,7 +35,6 @@ impl Snapshot {
             plays,
             base,
             back_up,
-            consent,
         }
     }
 }
@@ -110,7 +106,7 @@ pub fn next(waiting: &Waiting, now: &Now, ready: impl Fn(&str) -> Result<(), Not
 /// What the card says when a waiting build is dropped because what it was started with changed.
 pub fn dropped(needs: &str) -> String {
     trf(
-        "The build waiting for {version} to be prepared stopped: its instance or the permission for native mods changed meanwhile.",
+        "The build waiting for {version} to be prepared stopped: its instance changed meanwhile.",
         &[("version", needs)],
     )
 }
@@ -120,7 +116,7 @@ mod tests {
     use super::*;
     use std::cell::Cell;
 
-    fn snapshot(pin: Option<&str>, plays: Option<&str>, consent: bool) -> Snapshot {
+    fn snapshot(pin: Option<&str>, plays: Option<&str>) -> Snapshot {
         Snapshot {
             instance: "a".into(),
             pin: pin.map(Into::into),
@@ -128,13 +124,12 @@ mod tests {
             plays: plays.map(Into::into),
             base: "v1".into(),
             back_up: true,
-            consent,
         }
     }
 
     fn waiting() -> Waiting {
         Waiting {
-            snapshot: snapshot(Some("v1"), Some("v1"), true),
+            snapshot: snapshot(Some("v1"), Some("v1")),
             needs: "v1".into(),
             started: false,
         }
@@ -142,7 +137,7 @@ mod tests {
 
     fn now<'a>() -> Now<'a> {
         Now {
-            snapshot: Some(snapshot(Some("v1"), Some("v1"), true)),
+            snapshot: Some(snapshot(Some("v1"), Some("v1"))),
             preparing: false,
             installing: None,
             ended: None,
@@ -219,16 +214,14 @@ mod tests {
     }
 
     #[test]
-    fn a_changed_instance_or_permission_drops_the_build() {
+    fn a_changed_instance_drops_the_build() {
         let prepared = Cell::new(true);
         let w = waiting();
         let changed = [
             // Removed.
             None,
             // Plays another version.
-            Some(snapshot(Some("v2"), Some("v2"), true)),
-            // Native mods no longer allowed.
-            Some(snapshot(Some("v1"), Some("v1"), false)),
+            Some(snapshot(Some("v2"), Some("v2"))),
         ];
         for snapshot in changed {
             let now = Now { snapshot, ..now() };
@@ -241,17 +234,17 @@ mod tests {
         let prepared = Cell::new(true);
         // Pinned to v8, not installed: the window resolves it to nothing.
         let w = Waiting {
-            snapshot: snapshot(Some("v8"), None, true),
+            snapshot: snapshot(Some("v8"), None),
             ..waiting()
         };
         let same = Now {
-            snapshot: Some(snapshot(Some("v8"), None, true)),
+            snapshot: Some(snapshot(Some("v8"), None)),
             ..now()
         };
         assert_eq!(next(&w, &same, disk(&prepared)), Next::Build);
         // Pinned to v9 meanwhile, not installed either: it resolves to nothing too.
         let repinned = Now {
-            snapshot: Some(snapshot(Some("v9"), None, true)),
+            snapshot: Some(snapshot(Some("v9"), None)),
             ..now()
         };
         assert_eq!(

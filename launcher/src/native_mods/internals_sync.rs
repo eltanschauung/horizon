@@ -138,7 +138,6 @@ impl DiscoveryCatalog {
 /// Discover the pinned game with only this mod's modules, using the launcher's managed tools.
 /// Hold the returned catalog while reading its internals.json and points.json files.
 pub fn pinned_catalog_with_modules(folder: &Path) -> Result<DiscoveryCatalog, String> {
-    super::require_consent().map_err(|e| e.to_string())?;
     let lease = crate::native_cache::Cache::acquire(&crate::backend::build_dir())
         .map_err(super::cache_error)?;
     super::clear_log()?;

@@ -152,11 +152,9 @@ Native mods (docs/modding/src/how-to/native-mods.md): compile flat Rust mod proj
 - `--catalog-output`: Copy discovery catalogs into this caller-owned empty directory
 - `FOLDER`: A mod folder (horizon-mod.toml with [native], Cargo.toml and src/), or a folder of them (default: the native mods installed and turned on in the instance). Server exports also read wasm internals declarations from .hmod packages directly in this folder
 - `--server-output`: Export mode: build a standalone dedicated-server engine into this folder instead of an instance's build. Needs a mod FOLDER; no instance is read or changed, and no launcher config is written
-- `--allow-jar-downloads`: Allow exact-hash jar downloads into the local cache for the server export; jar bytes are never included in the exported folder
 - `--instance`: The instance whose installed native mods to build, and which then plays the build (default: the selected one)
 - `--version`: The installed version whose game files the build reuses, and whose commit it builds on when no mod pins one (default: the one the instance plays, so a rebuild stays on its Horizon)
 - `--update`: Move to the newest installed release or Nightly instead of the Horizon the instance plays (rebuilds the mods for that pinned SDK)
-- `--trust-native-code`: Allow native code for this install (remembered; revoke in Settings, Storage)
 - `--profile` (optimized): Native mods use the pinned SDK's optimized compilation settings. The game is never rebuilt by a mod build
 - `--back-up-worlds`: When a mod this build can't use was saved into the instance's worlds, back those worlds up (into the game folder's backups/) and build without it. Without this the build stops and names the worlds, leaving the instance as it is
 
@@ -929,7 +927,6 @@ Install a native mod from a GitHub link (docs/modding/src/how-to/native-mods.md,
 - `--mod`: The mod to install when the link holds several
 - `--all`: Install every mod the link holds
 - `--instance`: The instance (default: the selected one)
-- `--trust-native-code`: Allow native code for this install (remembered; revoke in Settings, Storage)
 
 MCP: none: the player's switch.
 
@@ -942,7 +939,6 @@ Look for newer versions of the native mods installed from GitHub (the latest rel
 - `ID`: One mod (default: all of them)
 - `--check`: Only say what is newer
 - `--instance`: The instance (default: the selected one)
-- `--trust-native-code`: Allow native code for this install (remembered; revoke in Settings, Storage)
 
 MCP: none: the player's switch.
 

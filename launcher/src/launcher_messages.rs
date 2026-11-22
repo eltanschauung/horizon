@@ -308,9 +308,6 @@ impl Launcher {
                     }
                 }
                 Msg::Updates(Err(e)) => self.update_error = Some(e),
-                Msg::NativeRegistryConsent(inventory, reply) => {
-                    native_registry_consent::show(window, inventory, reply, cx)
-                }
                 Msg::NativeProgress(step, progress) => {
                     self.native_step = Some(step);
                     self.native_progress = Some(progress);
@@ -335,12 +332,7 @@ impl Launcher {
                     self.reload_instances();
                     // A build attempt ended: an open panel reads the log it left.
                     self.native_log.stale = true;
-                    // No permission: the question is the answer, not the refusal's words.
-                    let no_consent = matches!(result, Err(native_mods::Failed::NoConsent));
-                    if no_consent {
-                        self.request_native_build_consent();
-                    }
-                    if let (Err(e), false) = (result, cancelled || no_consent) {
+                    if let (Err(e), false) = (result, cancelled) {
                         if let native_mods::Failed::Worlds(stake) = &e {
                             self.keep_stop(stake);
                         }

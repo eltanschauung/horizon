@@ -93,7 +93,7 @@ if [ -n "${FNR_MIXINS_FROM_SOURCE:-}" ]; then
 fi
 if [ "$side" = server ]; then output_args+=(--server-output "$scratch/engine"); fi
 env "${env_vars[@]}" "$launcher" native-build "$mods" "${output_args[@]}" --version native-ci --profile optimized \
-  --trust-native-code > "$scratch/native-build.out" 2> "$scratch/native-build.err" || built=$?
+  > "$scratch/native-build.out" 2> "$scratch/native-build.err" || built=$?
 cat "$scratch/native-build.out"
 cat "$scratch/native-build.err" >&2
 test -z "${built:-}" || exit "$built"
@@ -199,7 +199,7 @@ PYCHANGE
   swap_args=()
   if [ "$side" = server ]; then swap_args+=(--server-output "$scratch/swap-engine"); fi
   env "${env_vars[@]}" "$launcher" native-build "$swap_mods" "${swap_args[@]}" --version native-ci --profile optimized \
-    --trust-native-code > "$scratch/swap-build.out" 2> "$scratch/swap-build.err" || {
+    > "$scratch/swap-build.out" 2> "$scratch/swap-build.err" || {
       cat "$scratch/swap-build.out"; cat "$scratch/swap-build.err" >&2; exit 1;
     }
   python3 - "$scratch/engine" "$scratch/swap-engine" "$data/versions" <<'PYLIB'

@@ -1,19 +1,11 @@
 use super::*;
 
-pub(super) fn native_permission(trust: bool) -> Result<(), String> {
-    if trust {
-        backend::Settings::load().allow_native_mods()?;
-    }
-    native_mods::require_consent().map_err(String::from)
-}
-
 pub(super) fn github_native(
     home: &Path,
     java: bool,
     found: &github_mods::Resolved,
     only: Option<&str>,
     all: bool,
-    trust: bool,
 ) -> Result<(), String> {
     if java {
         return Err("Native mods from GitHub are for Horizon instances.".into());
@@ -21,7 +13,6 @@ pub(super) fn github_native(
     println!("{}", found.label());
     println!("Source, to read: {}", found.source_url());
     eprintln!("{}", github_mods::WARNING);
-    native_permission(trust)?;
     let mods = github_mods::fetch(found)?;
     let chosen = github_mods::choose(&mods, only, all);
     let done = chosen.and_then(|chosen| {
@@ -41,12 +32,6 @@ pub(super) fn github_native(
             o.sha256
         );
     }
-    println!("Build it next: horizon-launcher native-build --trust-native-code");
+    println!("Build it next: horizon-launcher native-build");
     Ok(())
-}
-
-pub(super) fn registry_consent(inventory: &native_mods::RegistryInventory) -> bool {
-    eprintln!("{}\n{}", inventory.label(), inventory.detail());
-    // The headless native route has already required explicit native-code permission.
-    true
 }

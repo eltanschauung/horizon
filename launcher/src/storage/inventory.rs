@@ -573,10 +573,9 @@ impl Storage {
                         name.to_string_lossy()
                             .starts_with(crate::rust_toolchain::VERSION)
                     })
-                    && settings.native_mods_allowed_at.is_some()
                     && native_enabled
                 {
-                    // Conservatively retain the whole toolchain set while consent is enabled.
+                    // Conservatively retain the whole toolchain set while native mods are enabled.
                     Tier::Protected
                 } else if entry.leftover() {
                     Tier::Expiring

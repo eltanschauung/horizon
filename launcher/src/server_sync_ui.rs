@@ -140,7 +140,6 @@ impl Launcher {
             .get(&i.id)
             .is_none_or(|t| t.elapsed() >= Duration::from_secs(60));
         if stale
-            && self.pending_consent.is_none()
             && !self.server_sync.failed.contains_key(&i.id)
             && self.client.is_none()
             && self.starting_client.is_none()

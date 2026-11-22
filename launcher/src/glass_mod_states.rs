@@ -24,7 +24,7 @@ pub(super) struct Preview {
 }
 
 // Values: `mod-step-<key>`, `mod-error-<key>`, `mod-worlds[-many|-unbuilt]`, `mod-update-<all-fit|some|world|worlds>`,
-// `mod-fit`, `mod-left-out`, `mod-trust[-generic|-registry]`, `mod-log[-failed]` (keys: see `step` and `error`).
+// `mod-fit`, `mod-left-out`, `mod-log[-failed]` (keys: see `step` and `error`).
 
 /// Builds as `sdk_cache::shown` names them to players: as the Versions page does, no commit.
 const BUILD: &str = "the Nov 13 update";
@@ -159,7 +159,6 @@ fn error(key: &str) -> Option<String> {
             &[("world", "Survival 1"), ("error", "disk full")],
         ),
         "cancelled" => tr(nm::CANCELLED).to_string(),
-        "no-consent" => nm::Failed::NoConsent.to_string(),
         _ => return None,
     })
 }
@@ -239,8 +238,7 @@ impl Launcher {
         let (kind, key) = name.split_once('-').unwrap_or((name, ""));
         // A build only ran after the player allowed native mods; the other states show the
         // row before that.
-        if matches!(kind, "step" | "error") && key != "no-consent" {
-            self.settings.native_mods_allowed_at = Some(1);
+        if matches!(kind, "step" | "error") {
             *self.mods.native_state.borrow_mut() = Some((
                 String::new(),
                 native_status::State::Outdated,
@@ -251,7 +249,6 @@ impl Launcher {
             // How a build that worked looks once it ended: the step is cleared, the line says
             // how it went and the mods read as built (`Msg::Native`).
             ("step", "done") => {
-                self.settings.native_mods_allowed_at = Some(1);
                 self.mod_preview.state = Some(native_status::State::UpToDate);
                 // Built: no mod waits for a build any more.
                 *self.mods.native_state.borrow_mut() =
@@ -393,34 +390,12 @@ impl Launcher {
                 self.instance_mods.list = rows;
             }
             ("left", _) => {
-                // Left out by a build, which ran after the player allowed native mods.
-                self.settings.native_mods_allowed_at = Some(1);
                 self.mod_preview.left_out = left_out();
                 // A build counts the mods it left out as tried (`native_status::built`): the
                 // build is up to date, and only Switch off changes anything.
                 self.mod_preview.state = Some(native_status::State::UpToDate);
                 *self.mods.native_state.borrow_mut() =
                     Some((String::new(), native_status::State::UpToDate, Vec::new()));
-            }
-            ("trust", "registry") => {
-                let (reply, _answer) = std::sync::mpsc::channel();
-                let inventory = nm::RegistryInventory {
-                    added_crates: 4,
-                    build_scripts: vec!["libz-sys".into()],
-                    proc_macros: vec!["serde_derive".into()],
-                };
-                let _ = self.tx.send(Msg::NativeRegistryConsent(inventory, reply));
-            }
-            ("trust", "generic") => {
-                self.pending_consent = Some(PendingConsent::Build(Vec::new()));
-            }
-            ("trust", _) => {
-                // Every switched-on native mod, as the real request names them.
-                self.pending_consent = Some(PendingConsent::Build(vec![
-                    "fast-ore".into(),
-                    "greeter".into(),
-                    "hitbox-plus".into(),
-                ]));
             }
             ("log", key) => {
                 // `mod-log-failed`: opened from a build that did not compile.

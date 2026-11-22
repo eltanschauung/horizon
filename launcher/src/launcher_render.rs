@@ -212,13 +212,6 @@ impl Render for Launcher {
         let mut root = div()
             .id("root")
             .track_focus(&self.root_focus)
-            .capture_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
-                if ev.keystroke.key == "escape" && this.pending_consent.is_some() {
-                    this.cancel_native_consent();
-                    cx.stop_propagation();
-                    cx.notify();
-                }
-            }))
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
                 let k = &ev.keystroke;
                 match k.key.as_str() {
@@ -348,9 +341,6 @@ impl Render for Launcher {
         }
         if let Some(palette) = self.palette_overlay(window, cx) {
             root = root.child(palette);
-        }
-        if self.pending_consent.is_some() {
-            root = root.child(self.native_consent(cx));
         }
         if self.welcoming() {
             root = root.child(self.welcome_screen(cx));

@@ -4,7 +4,7 @@ Native mods run with your rights. Read their source and dependencies before allo
 Install them into the selected instance from the Mods page, then choose **Build**, or run:
 
 ```sh
-horizon-launcher native-build path/to/mod --instance INSTANCE --trust-native-code
+horizon-launcher native-build path/to/mod --instance INSTANCE
 ```
 
 Omit the folder to build the instance's enabled native mods. The launcher keeps the instance on

@@ -617,8 +617,7 @@ enum ModsCmd {
         /// The instance (default: the selected one)
         #[arg(long)]
         instance: Option<String>,
-        /// Allow native code for this install (remembered; revoke in Settings, Storage)
-        #[arg(long)]
+        #[arg(long, hide = true)]
         trust_native_code: bool,
     },
     /// Look for newer versions of the native mods installed from GitHub (the latest release, or the
@@ -632,8 +631,7 @@ enum ModsCmd {
         /// The instance (default: the selected one)
         #[arg(long)]
         instance: Option<String>,
-        /// Allow native code for this install (remembered; revoke in Settings, Storage)
-        #[arg(long)]
+        #[arg(long, hide = true)]
         trust_native_code: bool,
     },
     /// Remove a pack the browser installed
@@ -850,9 +848,7 @@ enum Cmd {
             requires = "folder"
         )]
         server_output: Option<PathBuf>,
-        /// Allow exact-hash jar downloads into the local cache for the server export;
-        /// jar bytes are never included in the exported folder
-        #[arg(long, requires = "server_output")]
+        #[arg(long, hide = true, requires = "server_output")]
         allow_jar_downloads: bool,
         /// The instance whose installed native mods to build, and which then plays the build
         /// (default: the selected one)
@@ -866,8 +862,7 @@ enum Cmd {
         /// plays (rebuilds the mods for that pinned SDK)
         #[arg(long, conflicts_with = "version")]
         update: bool,
-        /// Allow native code for this install (remembered; revoke in Settings, Storage)
-        #[arg(long)]
+        #[arg(long, hide = true)]
         trust_native_code: bool,
         /// Native mods use the pinned SDK's optimized compilation settings.
         /// The game is never rebuilt by a mod build.
@@ -1389,16 +1384,15 @@ fn execute(command: Cmd, as_json: bool) -> Result<i32, String> {
             catalog_output,
             folder,
             server_output,
-            allow_jar_downloads,
+            allow_jar_downloads: _,
             instance,
             version,
             update,
-            trust_native_code,
+            trust_native_code: _,
             profile,
             mixins_from_source,
             back_up_worlds,
         } => {
-            native_permission(trust_native_code)?;
             native_mods::mixins_from_source(mixins_from_source);
             if catalog {
                 let discovered =
@@ -1439,9 +1433,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<i32, String> {
                         &base,
                         &folder,
                         native_mods::Target::Server,
-                        allow_jar_downloads,
                         steps,
-                        registry_consent,
                     )?;
                     println!("{}", tr("Native mod preflight passed; no build exported."));
                     return Ok(0);
@@ -1451,9 +1443,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<i32, String> {
                     &folder,
                     &output,
                     profile,
-                    allow_jar_downloads,
                     steps,
-                    registry_consent,
                 )?;
                 let built = std::path::absolute(&built).unwrap_or(built);
                 let path = built.display().to_string();
@@ -1498,9 +1488,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<i32, String> {
                     &base,
                     &folder,
                     native_mods::Target::Client,
-                    false,
                     steps,
-                    registry_consent,
                 )?;
                 println!(
                     "{}",
@@ -1510,7 +1498,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<i32, String> {
             }
             let profile = explicit.then_some(target.native_profile);
             let built =
-                native_mods::build(&base, &folder, &target, profile, native_mods::Asked { caller: native_mods::Caller::CommandLine, back_up: back_up_worlds }, steps, registry_consent).map_err(|error| {
+                native_mods::build(&base, &folder, &target, profile, native_mods::Asked { caller: native_mods::Caller::CommandLine, back_up: back_up_worlds }, steps).map_err(|error| {
                     if let native_mods::Failed::Worlds(stake) = &error {
                         return trf(
                             "{error}\n{stay}: nothing changed. Or run again with --back-up-worlds to back them up into {backups} and build without the mods named.",
@@ -2796,7 +2784,6 @@ fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
             url,
             mod_id,
             all,
-            trust_native_code,
             ..
         } => {
             let link = github_mods::parse(&url)?;
@@ -2807,13 +2794,11 @@ fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
                 &found,
                 mod_id.as_deref(),
                 all,
-                trust_native_code,
             )?;
         }
         ModsCmd::UpdateGithub {
             id,
             check,
-            trust_native_code,
             ..
         } => {
             if java.is_some() {
@@ -2840,7 +2825,7 @@ fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
                     o.label()
                 );
                 if !check {
-                    github_native(&home, false, &latest, Some(&o.id), false, trust_native_code)?;
+                    github_native(&home, false, &latest, Some(&o.id), false)?;
                 }
             }
         }
@@ -4072,11 +4057,10 @@ mod tests {
                 url,
                 mod_id,
                 all,
-                trust_native_code,
                 ..
             }) => assert_eq!(
-                (url.as_str(), mod_id.as_deref(), all, trust_native_code),
-                ("https://github.com/a/b", Some("zoom"), true, false)
+                (url.as_str(), mod_id.as_deref(), all),
+                ("https://github.com/a/b", Some("zoom"), true)
             ),
             _ => panic!("expected mods add-github"),
         }
@@ -4088,6 +4072,8 @@ mod tests {
                 ..
             })
         ));
+        assert!(parse(&["add-github", "https://github.com/a/b", "--trust-native-code"]).is_some());
+        assert!(parse(&["update-github", "--trust-native-code"]).is_some());
         // Search names one for a Java instance's version and loader; Check reads none: checks
         // are shared.
         assert!(matches!(
@@ -4268,9 +4254,9 @@ mod tests {
 #[path = "cli_catalog_tests.rs"]
 mod catalog_tests;
 
-#[path = "cli_native_permission.rs"]
-mod native_permission_impl;
-use native_permission_impl::{github_native, native_permission, registry_consent};
+#[path = "cli_github_native.rs"]
+mod github_native_impl;
+use github_native_impl::github_native;
 
 mod developer_builds;
 

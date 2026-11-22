@@ -3,13 +3,11 @@
 Install a native mod from the Mods page with **Add from GitHub**, or use:
 
 ```sh
-horizon-launcher mods add-github URL --trust-native-code
+horizon-launcher mods add-github URL
 ```
 
-`--trust-native-code` records your consent to run native code. You can omit it after the launcher
-has saved your consent. Native mods run with full access to your computer; read the source before
-installing. Before downloading the package or source, the launcher presents the
-exact resolved source commit link with its warning so you can review that revision.
+Native mods run with full access to your computer. The launcher records the exact resolved
+source commit for each GitHub installation.
 GitHub installs are not reviewed by the Horizon registry.
 
 ## Choose a source
@@ -47,8 +45,7 @@ repository, release tag when applicable, commit, asset name and installed file's
 `horizon-launcher mods list` displays the GitHub origin with its tag or abbreviated commit.
 
 - `horizon-launcher mods update-github [ID] --check` checks for updates without installing them.
-- `horizon-launcher mods update-github [ID]` installs updates with the native-code warning and
-  saved consent requirement. Release installs follow the latest release; commit installs follow
+- `horizon-launcher mods update-github [ID]` installs updates. Release installs follow the latest release; commit installs follow
   the default branch.
 - `horizon-launcher mods remove ID` removes a mod.
 

@@ -4562,9 +4562,6 @@ pub struct Settings {
     /// and before Play (`browser::horizon::auto`). Unset is on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mods_auto_update: Option<bool>,
-    /// First-use native code permission for this launcher install, Unix seconds.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub native_mods_allowed_at: Option<u64>,
     /// Managed cache limit in GiB (unset: 25; zero: no automatic cleanup). Player data isn't cache.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_limit_gib: Option<u64>,
@@ -4580,17 +4577,6 @@ pub struct Settings {
 }
 
 impl Settings {
-    /// Remember an explicit approval; merely finding an installed toolchain never grants it.
-    pub fn allow_native_mods(&mut self) -> Result<(), String> {
-        self.native_mods_allowed_at = Some(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_err(|error| error.to_string())?
-                .as_secs(),
-        );
-        self.save()
-    }
-
     pub fn load() -> Self {
         Self::parse(&fs::read_to_string(data_dir().join("settings.json")).unwrap_or_default())
     }

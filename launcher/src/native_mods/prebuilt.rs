@@ -645,7 +645,6 @@ pub(super) fn compile(
     projects: &[api::Project<'_>],
     declared: &[Vec<dependencies::Dependency>],
     resolution: &dependencies::Resolution,
-    consent: Option<&dyn Fn(&super::RegistryInventory) -> bool>,
     // Each mod is its own library: told which one starts, and how far through them.
     on_mod: &dyn Fn(&str, usize, usize),
 ) -> Result<(PathBuf, Vec<PathBuf>), String> {
@@ -695,7 +694,6 @@ pub(super) fn compile(
             declared,
             resolution,
             super::registry_compile::Options {
-                consent,
                 adapter: &std::env::current_exe().map_err(|e| e.to_string())?,
             },
         )?;

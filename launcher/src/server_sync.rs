@@ -813,7 +813,7 @@ mod tests {
         assert!(
             apply(&home, &m, &files, &runtime, || {
                 assert!(!old.exists());
-                Err("Registry dependency compilation was not approved".into())
+                Err("Fixture compiler failed".into())
             })
             .is_err()
         );

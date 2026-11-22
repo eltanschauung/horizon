@@ -121,7 +121,8 @@ Windows release and portable packaging require the pinned, checksum-verified x64
   client inputs matching the healthy dedicated-server deployment, then build its
   exact source commit through the reusable native cache. Play shows disabled
   download/build phases with separate clocks; normal version selection is hidden.
-  Server-required mods cannot be disabled/removed; optional client choices persist.
+  The launcher compiles enabled native mods without separate approval. Server-required
+  mods cannot be disabled/removed, and optional client choices persist.
   Package transactions recover/roll back without touching worlds or accounts.
   Frozen server deployment publishes the matching channel only after health checks.
   See [server-synced launcher](docs/server-synced-launcher.md).

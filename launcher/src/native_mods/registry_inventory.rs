@@ -286,7 +286,7 @@ mod tests {
         })).unwrap()
     }
     #[test]
-    fn consent_counts_only_reachable_build_packages_and_names_executable_code() {
+    fn inventory_counts_only_reachable_build_packages_and_names_executable_code() {
         let inventory = metadata()
             .inventory(&super::super::registry_lock::RegistryLock::default(), &[])
             .unwrap();

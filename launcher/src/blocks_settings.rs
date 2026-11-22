@@ -1,4 +1,4 @@
-//! The blocky look's Settings page, the native build consent and the settings rows.
+//! The blocky look's Settings page and the settings rows.
 use super::*;
 
 impl Launcher {
@@ -303,91 +303,6 @@ impl Launcher {
             )
             .child(self.collection_section(cx))
             .children(self.agents_section(cx))
-    }
-
-    pub(crate) fn request_native_build_consent(&mut self) {
-        self.native_consent_build = None;
-        self.pending_consent = Some(PendingConsent::Build(
-            native_status::enabled(&self.mods.home())
-                .into_iter()
-                .map(|(id, _, _)| id)
-                .collect(),
-        ));
-    }
-
-    /// Cancel and Escape share the transition; neither can execute a pending action.
-    pub(crate) fn cancel_native_consent(&mut self) {
-        self.play_after_build = None;
-        self.native_consent_build = None;
-        if let Err(error) = native_consent::resolve(
-            &mut self.pending_consent,
-            false,
-            true,
-            &mut self.settings,
-            &self.mods.home(),
-        ) {
-            self.mods.message = Some(Err(error));
-        }
-        self.consent_error = None;
-        self.instance_mods_changed();
-    }
-
-    pub(crate) fn native_consent(&self, cx: &mut Context<Self>) -> Div {
-        let t = self.theme;
-        // The mods asked about, when known (a build with none enabled names none).
-        let name = self
-            .pending_consent
-            .as_ref()
-            .map(PendingConsent::name)
-            .filter(|name| !name.is_empty());
-        let build = matches!(self.pending_consent, Some(PendingConsent::Build(_)));
-        let bytes = horizon_launcher::rust_toolchain::host().map(|host| host.download_bytes());
-        let size = bytes
-            .map(storage::format_bytes)
-            .unwrap_or_else(|| tr("Unavailable on this platform").into());
-        div().absolute().inset_0().occlude().flex().items_center().justify_center().bg(crate::glass_ui::scrim())
-            .child(plate(&t).w(px(520.)).p(px(28.)).bg(t.surface).rounded(px(16.)).border_1().border_color(t.rule).shadow_lg().flex().flex_col().gap(px(18.))
-                .child(div().size(px(48.)).rounded(px(12.)).bg(t.warn.opacity(0.12)).flex().items_center().justify_center().child(crate::glass_ui::icon("information-circle", 26., t.warn)))
-                .child(div().text_size(px(24.)).font_weight(FontWeight::BOLD).child(tr("Allow native mods?")))
-                .children(name.map(|name| div().font_weight(FontWeight::BOLD).child(name)))
-                .child(tr("These mods are programs that run inside your game. Like any program you install, they can read and change your files. Allow them only if you trust who made them."))
-                .children(horizon_launcher::rust_toolchain::installed().is_none().then(|| trf("Horizon will first download a compiler ({size}) to build them.", &[("size", &size)])))
-                .child(tr("You can take this permission back in Settings > Storage."))
-                .children(self.consent_error.clone().map(|error| div().text_color(t.danger).child(error)))
-                .children(bytes.is_none().then(|| div().text_color(t.danger).child(tr("Native mods can't be built on this computer, so they can't be allowed here."))))
-                .child(div().flex().justify_end().gap(px(12.))
-                    .child(button("native-cancel", "Cancel", Kind::Secondary, &t).w(px(120.)).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                        this.cancel_native_consent();
-                        cx.notify();
-                    })))
-                    .child({
-                        let allow = button("native-allow", if build { tr("Allow and build") } else { tr("Allow") }, Kind::Primary, &t).w(px(160.));
-                        if bytes.is_none() {
-                            disabled(allow)
-                        } else {
-                            allow.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                        match native_consent::resolve(&mut this.pending_consent, true, true, &mut this.settings, &this.mods.home()) {
-                            Err(error) => this.consent_error = Some(error),
-                            Ok(Some(action)) => { this.consent_error = None; this.storage_revoke_error = None; match action {
-                                PendingConsent::Build(_) => {
-                                    let (base, back_up) = this.native_consent_build.take().unwrap_or_default();
-                                    this.build_native_on(base, back_up)
-                                }
-                                PendingConsent::Toggle(entry) => this.mods_switch(&entry),
-                                PendingConsent::Install(source, id, known) => this.mods_install(source, id, known),
-                                PendingConsent::Github(found, only) => this.github_install(found, only),
-                                PendingConsent::Local(id) => {
-                                    this.mods.message = horizon_launcher::browser::java::set_enabled(&this.mods.home(), &id, true).err().map(Err);
-                                    this.instance_mods_changed();
-                                }
-                            } }
-                            Ok(None) => {},
-                        }
-                        cx.notify();
-                    }))
-                        }
-                    })
-                ))
     }
 
     /// Settings' Game arguments row: the extra arguments the game starts with, kept in
