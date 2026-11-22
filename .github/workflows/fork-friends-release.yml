@@ -16,7 +16,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: fork-friends-${{ inputs.tag || inputs.sdk_commit || inputs.bootstrap_commit }}
+  group: fork-friends-${{ inputs.bootstrap_commit != '' && 'bootstrap-' || '' }}${{ inputs.tag || inputs.sdk_commit || inputs.bootstrap_commit }}
   cancel-in-progress: false
 
 jobs:
