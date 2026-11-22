@@ -1,27 +1,17 @@
 {
-  "base": "v0.3.5",
-  "game_revision": "7bb97e1f7b2575ecc20258e602e8f97e6b6a929d",
-  "generation": "e0f2b45daee4612fb08bbe03220f0f13d46277360e533f468de87013cefbc578",
+  "base": "snapshot-2026-11-21-71156c8",
+  "game_revision": "71156c86c351fa42a77f616c8422412eaaae0760",
+  "generation": "21431d7e5fc849f01a25692c84254972ee561f6b925ec3c3ad240221f92554d2",
   "packages": [
     {
       "id": "alice_dolls",
       "kind": "content",
       "platform": null,
       "required": true,
-      "sha256": "44b9b43cbfbb5bb6c7a41c2977224bf7e60ac7a3a96ee9e1abcdbae8bf2180be",
-      "size": 89728,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/alice_dolls-44b9b43cbfbb5bb6c7a41c2977224bf7e60ac7a3a96ee9e1abcdbae8bf2180be.hmod",
+      "sha256": "415afca8f8dffbb00d9a4b8aac3f5bc7459deb6af9718cc402eb4070e22b32c0",
+      "size": 89572,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/alice_dolls-415afca8f8dffbb00d9a4b8aac3f5bc7459deb6af9718cc402eb4070e22b32c0.hmod",
       "version": "0.15.1"
-    },
-    {
-      "id": "arcadiandream",
-      "kind": "content",
-      "platform": null,
-      "required": true,
-      "sha256": "943496be0cc3376fb6aa6d34c4fff3e7a62c0b874f67acddfae1c706ec1973fc",
-      "size": 3981254,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/arcadiandream-943496be0cc3376fb6aa6d34c4fff3e7a62c0b874f67acddfae1c706ec1973fc.hmod",
-      "version": "0.1.0"
     },
     {
       "id": "betterdeserttemples",
@@ -30,7 +20,7 @@
       "required": true,
       "sha256": "7cdc7c265425a404c06014a6a495a32854e10acfb1d58b49615ac541b5c4dd31",
       "size": 653542,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/betterdeserttemples-7cdc7c265425a404c06014a6a495a32854e10acfb1d58b49615ac541b5c4dd31.hmod",
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/betterdeserttemples-7cdc7c265425a404c06014a6a495a32854e10acfb1d58b49615ac541b5c4dd31.hmod",
       "version": "0.2.0"
     },
     {
@@ -40,7 +30,7 @@
       "required": true,
       "sha256": "93c7105f41889c4a392ea9ec0b035a484e46cb5fa3f736c7409f21cba315cdcf",
       "size": 216203,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/betterendisland-93c7105f41889c4a392ea9ec0b035a484e46cb5fa3f736c7409f21cba315cdcf.hmod",
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/betterendisland-93c7105f41889c4a392ea9ec0b035a484e46cb5fa3f736c7409f21cba315cdcf.hmod",
       "version": "0.2.0"
     },
     {
@@ -50,7 +40,7 @@
       "required": true,
       "sha256": "74394afa0ebd90f1b24d017ec427dfd744fc8c23da83b33ea3f5c283e9729615",
       "size": 632013,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/betterjungletemples-74394afa0ebd90f1b24d017ec427dfd744fc8c23da83b33ea3f5c283e9729615.hmod",
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/betterjungletemples-74394afa0ebd90f1b24d017ec427dfd744fc8c23da83b33ea3f5c283e9729615.hmod",
       "version": "0.2.0"
     },
     {
@@ -60,7 +50,7 @@
       "required": true,
       "sha256": "a3e8391ddc8ccc87a122256e0b10e86751e396dca8829783a16858bc9fda9a87",
       "size": 36403,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/betterwitchhuts-a3e8391ddc8ccc87a122256e0b10e86751e396dca8829783a16858bc9fda9a87.hmod",
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/betterwitchhuts-a3e8391ddc8ccc87a122256e0b10e86751e396dca8829783a16858bc9fda9a87.hmod",
       "version": "0.2.0"
     },
     {
@@ -68,9 +58,9 @@
       "kind": "content",
       "platform": null,
       "required": true,
-      "sha256": "8eaff69255279f65981eb8cc0a2c48da38cdeb713bd8fb1f01b32ed82cc97cb5",
-      "size": 69815,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/bibliocraft-8eaff69255279f65981eb8cc0a2c48da38cdeb713bd8fb1f01b32ed82cc97cb5.hmod",
+      "sha256": "0b25d06fc99754a9b2e8279655ce01ca0f40549d03d8a500caff999553f8d091",
+      "size": 50113,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/bibliocraft-0b25d06fc99754a9b2e8279655ce01ca0f40549d03d8a500caff999553f8d091.hmod",
       "version": "0.2.0"
     },
     {
@@ -78,9 +68,9 @@
       "kind": "content",
       "platform": null,
       "required": true,
-      "sha256": "00f9bf291dd733cbe4244d7090c8513f275be3ab2879fb886820cdf90abc73ca",
-      "size": 27446366,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/biomesoplenty-00f9bf291dd733cbe4244d7090c8513f275be3ab2879fb886820cdf90abc73ca.hmod",
+      "sha256": "2819904c2b7fd7cd91b1c61508eaf6b1127bcbdeea118a166e27b8f5a7f1c2ca",
+      "size": 27446451,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/biomesoplenty-2819904c2b7fd7cd91b1c61508eaf6b1127bcbdeea118a166e27b8f5a7f1c2ca.hmod",
       "version": "0.2.8"
     },
     {
@@ -88,20 +78,10 @@
       "kind": "content",
       "platform": null,
       "required": true,
-      "sha256": "1d6c707d5a707f9b28bd3ec73f9618d4eaf3d780a2628ef99cb70e6dae4735bb",
-      "size": 12443177,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/block_variety-1d6c707d5a707f9b28bd3ec73f9618d4eaf3d780a2628ef99cb70e6dae4735bb.hmod",
+      "sha256": "467b981a347d007f9347d209c92c42ac30b57a901a28f50827111c3e5d72ffec",
+      "size": 12409295,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/block_variety-467b981a347d007f9347d209c92c42ac30b57a901a28f50827111c3e5d72ffec.hmod",
       "version": "0.4.0"
-    },
-    {
-      "id": "emojiful_twemoji",
-      "kind": "content",
-      "platform": null,
-      "required": true,
-      "sha256": "81f5e014ebc51058aecfc76a7d6118b4d5a2832c2c24dbdac38d7585fb6af388",
-      "size": 2609419,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/emojiful_twemoji-81f5e014ebc51058aecfc76a7d6118b4d5a2832c2c24dbdac38d7585fb6af388.hmod",
-      "version": "0.1.1"
     },
     {
       "id": "gensouworks_horizon",
@@ -110,7 +90,7 @@
       "required": true,
       "sha256": "fe18eb2ac7d166c614a9e083f5c3bacd3b48140868e1725f217a7a5f1c0cb951",
       "size": 451027,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/gensouworks_horizon-fe18eb2ac7d166c614a9e083f5c3bacd3b48140868e1725f217a7a5f1c0cb951.hmod",
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/gensouworks_horizon-fe18eb2ac7d166c614a9e083f5c3bacd3b48140868e1725f217a7a5f1c0cb951.hmod",
       "version": "0.1.1"
     },
     {
@@ -118,20 +98,10 @@
       "kind": "content",
       "platform": null,
       "required": true,
-      "sha256": "2695c4885fedfe252271229cc33e771720c44b3c9b5f9230cb10b0b20e9da78f",
-      "size": 8018,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/gravestone-2695c4885fedfe252271229cc33e771720c44b3c9b5f9230cb10b0b20e9da78f.hmod",
+      "sha256": "c4ddbf8233d340dbe9a79ef5e37567714025bf966b045b14a38e41cec5fe8425",
+      "size": 8043,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/gravestone-c4ddbf8233d340dbe9a79ef5e37567714025bf966b045b14a38e41cec5fe8425.hmod",
       "version": "1.0.0"
-    },
-    {
-      "id": "horizon_gensokyo_legacy",
-      "kind": "content",
-      "platform": null,
-      "required": true,
-      "sha256": "fa679da8f9bf0b681b4c9995e649986364690ad7bbc811588fec2a00b542dd76",
-      "size": 432335,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/horizon_gensokyo_legacy-fa679da8f9bf0b681b4c9995e649986364690ad7bbc811588fec2a00b542dd76.hmod",
-      "version": "0.1.0"
     },
     {
       "id": "horizon_magic_brooms",
@@ -140,27 +110,17 @@
       "required": true,
       "sha256": "18c0d7bc9a00a10e6a4959ef5cc463ba8b79461be047030255239e752e475d32",
       "size": 124467,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/horizon_magic_brooms-18c0d7bc9a00a10e6a4959ef5cc463ba8b79461be047030255239e752e475d32.hmod",
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/horizon_magic_brooms-18c0d7bc9a00a10e6a4959ef5cc463ba8b79461be047030255239e752e475d32.hmod",
       "version": "0.1.0"
-    },
-    {
-      "id": "lunatic",
-      "kind": "content",
-      "platform": null,
-      "required": true,
-      "sha256": "725167f65cb029686dea2d63548491ec4c733072901df6be5d595043b2e65189",
-      "size": 710644,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/lunatic-725167f65cb029686dea2d63548491ec4c733072901df6be5d595043b2e65189.hmod",
-      "version": "0.13.1"
     },
     {
       "id": "misogynist_unexpansion",
       "kind": "content",
       "platform": null,
       "required": true,
-      "sha256": "c830756fc72cbd4177936677ffd1d5b5798cfc5dfa4a6af2565f058a0751260f",
-      "size": 3969,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/misogynist_unexpansion-c830756fc72cbd4177936677ffd1d5b5798cfc5dfa4a6af2565f058a0751260f.hmod",
+      "sha256": "5520272ac3f75d90c9c2b6da0d84bc5546ded36430fbe64b4baef37ef2e16cba",
+      "size": 3974,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/misogynist_unexpansion-5520272ac3f75d90c9c2b6da0d84bc5546ded36430fbe64b4baef37ef2e16cba.hmod",
       "version": "0.1.0"
     },
     {
@@ -170,7 +130,7 @@
       "required": true,
       "sha256": "e7cbcdadbac06c67909b5f83214a2e9fa214ead78ab76eec4d17803d4b95c0dc",
       "size": 2230967,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/mvs-e7cbcdadbac06c67909b5f83214a2e9fa214ead78ab76eec4d17803d4b95c0dc.hmod",
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/mvs-e7cbcdadbac06c67909b5f83214a2e9fa214ead78ab76eec4d17803d4b95c0dc.hmod",
       "version": "0.1.0"
     },
     {
@@ -178,9 +138,9 @@
       "kind": "content",
       "platform": null,
       "required": true,
-      "sha256": "5cc6936a3d87b226f233bb058f20e9be569ee4ee5248fc1a5f2531c772025345",
-      "size": 127153,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/naturescompass-5cc6936a3d87b226f233bb058f20e9be569ee4ee5248fc1a5f2531c772025345.hmod",
+      "sha256": "d2ed5ebed0578bd6abae3bb29ec9af6b0ca5e870509c61ffa7040124b01fe424",
+      "size": 127124,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/naturescompass-d2ed5ebed0578bd6abae3bb29ec9af6b0ca5e870509c61ffa7040124b01fe424.hmod",
       "version": "1.9.7-horizon.1"
     },
     {
@@ -190,7 +150,7 @@
       "required": true,
       "sha256": "f75ed16e3c6b22a791434164a2102a563d61b5ef329f538c3dcafe8efbf5f6aa",
       "size": 4368474,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/structure_addon-f75ed16e3c6b22a791434164a2102a563d61b5ef329f538c3dcafe8efbf5f6aa.hmod",
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/structure_addon-f75ed16e3c6b22a791434164a2102a563d61b5ef329f538c3dcafe8efbf5f6aa.hmod",
       "version": "0.4.0"
     },
     {
@@ -198,9 +158,9 @@
       "kind": "content",
       "platform": null,
       "required": true,
-      "sha256": "1550d00f1750b948299a8b9e4127d334a9c2befbb817989c01df57f3db53dda0",
-      "size": 2119464,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/thkaguyamod-1550d00f1750b948299a8b9e4127d334a9c2befbb817989c01df57f3db53dda0.hmod",
+      "sha256": "400d80b6c34141330fd4a73d1544d3bc1eaa120b051946f5a7f9a4b30a002244",
+      "size": 2117077,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/thkaguyamod-400d80b6c34141330fd4a73d1544d3bc1eaa120b051946f5a7f9a4b30a002244.hmod",
       "version": "0.7.2"
     },
     {
@@ -208,9 +168,9 @@
       "kind": "content",
       "platform": null,
       "required": true,
-      "sha256": "3af3a9cc2a3d37ffe2d0d400c2f89392129a4b3c71843bf345c3c156c05c60fc",
-      "size": 104087,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/thmobs-3af3a9cc2a3d37ffe2d0d400c2f89392129a4b3c71843bf345c3c156c05c60fc.hmod",
+      "sha256": "71ab2cc701f17964ac29b0ad88b18eeb573aa8612d45fcf97acc536f55ee08a9",
+      "size": 103588,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/thmobs-71ab2cc701f17964ac29b0ad88b18eeb573aa8612d45fcf97acc536f55ee08a9.hmod",
       "version": "0.9.0"
     },
     {
@@ -218,9 +178,9 @@
       "kind": "content",
       "platform": null,
       "required": true,
-      "sha256": "9fe490866549bf5bfd3fde75b78f3e714a78fd8a6b52c621210e1b5f9cb5f0b4",
-      "size": 256862,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/yukari_gap-9fe490866549bf5bfd3fde75b78f3e714a78fd8a6b52c621210e1b5f9cb5f0b4.hmod",
+      "sha256": "cd4b2dc128a5c357ad36d3165d831d07912b12d8f38c023e1156de6c2a16625c",
+      "size": 256883,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/yukari_gap-cd4b2dc128a5c357ad36d3165d831d07912b12d8f38c023e1156de6c2a16625c.hmod",
       "version": "0.7.0"
     },
     {
@@ -228,9 +188,9 @@
       "kind": "content",
       "platform": null,
       "required": true,
-      "sha256": "6cea34bb2e4f809e296541ff2b5d73f243966a54a44bb81608ffc37333272998",
-      "size": 122118,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/yungsextras-6cea34bb2e4f809e296541ff2b5d73f243966a54a44bb81608ffc37333272998.hmod",
+      "sha256": "5feaf73e264b9483631947770b68b23f97c4c893b4f6183f2aae9aa5d7b0668e",
+      "size": 96979,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/yungsextras-5feaf73e264b9483631947770b68b23f97c4c893b4f6183f2aae9aa5d7b0668e.hmod",
       "version": "0.2.0"
     },
     {
@@ -238,320 +198,320 @@
       "kind": "native",
       "platform": null,
       "required": true,
-      "sha256": "5e76b3b73566b74ba5a3cd53eecf89126e2bc7830822d36b92f9fc6f2b95a950",
-      "size": 135152,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/alice_dolls_native-5e76b3b73566b74ba5a3cd53eecf89126e2bc7830822d36b92f9fc6f2b95a950.hnmod",
-      "version": "0.42.4"
+      "sha256": "40359619120498122fb13f33c00e548db709672f7f6a30cc90d9a2c8d1bf107d",
+      "size": 142489,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/alice_dolls_native-40359619120498122fb13f33c00e548db709672f7f6a30cc90d9a2c8d1bf107d.hmod",
+      "version": "0.42.4+sdk.1"
     },
     {
       "id": "arcadiandream",
       "kind": "native",
       "platform": null,
       "required": true,
-      "sha256": "a3c2ec4d05914bae0d1f1c0a55ef742ddb4c5372a58f9824273e1a13671e8b00",
-      "size": 82469,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/arcadiandream-a3c2ec4d05914bae0d1f1c0a55ef742ddb4c5372a58f9824273e1a13671e8b00.hnmod",
-      "version": "0.1.0"
+      "sha256": "47f1cdd0107ba121d78b977b6097e59abac5604274e7127fefb4ec4f76e2ae91",
+      "size": 4055600,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/arcadiandream-47f1cdd0107ba121d78b977b6097e59abac5604274e7127fefb4ec4f76e2ae91.hmod",
+      "version": "0.1.0+sdk.1"
     },
     {
       "id": "block_variety_native",
       "kind": "native",
       "platform": null,
       "required": true,
-      "sha256": "645473dcbdff7bd80cb1219902e82d58c9f6c88184998a4daffbff0bd14d7d84",
-      "size": 79166,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/block_variety_native-645473dcbdff7bd80cb1219902e82d58c9f6c88184998a4daffbff0bd14d7d84.hnmod",
-      "version": "0.5.0"
+      "sha256": "e2f783c5cb0cfc14bd4aee783230a877e51f6b969046e3df0d9a0bc27a2615a3",
+      "size": 79505,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/block_variety_native-e2f783c5cb0cfc14bd4aee783230a877e51f6b969046e3df0d9a0bc27a2615a3.hmod",
+      "version": "0.6.0"
     },
     {
       "id": "chatheads",
       "kind": "native",
       "platform": null,
       "required": false,
-      "sha256": "ee95deea59d70f7ae1d1ee5d07edf22f3b04c789f76e975869e12a035e96ea32",
-      "size": 8944,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/chatheads-ee95deea59d70f7ae1d1ee5d07edf22f3b04c789f76e975869e12a035e96ea32.hnmod",
-      "version": "0.1.0+character.2"
+      "sha256": "6d2c2e92010a4f51735d3ec76d8c5779a425d208f5033133d9f1da971253ea83",
+      "size": 3094,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/chatheads-6d2c2e92010a4f51735d3ec76d8c5779a425d208f5033133d9f1da971253ea83.hmod",
+      "version": "0.2.0"
     },
     {
       "id": "classic_music",
       "kind": "native",
       "platform": null,
       "required": false,
-      "sha256": "7f24eaee5a4f822dd04be7a3fd333f5b14aa3cb01eef30095de4f86b9a709b81",
-      "size": 6697,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/classic_music-7f24eaee5a4f822dd04be7a3fd333f5b14aa3cb01eef30095de4f86b9a709b81.hnmod",
-      "version": "0.1.0"
+      "sha256": "f1217582823ba434c4424df4f901737e2b6ad7a533dae0aaf9a571a030d68aee",
+      "size": 1739,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/classic_music-f1217582823ba434c4424df4f901737e2b6ad7a533dae0aaf9a571a030d68aee.hmod",
+      "version": "0.2.0"
     },
     {
       "id": "dynamiclights",
       "kind": "native",
       "platform": null,
       "required": false,
-      "sha256": "7aeb931abba59dd3b96bac6489ee0b96a5b6c49422bbcd7b63c18c08541afb73",
-      "size": 26750,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/dynamiclights-7aeb931abba59dd3b96bac6489ee0b96a5b6c49422bbcd7b63c18c08541afb73.hnmod",
-      "version": "1.0.3"
+      "sha256": "12d892389853257e42c3c32316c24209ad54214cf4c7dff0a29cc958f73478f7",
+      "size": 40096,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/dynamiclights-12d892389853257e42c3c32316c24209ad54214cf4c7dff0a29cc958f73478f7.hmod",
+      "version": "1.1.0"
     },
     {
       "id": "eating_drinking_animation",
       "kind": "native",
       "platform": null,
       "required": false,
-      "sha256": "559f1edffff3dde7241f4c2326e49387159aa4bd1d427e760bc3e0ba858bbadb",
-      "size": 5631,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/eating_drinking_animation-559f1edffff3dde7241f4c2326e49387159aa4bd1d427e760bc3e0ba858bbadb.hnmod",
-      "version": "0.1.0"
+      "sha256": "11a3af33e81cc1d5bf4281183b6cc43fac40608aece483c4ba7d2576bb5ab42f",
+      "size": 6323,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/eating_drinking_animation-11a3af33e81cc1d5bf4281183b6cc43fac40608aece483c4ba7d2576bb5ab42f.hmod",
+      "version": "0.2.0"
     },
     {
       "id": "eatinganimation",
       "kind": "native",
       "platform": null,
       "required": false,
-      "sha256": "3b4d7ce3c9791facc862da7727c2c7c71025cd9bb3ee4cbeaf40f48c72bf5cb0",
-      "size": 3491,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/eatinganimation-3b4d7ce3c9791facc862da7727c2c7c71025cd9bb3ee4cbeaf40f48c72bf5cb0.hnmod",
-      "version": "0.1.1"
+      "sha256": "11e3fa53649eba597280418901ae0ccd13b38f5fd89913a7e0f000cfb49779ae",
+      "size": 1451,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/eatinganimation-11e3fa53649eba597280418901ae0ccd13b38f5fd89913a7e0f000cfb49779ae.hmod",
+      "version": "0.2.0"
     },
     {
       "id": "emojiful",
       "kind": "native",
       "platform": null,
       "required": true,
-      "sha256": "b6c5019bf9285e55b76a71e33ba3ed65289240df4c53f0c7d08012b5cffdf9ce",
-      "size": 21324,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/emojiful-b6c5019bf9285e55b76a71e33ba3ed65289240df4c53f0c7d08012b5cffdf9ce.hnmod",
-      "version": "0.1.1"
+      "sha256": "96061eb0acd76651857f34d25cd3b28aa60f150c5d19649748c64a073f2ec908",
+      "size": 2612055,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/emojiful-96061eb0acd76651857f34d25cd3b28aa60f150c5d19649748c64a073f2ec908.hmod",
+      "version": "0.4.1"
     },
     {
       "id": "firstpersonmodel_horizon",
       "kind": "native",
       "platform": null,
       "required": false,
-      "sha256": "b055a37a4a002ded7d8f5069de109cdaaacf4fc45aceb14063b633328cf3f78e",
-      "size": 7485,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/firstpersonmodel_horizon-b055a37a4a002ded7d8f5069de109cdaaacf4fc45aceb14063b633328cf3f78e.hnmod",
-      "version": "0.2.7"
+      "sha256": "10a5bdae3b74889be74ddb0bd43f480a3c187fc7006884ecfac2e43adae5ddfa",
+      "size": 6646,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/firstpersonmodel_horizon-10a5bdae3b74889be74ddb0bd43f480a3c187fc7006884ecfac2e43adae5ddfa.hmod",
+      "version": "0.3.0"
     },
     {
       "id": "gravestone_core",
       "kind": "native",
       "platform": null,
       "required": true,
-      "sha256": "2a449726af8131ed2d280c6b7c28932c6dcbaf9f9d0633fedbcec77277d9080d",
-      "size": 18244,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/gravestone_core-2a449726af8131ed2d280c6b7c28932c6dcbaf9f9d0633fedbcec77277d9080d.hnmod",
-      "version": "1.0.1"
+      "sha256": "0cd5490b701a076b3661e4e0bd113cb9faea2460ae7ad01ca242a56a18bc5c95",
+      "size": 18179,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/gravestone_core-0cd5490b701a076b3661e4e0bd113cb9faea2460ae7ad01ca242a56a18bc5c95.hmod",
+      "version": "1.1.0"
     },
     {
       "id": "horizon_gensokyo_legacy",
       "kind": "native",
       "platform": null,
       "required": true,
-      "sha256": "2ceb0aa64830fb65cdd765524c70bcb661653305fafc51d35c4ee6352475b1a7",
-      "size": 29477,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/horizon_gensokyo_legacy-2ceb0aa64830fb65cdd765524c70bcb661653305fafc51d35c4ee6352475b1a7.hnmod",
-      "version": "0.1.0"
+      "sha256": "8149d4c7b0047506227e74520fdabf2c54f533e036e8f63bfc90eacf99ec6e4b",
+      "size": 29080,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/horizon_gensokyo_legacy-8149d4c7b0047506227e74520fdabf2c54f533e036e8f63bfc90eacf99ec6e4b.hmod",
+      "version": "0.1.1"
     },
     {
       "id": "horizon_multiplayer_sleep",
       "kind": "native",
       "platform": null,
       "required": true,
-      "sha256": "5191fdcb16eb81257c0e2c72907af880e033710bf406e7833a0c071c606a57ff",
-      "size": 2305,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/horizon_multiplayer_sleep-5191fdcb16eb81257c0e2c72907af880e033710bf406e7833a0c071c606a57ff.hnmod",
-      "version": "0.1.0"
+      "sha256": "999019e0e171689fa8cf9698374788821116af9f41756b2f4a0b2159ed811f54",
+      "size": 1741,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/horizon_multiplayer_sleep-999019e0e171689fa8cf9698374788821116af9f41756b2f4a0b2159ed811f54.hmod",
+      "version": "0.2.0"
     },
     {
       "id": "horizon_old_combat_mod",
       "kind": "native",
       "platform": null,
       "required": true,
-      "sha256": "16c216e45faee65600445180ebcfc287a0c7de7e4be3d8879cc78d1d4eadf577",
-      "size": 4086,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/horizon_old_combat_mod-16c216e45faee65600445180ebcfc287a0c7de7e4be3d8879cc78d1d4eadf577.hnmod",
-      "version": "0.1.0"
+      "sha256": "500734d2c0a17debba4bad729737850617d683db243eec8d9e4affe32f34a106",
+      "size": 5164,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/horizon_old_combat_mod-500734d2c0a17debba4bad729737850617d683db243eec8d9e4affe32f34a106.hmod",
+      "version": "0.2.0"
     },
     {
       "id": "horizonmatica",
       "kind": "native",
       "platform": null,
       "required": true,
-      "sha256": "b938766fdd2c8e9314cba986fcd9f9f2b06a5eea4eb72b7529f87a9b069a9abe",
-      "size": 152456,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/horizonmatica-b938766fdd2c8e9314cba986fcd9f9f2b06a5eea4eb72b7529f87a9b069a9abe.hnmod",
-      "version": "0.3.2"
+      "sha256": "36f0582506a256be71b7708073beb0b53dbb48f55880bd2f64b2abdfc1430cae",
+      "size": 135669,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/horizonmatica-36f0582506a256be71b7708073beb0b53dbb48f55880bd2f64b2abdfc1430cae.hmod",
+      "version": "0.4.0"
     },
     {
       "id": "invis_armor",
       "kind": "native",
       "platform": null,
       "required": false,
-      "sha256": "9647cf33dfcd15282cc112dc6a88503f3ce6e70ce3aa9a04c6c11ecc03a7e94b",
-      "size": 7381,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/invis_armor-9647cf33dfcd15282cc112dc6a88503f3ce6e70ce3aa9a04c6c11ecc03a7e94b.hnmod",
-      "version": "0.1.0"
+      "sha256": "4abe5058cb28fae1c3e5797a4d56b18d7e09f71db8ef9d40c7a185972b60673c",
+      "size": 5176,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/invis_armor-4abe5058cb28fae1c3e5797a4d56b18d7e09f71db8ef9d40c7a185972b60673c.hmod",
+      "version": "0.2.0"
     },
     {
       "id": "jade",
       "kind": "native",
       "platform": null,
       "required": false,
-      "sha256": "e6ff6fbc65abaf091b8498f07949fdd2095b45cbcc818e6520826ea7017de52d",
-      "size": 229255,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/jade-e6ff6fbc65abaf091b8498f07949fdd2095b45cbcc818e6520826ea7017de52d.hnmod",
-      "version": "26.3.8+fork.1"
+      "sha256": "3d186b03b43858be3b151fe9f8b39a0954c89f11a33d86289bba5be73e1689c5",
+      "size": 228853,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/jade-3d186b03b43858be3b151fe9f8b39a0954c89f11a33d86289bba5be73e1689c5.hmod",
+      "version": "26.3.9"
     },
     {
       "id": "justenoughitems",
       "kind": "native",
       "platform": null,
       "required": false,
-      "sha256": "6acc0701e16cbbee5941310dc600f805ebdcf2897d92c62047e8bf8a7e519396",
-      "size": 92521,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/justenoughitems-6acc0701e16cbbee5941310dc600f805ebdcf2897d92c62047e8bf8a7e519396.hnmod",
-      "version": "1.1.0"
+      "sha256": "a1d5831a87766e2e281cce4b77be569884bd02368e8c41916f1f5efc60fcd48a",
+      "size": 125626,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/justenoughitems-a1d5831a87766e2e281cce4b77be569884bd02368e8c41916f1f5efc60fcd48a.hmod",
+      "version": "1.2.0"
     },
     {
       "id": "lunatic",
       "kind": "native",
       "platform": null,
       "required": true,
-      "sha256": "f4414e4d069c78c56042cbe391da70956e34890ca9b5f3edbdddb14687c5547f",
-      "size": 99947,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/lunatic-f4414e4d069c78c56042cbe391da70956e34890ca9b5f3edbdddb14687c5547f.hnmod",
-      "version": "0.13.1"
+      "sha256": "d564d2175de81df3f50a55494306cde8b7ad0fbc5053c2d796d90f5c70e11838",
+      "size": 822976,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/lunatic-d564d2175de81df3f50a55494306cde8b7ad0fbc5053c2d796d90f5c70e11838.hmod",
+      "version": "0.14.0"
     },
     {
       "id": "minimap",
       "kind": "native",
       "platform": null,
       "required": false,
-      "sha256": "a173f0f33c365d855c1671799ad5fa4deb2fa80d26fbe6a0a6c70678fdf107bf",
-      "size": 21373,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/minimap-a173f0f33c365d855c1671799ad5fa4deb2fa80d26fbe6a0a6c70678fdf107bf.hnmod",
-      "version": "2.0.1"
+      "sha256": "4ca5b1cfb1a8c6512dd02a8b5a75f474044d77dbc006ae55e1120cb90b7eeb83",
+      "size": 33277,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/minimap-4ca5b1cfb1a8c6512dd02a8b5a75f474044d77dbc006ae55e1120cb90b7eeb83.hmod",
+      "version": "2.1.0"
     },
     {
       "id": "misogynist_unexpansion_native",
       "kind": "native",
       "platform": null,
       "required": true,
-      "sha256": "5e3c4f634160f47f5a0307f25ea944bc0b9b99baba9340e39bd96e334db1f583",
-      "size": 46426,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/misogynist_unexpansion_native-5e3c4f634160f47f5a0307f25ea944bc0b9b99baba9340e39bd96e334db1f583.hnmod",
-      "version": "0.16.0"
+      "sha256": "cd913b3e43994b4b51720ac00e84827d9b2cbcddbf151642fb415a63be36761c",
+      "size": 42131,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/misogynist_unexpansion_native-cd913b3e43994b4b51720ac00e84827d9b2cbcddbf151642fb415a63be36761c.hmod",
+      "version": "0.16.0+sdk.1"
     },
     {
       "id": "naturescompass_native",
       "kind": "native",
       "platform": null,
       "required": true,
-      "sha256": "f98622db89fddbeba6bf0fd6254bca30e4cc6522a9c44c72e13d103bcecb69ae",
-      "size": 15844,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/naturescompass_native-f98622db89fddbeba6bf0fd6254bca30e4cc6522a9c44c72e13d103bcecb69ae.hnmod",
-      "version": "1.9.7-horizon.2"
+      "sha256": "972d54b073b291bfba84455362afa63cf8dc53722d29dd9938a42ec438745d47",
+      "size": 17456,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/naturescompass_native-972d54b073b291bfba84455362afa63cf8dc53722d29dd9938a42ec438745d47.hmod",
+      "version": "1.9.7-horizon.3"
     },
     {
       "id": "no_copper",
       "kind": "native",
       "platform": null,
       "required": true,
-      "sha256": "4618cb86833ff842c9d9f6e0456c6c86016fddf752ec9006e69da0c92602d3d5",
-      "size": 3859,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/no_copper-4618cb86833ff842c9d9f6e0456c6c86016fddf752ec9006e69da0c92602d3d5.hnmod",
-      "version": "0.1.0"
+      "sha256": "51517830f8fa951a230dadf94502fcb2b9ef82274ca695e23e260aee574a1c29",
+      "size": 3652,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/no_copper-51517830f8fa951a230dadf94502fcb2b9ef82274ca695e23e260aee574a1c29.hmod",
+      "version": "0.2.0"
     },
     {
       "id": "skins_3d",
       "kind": "native",
       "platform": null,
       "required": true,
-      "sha256": "a2c36f66244f30fae674c49758d502830dc43fb08858135a6a7dde7a411ab3e9",
-      "size": 11397,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/skins_3d-a2c36f66244f30fae674c49758d502830dc43fb08858135a6a7dde7a411ab3e9.hnmod",
-      "version": "1.1.1"
+      "sha256": "0b34718f0839f209fcf46b35ff7df62605ec19f585ba2df5de3d9d21747ac0b7",
+      "size": 16523,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/skins_3d-0b34718f0839f209fcf46b35ff7df62605ec19f585ba2df5de3d9d21747ac0b7.hmod",
+      "version": "2.0.1"
     },
     {
       "id": "tectonic_horizon",
       "kind": "native",
       "platform": null,
       "required": true,
-      "sha256": "5042c00a7aa4abf223942f6c7909a8618d2ca212ea8623eee744c0b10d63612b",
-      "size": 27427,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/tectonic_horizon-5042c00a7aa4abf223942f6c7909a8618d2ca212ea8623eee744c0b10d63612b.hnmod",
-      "version": "0.3.5"
+      "sha256": "b6283dd0a2e7087717b69ee618ff397b3367889b6c4334829e21ec0ec33ade4d",
+      "size": 29466,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/tectonic_horizon-b6283dd0a2e7087717b69ee618ff397b3367889b6c4334829e21ec0ec33ade4d.hmod",
+      "version": "0.4.0"
     },
     {
       "id": "thkaguyamod_native",
       "kind": "native",
       "platform": null,
       "required": true,
-      "sha256": "fdcc32187790ca2eeb4b44adb51395a5c0f59f35836172058a8c7bd5b5e25dec",
-      "size": 141090,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/thkaguyamod_native-fdcc32187790ca2eeb4b44adb51395a5c0f59f35836172058a8c7bd5b5e25dec.hnmod",
-      "version": "0.6.1"
+      "sha256": "164de9a2d5e3a29ce2307f878caf145096c61d6234970dc98747c9a7c41d2a20",
+      "size": 148353,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/thkaguyamod_native-164de9a2d5e3a29ce2307f878caf145096c61d6234970dc98747c9a7c41d2a20.hmod",
+      "version": "0.6.1+sdk.1"
     },
     {
       "id": "thmobs_native",
       "kind": "native",
       "platform": null,
       "required": true,
-      "sha256": "92eb283b8dec12b5dad18cf6f6ffd1535f532e5c18e5c41fe896e12a57f24112",
-      "size": 93690,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/thmobs_native-92eb283b8dec12b5dad18cf6f6ffd1535f532e5c18e5c41fe896e12a57f24112.hnmod",
-      "version": "0.9.6"
+      "sha256": "05616cf7e0265b14c1500a3ad11ab66f8ad57456898a3d8e4d01a4594c5876ee",
+      "size": 96716,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/thmobs_native-05616cf7e0265b14c1500a3ad11ab66f8ad57456898a3d8e4d01a4594c5876ee.hmod",
+      "version": "0.9.6+sdk.1"
     },
     {
       "id": "voicechat",
       "kind": "native",
       "platform": null,
       "required": true,
-      "sha256": "d3893d5c60566914c20887dcf372332deed4c25ec79cbaae82b4c0f0073aa51d",
-      "size": 51966,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/voicechat-d3893d5c60566914c20887dcf372332deed4c25ec79cbaae82b4c0f0073aa51d.hnmod",
-      "version": "1.0.1+fork.1"
+      "sha256": "22f853ffe336c6c4c57a6024d8046fa5df8d0f83530dbc627d8a8f2462663fa5",
+      "size": 49970,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/voicechat-22f853ffe336c6c4c57a6024d8046fa5df8d0f83530dbc627d8a8f2462663fa5.hmod",
+      "version": "1.1.0"
     },
     {
       "id": "voicechat_server",
       "kind": "native",
       "platform": null,
       "required": false,
-      "sha256": "f9fe02255462a99628b844d4a7914b7e8f3472d112cae64ab61930897e2278ff",
-      "size": 25554,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/voicechat_server-f9fe02255462a99628b844d4a7914b7e8f3472d112cae64ab61930897e2278ff.hnmod",
-      "version": "1.1.0"
+      "sha256": "a149711537a7a2597516db7d9aaf42bae16b9e14f3534dd308f842edb49c1ca2",
+      "size": 29281,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/voicechat_server-a149711537a7a2597516db7d9aaf42bae16b9e14f3534dd308f842edb49c1ca2.hmod",
+      "version": "1.2.0"
     },
     {
       "id": "worldedit",
       "kind": "native",
       "platform": null,
       "required": true,
-      "sha256": "bbf0c26562f027da2fbb5389ce721c9f2a817005c85cca7ec2119b283461ee09",
-      "size": 38311,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/worldedit-bbf0c26562f027da2fbb5389ce721c9f2a817005c85cca7ec2119b283461ee09.hnmod",
-      "version": "1.2.1+fork.1"
+      "sha256": "c899c9007b6e6888bd1e7629a5028f823ff9097a5a2cc064a0a0804a842e4f30",
+      "size": 40062,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/worldedit-c899c9007b6e6888bd1e7629a5028f823ff9097a5a2cc064a0a0804a842e4f30.hmod",
+      "version": "1.3.0+fork.1"
     },
     {
       "id": "yukari_gap_native",
       "kind": "native",
       "platform": null,
       "required": true,
-      "sha256": "c9b4bc9424cb9b06c0782415f5d8c76394513ba7dd88320a0874050f4acddc9e",
-      "size": 35265,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/yukari_gap_native-c9b4bc9424cb9b06c0782415f5d8c76394513ba7dd88320a0874050f4acddc9e.hnmod",
-      "version": "0.9.0"
+      "sha256": "cce9bd33301105f722c675108fefddce104fcd9ad45f427bb78a6c62a52ade92",
+      "size": 37466,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/yukari_gap_native-cce9bd33301105f722c675108fefddce104fcd9ad45f427bb78a6c62a52ade92.hmod",
+      "version": "0.9.0+sdk.1"
     },
     {
       "id": "zoom",
       "kind": "native",
       "platform": null,
       "required": false,
-      "sha256": "fb347b333486857bd39e6a232f57b02e18d56169da8a7d4369c3d854124358d4",
-      "size": 6647,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/zoom-fb347b333486857bd39e6a232f57b02e18d56169da8a7d4369c3d854124358d4.hnmod",
-      "version": "2.0.0"
+      "sha256": "127f58c553b863f4dff9e8270017ed7fe3dcb9332400fb43e35c28634e59554c",
+      "size": 21491,
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/zoom-127f58c553b863f4dff9e8270017ed7fe3dcb9332400fb43e35c28634e59554c.hmod",
+      "version": "3.0.4"
     },
     {
       "id": "libopus",
@@ -560,7 +520,7 @@
       "required": true,
       "sha256": "e602e0f79080e988df0ab1c9ce2ec9c11325c3d808fbae3230ad1cfd4942acc4",
       "size": 500008,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/libopus-e602e0f79080e988df0ab1c9ce2ec9c11325c3d808fbae3230ad1cfd4942acc4.dll",
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/libopus-e602e0f79080e988df0ab1c9ce2ec9c11325c3d808fbae3230ad1cfd4942acc4.dll",
       "version": "1.6.1-2"
     },
     {
@@ -570,9 +530,9 @@
       "required": true,
       "sha256": "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551",
       "size": 1945,
-      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-e0f2b45daee4612fb08b/opus_license-01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551.txt",
+      "url": "https://github.com/eltanschauung/horizon/releases/download/sync-21431d7e5fc849f01a25/opus_license-01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551.txt",
       "version": "1.6.1-2"
     }
   ],
-  "schema": 1
+  "schema": 2
 }
