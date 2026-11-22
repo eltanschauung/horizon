@@ -80,12 +80,6 @@ impl Launcher {
             return;
         }
         let id = instance.id.clone();
-        if self.settings.native_mods_allowed_at.is_none() {
-            if play_after && self.pending_consent.is_none() {
-                self.pending_consent = Some(PendingConsent::ServerPlay(id));
-            }
-            return;
-        }
         let current = self.version_of(&instance).cloned();
         self.server_sync.failed.remove(&id);
         self.server_sync.checked.insert(id.clone(), Instant::now());
@@ -102,14 +96,9 @@ impl Launcher {
         let tx = self.tx.clone();
         std::thread::spawn(move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                server_sync::sync(
-                    &instance,
-                    current.as_deref(),
-                    |phase, line| {
-                        let _ = tx.send(Msg::ServerSyncProgress(id.clone(), phase, line));
-                    },
-                    |inventory| native_registry_consent::request(&tx, inventory),
-                )
+                server_sync::sync(&instance, current.as_deref(), |phase, line| {
+                    let _ = tx.send(Msg::ServerSyncProgress(id.clone(), phase, line));
+                })
             }))
             .unwrap_or_else(|_| {
                 Err("The server update stopped unexpectedly; press Play to retry".into())
@@ -151,7 +140,6 @@ impl Launcher {
             .get(&i.id)
             .is_none_or(|t| t.elapsed() >= Duration::from_secs(60));
         if stale
-            && self.settings.native_mods_allowed_at.is_some()
             && self.pending_consent.is_none()
             && !self.server_sync.failed.contains_key(&i.id)
             && self.client.is_none()

@@ -339,10 +339,7 @@ impl Launcher {
             .as_ref()
             .map(PendingConsent::name)
             .filter(|name| !name.is_empty());
-        let build = matches!(
-            self.pending_consent,
-            Some(PendingConsent::Build(_) | PendingConsent::ServerPlay(_))
-        );
+        let build = matches!(self.pending_consent, Some(PendingConsent::Build(_)));
         let bytes = horizon_launcher::rust_toolchain::host().map(|host| host.download_bytes());
         let size = bytes
             .map(storage::format_bytes)
@@ -374,11 +371,6 @@ impl Launcher {
                                 PendingConsent::Build(_) => {
                                     let (base, back_up) = this.native_consent_build.take().unwrap_or_default();
                                     this.build_native_on(base, back_up)
-                                }
-                                PendingConsent::ServerPlay(id) => {
-                                    if this.selected_instance().is_some_and(|i| i.id == id) {
-                                        this.begin_server_sync(true);
-                                    }
                                 }
                                 PendingConsent::Toggle(entry) => this.mods_switch(&entry),
                                 PendingConsent::Install(source, id, known) => this.mods_install(source, id, known),

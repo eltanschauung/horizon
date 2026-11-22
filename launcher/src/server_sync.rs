@@ -222,6 +222,23 @@ fn fetch_manifest() -> Result<Manifest, String> {
     if bytes.len() > LIMIT as usize {
         return Err("Server manifest is too large".into());
     }
+    let signature = backend::get(&format!("{CHANNEL}.sig?check={now}"))?;
+    let mut text = String::new();
+    signature
+        .into_reader()
+        .take(4097)
+        .read_to_string(&mut text)
+        .map_err(err)?;
+    if text.len() > 4096 {
+        return Err("Server manifest signature is too large".into());
+    }
+    let sums = format!("{:x}  manifest.json\n", Sha256::digest(&bytes));
+    horizon_release_sign::verify(
+        "server-sync",
+        sums.as_bytes(),
+        &text,
+        &horizon_release_sign::trusted_keys_for(backend::REPO),
+    )?;
     let m: Manifest = serde_json::from_slice(&bytes).map_err(err)?;
     m.validate()?;
     Ok(m)
@@ -538,12 +555,10 @@ pub fn sync(
     instance: &instances::Instance,
     current: Option<&str>,
     progress: impl Fn(Phase, String),
-    registry_consent: impl Fn(&native_mods::RegistryInventory) -> bool,
 ) -> Result<Outcome, String> {
     if !manages_instance(instance) {
         return Err("This instance is not server-managed".into());
     }
-    native_mods::require_consent().map_err(String::from)?;
     progress(
         Phase::Downloading,
         "Checking the dedicated server's updates".into(),
@@ -598,12 +613,26 @@ pub fn sync(
     let runtime = backend::version_dir(&base);
     let _lock = browser::lock_home(&instance.home).map_err(err)?;
     let version = apply(&instance.home, &m, &files, &runtime, || {
+        // Only the signed inputs enter staging, including content mods with WASM listeners.
+        let approved = tempfile::tempdir_in(&cache).map_err(err)?;
+        for p in m
+            .packages
+            .iter()
+            .filter(|p| p.applies() && p.kind != Kind::Runtime)
+        {
+            atomic_copy(&files.join(&p.sha256), &approved.path().join(p.relative()))?;
+        }
+        fs::copy(
+            instance.home.join("horizon-mods.txt"),
+            approved.path().join("horizon-mods.txt"),
+        )
+        .map_err(err)?;
         if let Some(current) = current.filter(|v| {
             native_mods::about(v)
                 .is_some_and(|a| a.horizon == m.game_revision && a.left_out.is_empty())
                 && backend::is_prepared(v)
         }) {
-            let enabled = crate::native_status::enabled(&instance.home);
+            let enabled = crate::native_status::enabled(approved.path());
             let built = crate::native_status::built(current);
             if crate::native_status::state(&enabled, built.as_deref())
                 == crate::native_status::State::UpToDate
@@ -614,7 +643,7 @@ pub fn sync(
         progress(Phase::Building, "Building the server's mod set".into());
         native_mods::build_pinned(
             &base,
-            &instance.home,
+            approved.path(),
             &m.game_revision,
             native_mods::Profile::Optimized,
             |step| {
@@ -626,7 +655,6 @@ pub fn sync(
                 };
                 progress(phase, step.label());
             },
-            registry_consent,
         )
     })?;
     // The executable is selected only AFTER both package and build verification.
