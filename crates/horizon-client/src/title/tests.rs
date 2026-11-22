@@ -18,10 +18,16 @@ impl Fixture {
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
         fs::create_dir_all(root.join("saves")).unwrap();
-        Self {
-            title: Title::new(root.join("saves"), &root, ""),
-            root,
-        }
+        let namespace = root.join("assets/lunatic/horizon");
+        fs::create_dir_all(&namespace).unwrap();
+        fs::write(
+            namespace.join("characters.json"),
+            br#"{"characters":[{"id":"lunatic:reisen","name":"Reisen Udongein Inaba"}]}"#,
+        )
+        .unwrap();
+        let mut title = Title::new(root.join("saves"), &root, "");
+        title.characters.selected = Some(0);
+        Self { title, root }
     }
     pub(super) fn world(&self, folder: &str, name: &str) {
         crate::save::write_dat(
@@ -866,12 +872,8 @@ fn classic_navigation_buttons_sound_even_without_a_game_action() {
         f.title.click(0.0, 0.0, (480.0, 262.0)),
         (Action::None, false)
     );
-    assert_eq!(f.click_with_sound("Minecraft Realms"), (Action::None, true));
-    // The Realms screen's Back, as the loaded language names it.
-    assert_eq!(
-        f.click_with_sound(&crate::lang::get("gui.back")),
-        (Action::None, true)
-    );
+    assert_eq!(f.click_with_sound("Character Select"), (Action::None, true));
+    assert_eq!(f.click_with_sound("Back"), (Action::None, true));
     assert_eq!(f.click_with_sound("Singleplayer"), (Action::None, true));
     assert_eq!(
         f.click_with_sound("Play Selected World"),
@@ -2419,6 +2421,11 @@ fn a_finished_optimization_stamps_the_level_data() {
 fn character_selection_gates_play_and_survives_a_restart() {
     let mut f = Fixture::new();
     f.title.characters.selected = None;
+    let buttons = f.title.buttons(480.0, 262.0);
+    let third = &buttons[2];
+    assert_eq!(third.label, "Character Select");
+    assert_eq!(third.y, buttons[0].y + 48.0);
+    assert!(!buttons.iter().any(|b| b.id == 8));
     for label in ["Singleplayer", "Multiplayer", "Friends"] {
         assert_eq!(f.click_with_sound(label), (Action::None, false));
         assert!(matches!(f.title.mode, Mode::Main));
@@ -2440,7 +2447,7 @@ fn character_selection_gates_play_and_survives_a_restart() {
     assert_eq!(chosen.id, "lunatic:reisen");
     assert_eq!(chosen.model, crate::characters::Model::Slim);
     assert!(matches!(f.title.mode, Mode::Main));
-    let restarted = Title::new(f.root.join("saves"), &f.root);
+    let restarted = Title::new(f.root.join("saves"), &f.root, "");
     assert_eq!(restarted.selected_character(), Some(chosen));
     assert!(
         restarted
@@ -2462,17 +2469,18 @@ fn character_selection_gates_play_and_survives_a_restart() {
 fn missing_catalog_and_corrupt_choice_keep_play_locked_and_broken_skins_fall_back() {
     let mut f = Fixture::new();
     let choice = f.title.selected_character().unwrap();
-    let atlas = HudAtlas::fonts(&f.root).unwrap();
+    let resources = horizon_assets::resource_source::ResourceSource::directory(f.root.clone());
+    let atlas = HudAtlas::fonts(&resources).unwrap();
     assert_eq!(choice.skin(&atlas), crate::characters::FALLBACK_SKIN);
     assert!(!choice.is_slim(&atlas), "Steve fallback must remain wide");
     fs::write(f.root.join("character.json"), "broken").unwrap();
-    f.title = Title::new(f.root.join("saves"), &f.root);
+    f.title = Title::new(f.root.join("saves"), &f.root, "");
     assert!(f.title.selected_character().is_none());
     f.click("Character Select");
     f.click("Select Character");
     // A disabled/removed mod must invalidate its saved choice, rather than silently unlock play.
-    fs::write(f.root.join("horizon-mod-content.json"), "[]").unwrap();
-    f.title = Title::new(f.root.join("saves"), &f.root);
+    fs::remove_file(f.root.join("assets/lunatic/horizon/characters.json")).unwrap();
+    f.title = Title::new(f.root.join("saves"), &f.root, "");
     assert!(f.title.selected_character().is_none());
     assert_eq!(f.click_with_sound("Singleplayer"), (Action::None, false));
     f.click("Character Select");
