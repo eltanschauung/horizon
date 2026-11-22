@@ -531,6 +531,7 @@ impl WorldgenOverrides {
             id.split_once(':')
                 .is_none_or(|(ns, _)| self.mod_enabled(ns))
         });
+        super::native_terrain::registry_effective(self, bundle, &mut base);
         base
     }
 }

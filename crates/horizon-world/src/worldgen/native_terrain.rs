@@ -12,6 +12,14 @@ pub(super) fn registry_defaults(
 ) {
 }
 
+/// Rewrite the effective registry after content packs and world datapacks have been applied.
+#[horizon_mod_api_macros::replaceable]
+pub(super) fn registry_effective(
+    _overrides: &WorldgenOverrides,
+    _bundle: &str,
+    _base: &mut BTreeMap<String, String>,
+) {}
+
 #[horizon_mod_api_macros::replaceable]
 pub(super) fn level_height(
     _overrides: &WorldgenOverrides,
