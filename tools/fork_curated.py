@@ -96,6 +96,11 @@ def compatible_content(path):
     if tomllib.loads(manifest) != expected or "mod.wasm" in files:
         raise ValueError(f"Unexpected content manifest changes: {path.name}")
     files["horizon-mod.toml"] = (manifest + "\n").encode()
+    # Both projects ship an empty runtime hook and a Rust model used by their
+    # tests. The content distribution only needs their declarations and assets.
+    for name in tuple(files):
+        if name in {"Cargo.toml", "Cargo.lock", "uses.json"} or name.startswith("src/"):
+            del files[name]
     return write_package(path.parent / "compatible" / path.name, files)
 
 
