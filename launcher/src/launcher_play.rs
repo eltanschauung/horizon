@@ -169,8 +169,15 @@ impl Launcher {
         cx.notify();
     }
 
-    /// Prepares the selected version, its Minecraft files from the player's install or, for an
-    /// owner who asks, from Mojang.
+    pub(crate) fn horizon_preparation_access(&self) -> Option<bool> {
+        if self.accounts.selected_ely_key().is_some() {
+            Some(true)
+        } else {
+            self.owner
+        }
+    }
+
+    /// Prepares the selected version with files from the player's install or from Mojang.
     pub(crate) fn prepare(&mut self, from: backend::MinecraftFrom) {
         if let Some(tag) = self.selected().cloned() {
             self.prepare_version(tag, from);

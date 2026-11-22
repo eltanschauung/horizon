@@ -1850,6 +1850,10 @@ impl Accounts {
         }
         self.accounts.iter().find(|a| &a.uuid == uuid)
     }
+    pub(crate) fn selected_ely_key(&self) -> Option<&str> {
+        let key = self.selected.as_deref()?;
+        (key.starts_with("ely:") && self.selected().is_some()).then_some(key)
+    }
     /// Find an account by name (any case) or UUID (with or without dashes).
     pub fn find(&self, who: &str) -> Option<&Account> {
         if let Some(id) = who.strip_prefix("ely:") {

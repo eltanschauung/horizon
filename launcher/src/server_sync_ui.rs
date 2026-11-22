@@ -196,13 +196,13 @@ impl Launcher {
         let play = std::mem::take(&mut self.server_sync.play_after);
         match result {
             Ok(server_sync::Outcome::Prepare(base)) => {
-                if self.owner == Some(true) {
+                if self.horizon_preparation_access() == Some(true) {
                     self.server_sync.preparing = Some((id, play));
                     self.prepare_version(base, backend::MinecraftFrom::Install);
                 } else {
                     self.server_sync_failed(
                         id,
-                        tr("The server's game build needs Minecraft assets. Sign in to prepare it, then press Play.").into(),
+                        tr("The server's game build needs Minecraft assets. Sign in with Ely.by or a Microsoft account that owns Minecraft: Java Edition, then press Play.").into(),
                     );
                 }
             }

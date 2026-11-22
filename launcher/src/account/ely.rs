@@ -150,26 +150,12 @@ pub fn game_session(
     accounts: &mut Accounts,
     selected: &str,
 ) -> Result<GameSession, String> {
-    let uuid = selected
-        .strip_prefix("ely:")
-        .ok_or("Invalid Ely.by account")?;
     let store = super::store();
     let _lock = super::session::lock(store)?;
     *accounts = Accounts::load();
-    if !accounts.ely.iter().any(|a| a.uuid == uuid) {
-        return Err("Sign in to Ely.by again.".into());
-    }
-    let tokens = read(store, uuid)?;
-    let (mut profile, tokens) = refresh_at(AUTH, &tokens)?;
-    if profile.uuid != uuid {
-        return Err("Ely.by refreshed a different account. Sign in again.".into());
-    }
+    let (mut profile, tokens) = refresh_saved_session(AUTH, store, accounts, selected)?;
     refresh_look(&mut profile);
-    store.set(
-        selected,
-        &serde_json::to_string(&tokens).map_err(|_| "Could not save Ely.by session")?,
-    )?;
-    if let Some(account) = accounts.ely.iter_mut().find(|a| a.uuid == uuid) {
+    if let Some(account) = accounts.ely.iter_mut().find(|a| a.uuid == profile.uuid) {
         *account = profile.clone();
     }
     accounts.save()?;
@@ -183,6 +169,36 @@ pub fn game_session(
         offline: None,
         env: Vec::new(),
     })
+}
+
+/// Check the selected account before downloading Horizon's game files.
+pub(crate) fn authorize_download(selected: &str) -> Result<(), String> {
+    let store = super::store();
+    let _lock = super::session::lock(store)?;
+    refresh_saved_session(AUTH, store, &Accounts::load(), selected).map(|_| ())
+}
+
+fn refresh_saved_session(
+    base: &str,
+    store: &dyn SecretStore,
+    accounts: &Accounts,
+    selected: &str,
+) -> Result<(Account, Tokens), String> {
+    let uuid = selected
+        .strip_prefix("ely:")
+        .ok_or("Invalid Ely.by account")?;
+    if !accounts.ely.iter().any(|account| account.uuid == uuid) {
+        return Err("Sign in to Ely.by again.".into());
+    }
+    let (profile, tokens) = refresh_at(base, &read(store, uuid)?)?;
+    if profile.uuid != uuid {
+        return Err("Ely.by refreshed a different account. Sign in again.".into());
+    }
+    store.set(
+        selected,
+        &serde_json::to_string(&tokens).map_err(|_| "Could not save Ely.by session")?,
+    )?;
+    Ok((profile, tokens))
 }
 
 fn refresh_at(base: &str, tokens: &Tokens) -> Result<(Account, Tokens), String> {
@@ -361,11 +377,13 @@ mod tests {
             .unwrap();
         assert_eq!(accounts.player(), Player::Account(key(UUID)));
         assert_eq!(accounts.selected().unwrap().uuid, UUID);
+        assert_eq!(accounts.selected_ely_key().unwrap(), key(UUID));
         assert!(!accounts.has_owner(&store));
         assert_eq!(read(&store, UUID).unwrap().access, "ely-secret");
         let metadata = serde_json::to_string(&accounts).unwrap();
         assert!(!metadata.contains("secret"));
         accounts.remove(&store, &key(UUID)).unwrap();
+        assert!(accounts.selected_ely_key().is_none());
         assert!(accounts.ely.is_empty());
         assert_eq!(accounts.accounts.len(), 1);
         assert_eq!(
@@ -373,6 +391,33 @@ mod tests {
             Some("microsoft-secret")
         );
         assert!(store.get(&key(UUID)).unwrap().is_none());
+    }
+    #[test]
+    fn ely_download_refreshes_only_a_matching_saved_profile() {
+        let store = MemoryStore::default();
+        let (profile, tokens) = response(reply("old-token"), "client").unwrap();
+        let selected = key(UUID);
+        let mut accounts = Accounts::default();
+        accounts.ely.push(profile);
+        assert!(refresh_saved_session("http://127.0.0.1:1", &store, &accounts, &selected).is_err());
+        store
+            .set(&selected, &serde_json::to_string(&tokens).unwrap())
+            .unwrap();
+
+        let mut wrong = reply("wrong-token");
+        wrong["selectedProfile"]["id"] = json!("11111111222243338444555555555556");
+        let (url, requests) = mock(vec![(200, wrong), (200, reply("fresh-token"))]);
+        assert!(refresh_saved_session(&url, &store, &accounts, &selected).is_err());
+        assert_eq!(read(&store, UUID).unwrap().access, "old-token");
+        refresh_saved_session(&url, &store, &accounts, &selected).unwrap();
+        assert_eq!(read(&store, UUID).unwrap().access, "fresh-token");
+        assert!(
+            requests
+                .join()
+                .unwrap()
+                .iter()
+                .all(|(path, _)| path == "/auth/refresh")
+        );
     }
     #[test]
     fn ely_accepts_registration_uuid_and_provider_name_shapes() {

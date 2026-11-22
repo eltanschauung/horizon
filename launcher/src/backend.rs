@@ -1900,7 +1900,7 @@ fn refill_own_store(tag: &str) {
         return;
     };
     let fetch = crate::downloads::install_metadata;
-    if let Err(e) = download_for_owner(&pins, &own, &fetch, &|line| eprintln!("{line}")) {
+    if let Err(e) = download_for_horizon(&pins, &own, &fetch, &|line| eprintln!("{line}")) {
         eprintln!("{tag}: the missing assets were not downloaded: {e}");
     }
 }
@@ -2040,9 +2040,26 @@ fn preparer_binary(dir: &Path) -> Option<PathBuf> {
     binary.is_file().then_some(binary)
 }
 
-/// Downloads the pinned version from Mojang into `dir` when an account in the launcher owns
-/// Minecraft (asked again now), else says what signing in would do, as the last line of the
-/// not-found error.
+/// Download Horizon's pinned game files for a selected Ely.by session or a Microsoft owner.
+fn download_for_horizon(
+    pins: &sources::Pins,
+    dir: &Path,
+    fetch: sources::Fetch,
+    log: &dyn Fn(String),
+) -> Result<(), String> {
+    let accounts = account::Accounts::load();
+    if let Some(selected) = accounts.selected_ely_key() {
+        account::ely::authorize_download(selected).map_err(|error| format!("\n  • {error}"))?;
+        log(format!(
+            "Downloading Minecraft {} from Mojang for Ely.by",
+            pins.version
+        ));
+        return download_mojang(pins, dir, fetch, log);
+    }
+    download_for_owner(pins, dir, fetch, log)
+}
+
+/// Check for a Microsoft owner before downloading the pinned game files.
 fn download_for_owner(
     pins: &sources::Pins,
     dir: &Path,
@@ -2194,14 +2211,7 @@ fn download_for(
             log(format!(
                 "{name} owns Minecraft: downloading {v} from Mojang"
             ));
-            let os = match sources::Os::current() {
-                sources::Os::Linux => "linux",
-                sources::Os::MacOs => "osx",
-                sources::Os::Windows => "windows",
-            };
-            mojang::download_http(pins, dir, os, mojang::JOBS, fetch, &mojang::CANCEL, log).map_err(|e| {
-                format!("\n  • Horizon tried to download {v} from Mojang for {name}, but: {e}")
-            })
+            download_mojang(pins, dir, fetch, log)
         }
         // An owner by its last answer, who can't be asked now.
         Ok(pass) => Err(format!(
@@ -2219,6 +2229,27 @@ fn download_for(
             &[("version", v)],
         )),
     }
+}
+
+fn download_mojang(
+    pins: &sources::Pins,
+    dir: &Path,
+    fetch: sources::Fetch,
+    log: &dyn Fn(String),
+) -> Result<(), String> {
+    let os = match sources::Os::current() {
+        sources::Os::Linux => "linux",
+        sources::Os::MacOs => "osx",
+        sources::Os::Windows => "windows",
+    };
+    mojang::download_http(pins, dir, os, mojang::JOBS, fetch, &mojang::CANCEL, log).map_err(
+        |error| {
+            format!(
+                "\n  • Could not download Minecraft {} from Mojang: {error}",
+                pins.version
+            )
+        },
+    )
 }
 
 /// The folder of the Microsoft Store's Minecraft Launcher (the one Windows offers, and the Xbox
@@ -2331,10 +2362,9 @@ fn assets_folder(
 /// Where the preparation takes Minecraft's files from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MinecraftFrom {
-    /// The player's own install (any launcher's); Mojang only when none has the version and an
-    /// account that owns the game is signed in.
+    /// The player's own install (any launcher's), with a signed-in download as fallback.
     Install,
-    /// Mojang, for the signed-in account that owns the game ("Download and prepare").
+    /// Download and prepare from Mojang using the signed-in account.
     Mojang,
 }
 
@@ -2404,8 +2434,8 @@ pub fn preparer(
         let fetch = crate::downloads::install_metadata;
         let linked = data_dir().join("linked-minecraft");
         if from == MinecraftFrom::Mojang {
-            // Straight from Mojang (what is already there and whole is kept), for an owner only.
-            download_for_owner(&pins, &own, &fetch, log)
+            // Keep the files that are already there and whole.
+            download_for_horizon(&pins, &own, &fetch, log)
                 .map_err(|e| e.trim_start_matches("\n  • ").to_string())?;
             own
         } else {
@@ -2417,7 +2447,8 @@ pub fn preparer(
                     sources::Resolved::Folder(dir) => dir,
                     sources::Resolved::NotFound(checked) => {
                         let not_found = sources::not_found(&version, &checked, minecraft);
-                        download_for_owner(&pins, &own, &fetch, log).map_err(|e| not_found + &e)?;
+                        download_for_horizon(&pins, &own, &fetch, log)
+                            .map_err(|e| not_found + &e)?;
                         own
                     }
                 }
@@ -5002,11 +5033,10 @@ mod tests {
         }
     }
 
-    /// The launcher downloads Mojang's game files (client jar, libraries, assets) only for an
-    /// account the services said owns the game: never without one, and never past the gate by
-    /// the developer option (`Settings::dev_offline`), whose pass has no owner.
+    /// Microsoft downloads still require a live ownership check. Horizon also accepts an
+    /// authenticated Ely.by session. Both paths use the same pinned Mojang downloader.
     #[test]
-    fn mojang_downloads_only_for_an_owner() {
+    fn mojang_downloads_check_authorization() {
         let dir = std::env::temp_dir().join(format!("horizon-owner-only-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         let pins = sources::Pins::read(&serde_json::json!({ "minecraft": {
@@ -5086,8 +5116,7 @@ mod tests {
         assert!(asked.lock().unwrap().is_empty());
         let _ = fs::remove_dir_all(&dir);
 
-        // In the sources: one call downloads the game, in `download_for`, and the only caller
-        // of that asks the strict gate. Game-file hosts appear nowhere else.
+        // Game-file hosts appear only in the shared downloader.
         let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut files = vec![src.clone()];
         let mut sources = Vec::new();
@@ -5118,14 +5147,19 @@ mod tests {
             let start = backend.find(&format!("\nfn {f}(")).unwrap();
             &backend[start..start + backend[start + 1..].find("\n}\n").unwrap()]
         };
-        assert!(body("download_for").contains("mojang::download_http("));
+        assert!(body("download_mojang").contains("mojang::download_http("));
+        assert!(
+            body("download_for_horizon").contains("account::ely::authorize_download(selected)")
+        );
+        assert!(body("download_for_horizon").contains("download_mojang("));
+        assert!(body("download_for_horizon").contains("download_for_owner("));
         assert!(body("download_for_owner").contains("account::launch("));
         assert!(!body("download_for_owner").contains("launch_for_game("));
         // `download_for` is defined once and called once, by `download_for_owner`.
         assert_eq!(backend.matches("download_for(").count(), 2);
         assert!(body("download_for_owner").contains("download_for("));
         // Refilling an incomplete store asks the same gate and names no host or download itself.
-        assert!(body("refill_own_store").contains("download_for_owner("));
+        assert!(body("refill_own_store").contains("download_for_horizon("));
         assert!(!body("refill_own_store").contains("mojang::"));
         // It runs at start-up, never on Play, which also runs `complete_assets`.
         let public = |f: &str| {

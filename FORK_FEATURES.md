@@ -126,7 +126,7 @@ Windows release and portable packaging require the pinned, checksum-verified x64
   Frozen server deployment publishes the matching channel only after health checks.
   See [server-synced launcher](docs/server-synced-launcher.md).
 
-- Ely.by accounts: Settings sign-in with optional 2FA, provider-separated keychain sessions, automatic refresh, account switching and sign-out; native Ely authentication/skins with Microsoft-only ownership downloads. Online servers opt in through `server.allow_portable`. See [Ely accounts](docs/ely-account.md).
+- Ely.by accounts support sign-in with optional 2FA, separate keychain sessions, account switching and sign-out. A selected Ely.by account can prepare Horizon from Mojang downloads and join online servers that enable `server.allow_portable`. See [Ely accounts](docs/ely-account.md).
 
 - Horizonmatica 0.3.2 is bundled and enabled in frozen release defaults; vendored MIT source and upstream credits live in horizon-mods/native/horizonmatica.
 

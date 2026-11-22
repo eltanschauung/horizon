@@ -116,10 +116,9 @@ impl Launcher {
         let left = self.download_left();
         let steps = self.preparing.then(|| self.steps(&version, left));
 
-        // Not prepared: an owner can have Horizon download Minecraft from Mojang; without an
-        // owner there is nothing to play, so signing in comes first.
+        // Game preparation accepts a selected Ely.by account or a Microsoft owner.
         let first = (!prepared && !self.preparing)
-            .then_some(self.owner)
+            .then_some(self.horizon_preparation_access())
             .flatten();
         // No launcher folder with Minecraft on this computer: an owner needs none.
         let no_install = self.settings.minecraft_dir.is_none();
@@ -133,10 +132,7 @@ impl Launcher {
                 "Not prepared. Horizon can download Minecraft {version} from Mojang for your account, or use your own install.",
                 &[("version", &version)],
             ),
-            Some(false) => trf(
-                "Not prepared. Sign in with the Microsoft account that owns Minecraft {version} first.",
-                &[("version", &version)],
-            ),
+            Some(false) => tr("Not prepared. Sign in with Ely.by or a Microsoft account that owns Minecraft: Java Edition.").into(),
             None => backend::resources_summary(prepared, !silent, &version),
         };
         let mut prepare = button(
@@ -201,7 +197,7 @@ impl Launcher {
             )),
             None => div().child(prepare),
         };
-        let owner = self.owner == Some(true);
+        let owner = self.horizon_preparation_access() == Some(true);
         let minecraft = self.settings.minecraft_dir.as_deref().map_or_else(
             || {
                 div()

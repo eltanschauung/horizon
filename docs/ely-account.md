@@ -10,8 +10,10 @@ No OAuth application is registered, so this uses Ely's official direct launcher
 and 2FA codes stay in memory, are cleared after success or leaving the page, and
 are never saved. Only refreshable session/client tokens enter the existing OS
 keychain/encrypted fallback store, under `ely:<uuid>`. Public account metadata is
-separate from Microsoft metadata. Existing Microsoft ownership/download checks
-remain in place: Ely authenticates a player, not a Minecraft license.
+separate from Microsoft metadata. Selecting a signed-in Ely.by account lets
+Horizon download its pinned Minecraft files directly from Mojang. The launcher
+refreshes the Ely.by session before downloading. Java Edition instances use
+Microsoft ownership for their downloads and authentication.
 
 The native game reads a fresh owner-only session file with `user_type: "ely"` and
 joins through the fixed Ely session service. It never sends Ely tokens to Microsoft

@@ -272,7 +272,7 @@ impl Launcher {
         let owner = if horizon_launcher::developer_offline::selected() {
             Some(true)
         } else {
-            self.owner
+            self.horizon_preparation_access()
         };
         let managed = self
             .selected_instance()

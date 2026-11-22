@@ -73,7 +73,7 @@ impl Launcher {
         };
         panel.child(div().flex().gap(px(12.)).child(sign).child(button("ely-register","Create an Ely.by account",Kind::Ghost,&t).on_click(|_,_,cx|cx.open_url("https://account.ely.by/register"))))
             .children(self.ely_error.clone().map(|e|div().text_color(t.danger).child(e)))
-            .child(div().text_size(px(12.)).child("Password is never saved. Ely.by does not provide a Minecraft license; Minecraft downloads still require ownership."))
+            .child(div().text_size(px(12.)).child(tr("Use Ely.by to download and prepare Horizon and join Ely.by-compatible servers. Your password is never saved.")))
     }
     pub(super) fn ely_sign_in(&mut self) {
         if self.ely_busy {

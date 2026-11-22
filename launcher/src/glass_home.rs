@@ -317,7 +317,11 @@ impl Launcher {
                     ],
                 ),
                 // Signed out, the button says "Sign in to play": the line says the same.
-                None if self.owner == Some(false)
+                None if i
+                    .java
+                    .as_ref()
+                    .map_or_else(|| self.horizon_preparation_access(), |_| self.owner)
+                    == Some(false)
                     && !horizon_launcher::developer_offline::selected() =>
                 {
                     tr("You haven't played this one yet. Sign in to start.").into()
@@ -659,7 +663,7 @@ impl Launcher {
                 let owner = if horizon_launcher::developer_offline::selected() {
                     Some(true)
                 } else {
-                    self.owner
+                    self.horizon_preparation_access()
                 };
                 // `HORIZON_LAUNCHER_PREVIEW_OWNER=1`: Play as for an owner with the game's files
                 // ready, to drive Build and play in debug builds without a sign-in.
@@ -725,8 +729,7 @@ impl Launcher {
                             cx.notify();
                         }))
                     }
-                    // No account here owns the game: the button says "Sign in to play", so a
-                    // press signs in, as the top bar's Sign in with Microsoft does.
+                    // The button offers Microsoft sign-in when no account is ready.
                     (None, PlayPress::Nothing) if owner == Some(false) => {
                         main.on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                             this.picker.open = false;
