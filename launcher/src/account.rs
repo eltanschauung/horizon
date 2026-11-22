@@ -1850,7 +1850,8 @@ impl Accounts {
         }
         self.accounts.iter().find(|a| &a.uuid == uuid)
     }
-    pub(crate) fn selected_ely_key(&self) -> Option<&str> {
+    /// The selected Ely.by account's key, if the profile is still saved.
+    pub fn selected_ely_key(&self) -> Option<&str> {
         let key = self.selected.as_deref()?;
         (key.starts_with("ely:") && self.selected().is_some()).then_some(key)
     }
