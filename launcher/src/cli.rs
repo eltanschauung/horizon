@@ -802,6 +802,9 @@ enum Cmd {
         /// Inspect the channel without installing or building
         #[arg(long)]
         check: bool,
+        /// Allow the server's native mods to compile and run code
+        #[arg(long, conflicts_with = "check")]
+        trust_native_code: bool,
     },
     /// Show disposable storage by category as JSON. Builds must be idle
     ///
@@ -1335,7 +1338,11 @@ fn execute(command: Cmd, as_json: bool) -> Result<i32, String> {
                 );
             }
         }
-        Cmd::ServerSync { instance, check } => {
+        Cmd::ServerSync {
+            instance,
+            check,
+            trust_native_code,
+        } => {
             let i = match instance {
                 Some(id) => instances::find(&id)?,
                 None => instances::selected(),
@@ -1350,10 +1357,13 @@ fn execute(command: Cmd, as_json: bool) -> Result<i32, String> {
                     current.as_deref(),
                 )?);
             } else {
-                let result =
-                    horizon_launcher::server_sync::sync(&i, current.as_deref(), |phase, line| {
-                        eprintln!("{} {line}", phase.label())
-                    })?;
+                native_permission(trust_native_code)?;
+                let result = horizon_launcher::server_sync::sync(
+                    &i,
+                    current.as_deref(),
+                    |phase, line| eprintln!("{} {line}", phase.label()),
+                    registry_consent,
+                )?;
                 json(match result {
                     horizon_launcher::server_sync::Outcome::Ready(version) => {
                         serde_json::json!({"ready":true,"version":version})

@@ -403,8 +403,22 @@ fn apply(
         ] {
             if let Ok(entries) = fs::read_dir(home.join(folder)) {
                 for entry in entries {
-                    let path = entry.map_err(err)?.path();
-                    if path.extension().and_then(|s| s.to_str()) != Some("hmod") {
+                    let entry = entry.map_err(err)?;
+                    if !entry.file_type().map_err(err)?.is_file() {
+                        continue;
+                    }
+                    let path = entry.path();
+                    let extension = path.extension().and_then(|s| s.to_str());
+                    if kind == Kind::Native
+                        && (extension == Some("hnmod")
+                            || (extension == Some("hmod")
+                                && crate::native_status::legacy_format(&path)))
+                    {
+                        remember(&path)?;
+                        fs::remove_file(&path).map_err(err)?;
+                        continue;
+                    }
+                    if extension != Some("hmod") {
                         continue;
                     }
                     if let Ok(package) = ModPackage::read(&path) {
@@ -524,10 +538,12 @@ pub fn sync(
     instance: &instances::Instance,
     current: Option<&str>,
     progress: impl Fn(Phase, String),
+    registry_consent: impl Fn(&native_mods::RegistryInventory) -> bool,
 ) -> Result<Outcome, String> {
     if !manages_instance(instance) {
         return Err("This instance is not server-managed".into());
     }
+    native_mods::require_consent().map_err(String::from)?;
     progress(
         Phase::Downloading,
         "Checking the dedicated server's updates".into(),
@@ -577,7 +593,6 @@ pub fn sync(
         ));
     }
     if !backend::is_prepared(&base) {
-        instances::edit(&instance.id, |meta| meta.version = Some(base.clone()))?;
         return Ok(Outcome::Prepare(base));
     }
     let runtime = backend::version_dir(&base);
@@ -611,6 +626,7 @@ pub fn sync(
                 };
                 progress(phase, step.label());
             },
+            registry_consent,
         )
     })?;
     // The executable is selected only AFTER both package and build verification.
@@ -754,6 +770,52 @@ mod tests {
         assert!(!required(&home, "test_mod"));
         assert!(!home.join(RECORD).exists());
     }
+    #[test]
+    fn legacy_native_install_is_archived_only_on_success() {
+        let t = Temp::new();
+        let (m, files, home) = fixture(&t.0, true);
+        let folder = home.join("horizon-native-mods");
+        fs::create_dir_all(&folder).unwrap();
+        let old = folder.join("test_mod_native.hnmod");
+        let choices = home.join("horizon-mods.txt");
+        let runtime = t.0.join("runtime");
+        fs::write(&old, b"legacy package").unwrap();
+        fs::write(&choices, "mod.custom:false\n").unwrap();
+
+        assert!(
+            apply(&home, &m, &files, &runtime, || {
+                assert!(!old.exists());
+                Err("Registry dependency compilation was not approved".into())
+            })
+            .is_err()
+        );
+        assert_eq!(fs::read(&old).unwrap(), b"legacy package");
+        assert_eq!(fs::read_to_string(&choices).unwrap(), "mod.custom:false\n");
+
+        apply(&home, &m, &files, &runtime, || {
+            assert!(!old.exists());
+            assert!(folder.join("test_mod.hmod").is_file());
+            Ok("built".into())
+        })
+        .unwrap();
+        assert!(!old.exists());
+        let archived = fs::read_dir(home.join(".horizon-server-sync/backups"))
+            .unwrap()
+            .any(|path| {
+                let dir = path.unwrap().path();
+                let journal: BTreeMap<PathBuf, Option<PathBuf>> =
+                    serde_json::from_slice(&fs::read(dir.join("journal.json")).unwrap()).unwrap();
+                journal
+                    .get(&old)
+                    .and_then(Option::as_ref)
+                    .is_some_and(|saved| {
+                        fs::read(dir.join(saved.file_name().unwrap())).unwrap() == b"legacy package"
+                    })
+            });
+        assert!(archived);
+        assert!(!browser::java::is_enabled(&home, "custom"));
+    }
+
     #[test]
     fn required_mods_are_enabled_and_cannot_be_disabled() {
         let t = Temp::new();

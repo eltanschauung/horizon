@@ -7,6 +7,7 @@ use std::collections::HashMap;
 pub(super) struct SyncUi {
     running: Option<Run>,
     checked: HashMap<String, Instant>,
+    failed: HashMap<String, String>,
     launch_ready: Option<String>,
     preparing: Option<(String, bool)>,
     play_after: bool,
@@ -52,6 +53,16 @@ impl Launcher {
         self.managed_instance()?;
         self.server_sync.running.as_ref().map(Run::label)
     }
+    pub(super) fn server_sync_error(&self) -> Option<&str> {
+        let id = &self.selected_instance()?.id;
+        self.server_sync.failed.get(id).map(String::as_str)
+    }
+
+    fn server_sync_failed(&mut self, id: String, error: String) {
+        self.client_error = Some(error.clone());
+        self.server_sync.failed.insert(id, error);
+    }
+
     pub(super) fn begin_server_sync(&mut self, play_after: bool) {
         if self.server_sync.running.is_some() {
             self.server_sync.play_after |= play_after;
@@ -68,8 +79,15 @@ impl Launcher {
         {
             return;
         }
-        let current = self.version_of(&instance).cloned();
         let id = instance.id.clone();
+        if self.settings.native_mods_allowed_at.is_none() {
+            if play_after && self.pending_consent.is_none() {
+                self.pending_consent = Some(PendingConsent::ServerPlay(id));
+            }
+            return;
+        }
+        let current = self.version_of(&instance).cloned();
+        self.server_sync.failed.remove(&id);
         self.server_sync.checked.insert(id.clone(), Instant::now());
         self.server_sync.play_after = play_after;
         self.server_sync.running = Some(Run {
@@ -84,9 +102,14 @@ impl Launcher {
         let tx = self.tx.clone();
         std::thread::spawn(move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                server_sync::sync(&instance, current.as_deref(), |phase, line| {
-                    let _ = tx.send(Msg::ServerSyncProgress(id.clone(), phase, line));
-                })
+                server_sync::sync(
+                    &instance,
+                    current.as_deref(),
+                    |phase, line| {
+                        let _ = tx.send(Msg::ServerSyncProgress(id.clone(), phase, line));
+                    },
+                    |inventory| native_registry_consent::request(&tx, inventory),
+                )
             }))
             .unwrap_or_else(|_| {
                 Err("The server update stopped unexpectedly; press Play to retry".into())
@@ -128,6 +151,9 @@ impl Launcher {
             .get(&i.id)
             .is_none_or(|t| t.elapsed() >= Duration::from_secs(60));
         if stale
+            && self.settings.native_mods_allowed_at.is_some()
+            && self.pending_consent.is_none()
+            && !self.server_sync.failed.contains_key(&i.id)
             && self.client.is_none()
             && self.starting_client.is_none()
             && self.native_step.is_none()
@@ -148,7 +174,14 @@ impl Launcher {
         let Some((id, play)) = self.server_sync.preparing.take() else {
             return;
         };
-        if succeeded && self.managed_instance().is_some_and(|instance| instance.id == id) {
+        if !succeeded {
+            if let Some(error) = self.prepare_error.clone() {
+                self.server_sync_failed(id, error);
+            }
+        } else if self
+            .managed_instance()
+            .is_some_and(|instance| instance.id == id)
+        {
             self.begin_server_sync(play);
         }
     }
@@ -178,6 +211,11 @@ impl Launcher {
                 if self.owner == Some(true) {
                     self.server_sync.preparing = Some((id, play));
                     self.prepare_version(base, backend::MinecraftFrom::Install);
+                } else {
+                    self.server_sync_failed(
+                        id,
+                        tr("The server's game build needs Minecraft assets. Sign in to prepare it, then press Play.").into(),
+                    );
                 }
             }
             Ok(server_sync::Outcome::Ready(_))
@@ -187,11 +225,7 @@ impl Launcher {
                 self.play();
             }
             Ok(_) => {}
-            Err(error) => {
-                self.client_error = Some(format!(
-                    "Server update failed: {error}. Press Play to retry."
-                ))
-            }
+            Err(error) => self.server_sync_failed(id, format!("Server update failed: {error}")),
         }
     }
 }

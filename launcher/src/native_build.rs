@@ -175,12 +175,7 @@ impl Launcher {
                         |step| {
                             let _ = tx.send(Msg::NativeProgress(step.shown(), step.progress()));
                         },
-                        |inventory| {
-                            let (reply, answer) = std::sync::mpsc::channel();
-                            tx.send(Msg::NativeRegistryConsent(inventory.clone(), reply))
-                                .is_ok()
-                                && answer.recv().unwrap_or(false)
-                        },
+                        |inventory| native_registry_consent::request(&tx, inventory),
                         deliver,
                     )
                 },

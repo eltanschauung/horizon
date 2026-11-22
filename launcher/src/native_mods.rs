@@ -2617,6 +2617,7 @@ pub fn build_pinned(
     revision: &str,
     profile: Profile,
     progress: impl Fn(Step),
+    registry_consent: impl Fn(&RegistryInventory) -> bool,
 ) -> Result<String, String> {
     require_consent().map_err(String::from)?;
     if let Some(error) = backend::native_mod_architecture_error() {
@@ -2638,6 +2639,7 @@ pub fn build_pinned(
             Target::Client,
             BuildOptions {
                 worlds: Some(home),
+                registry_consent: Some(&registry_consent),
                 ..BuildOptions::default()
             },
             &progress,

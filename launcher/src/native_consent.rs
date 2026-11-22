@@ -1,13 +1,14 @@
 //! One deferred native-code action. Declining never invokes its installer or builder.
 use horizon_launcher::{
     backend::Settings,
-    browser::{installed::Entry, java, Project, SourceId},
+    browser::{Project, SourceId, installed::Entry, java},
     github_mods::Resolved,
 };
 use std::path::Path;
 
 pub(super) enum PendingConsent {
     Build(Vec<String>),
+    ServerPlay(String),
     Toggle(Entry),
     Install(SourceId, String, Option<Project>),
     Github(Resolved, Option<String>),
@@ -18,6 +19,7 @@ impl PendingConsent {
     pub(super) fn name(&self) -> String {
         match self {
             Self::Build(ids) => ids.join(", "),
+            Self::ServerPlay(_) => crate::i18n::tr("Dedicated server mods").into(),
             Self::Toggle(entry) => entry.title.clone(),
             Self::Install(_, id, _) | Self::Local(id) => id.clone(),
             Self::Github(found, _) => found.label(),
@@ -57,7 +59,9 @@ pub(super) fn resolve(
                 }
             }
             PendingConsent::Local(id) => java::set_enabled(home, &id, false)?,
-            PendingConsent::Install(..) | PendingConsent::Github(..) => {}
+            PendingConsent::Install(..)
+            | PendingConsent::Github(..)
+            | PendingConsent::ServerPlay(_) => {}
         }
     }
     Ok(None)

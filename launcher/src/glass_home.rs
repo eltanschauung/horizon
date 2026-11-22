@@ -130,6 +130,12 @@ impl Launcher {
                 3,
                 actions,
             ))
+            .children(self.server_sync_error().map(|error| {
+                div()
+                    .mt(px(12.))
+                    .text_color(self.theme.danger)
+                    .child(error.to_owned())
+            }))
     }
 
     /// The edition switch over the rail, in the top bar where Horizon's mark was: Horizon's mark
@@ -411,7 +417,12 @@ impl Launcher {
             .is_some_and(|i| i.channel == horizon_launcher::instances::Channel::Stable);
         // A Stable instance follows the newest stable build, not each Nightly.
         let stable_update = self.stable_update(tag);
-        let update = if stable {
+        let managed = self
+            .selected_instance()
+            .is_some_and(horizon_launcher::server_sync::manages_instance);
+        let update = if managed {
+            None
+        } else if stable {
             stable_update.as_ref().map(|r| r.tag.clone())
         } else {
             self.updates
@@ -438,7 +449,8 @@ impl Launcher {
             .is_some_and(|i| self.native_for.as_deref() == Some(i.id.as_str()));
         let building = mine && self.native_step.is_some();
         // Native mods that changed since the last build: Play builds them first, one button.
-        let needs_build = !building
+        let needs_build = !managed
+            && !building
             && self
                 .selected_instance()
                 .filter(|i| i.java.is_none())
@@ -658,7 +670,7 @@ impl Launcher {
                 } else {
                     (ready, owner)
                 };
-                let press = play_press(ready, owner, false);
+                let press = play_press(ready || managed, owner, false);
                 let build_first =
                     needs_build && update.is_none() && matches!(press, PlayPress::Play);
                 let (label, icon) = match &update {
