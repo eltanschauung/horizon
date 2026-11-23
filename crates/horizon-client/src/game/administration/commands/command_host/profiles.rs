@@ -106,7 +106,7 @@ impl ProfilesHost for ListsTarget<'_, '_> {
             l.white.contains(target) && l.white.remove(target)
         }
     }
-    fn game_profiles(&mut self, ctx: &Context, name: &str) -> R<Vec<NameAndId>> {
-        Game::game_profiles(self.game, ctx, name)
+    fn game_profiles(&mut self, ctx: &Context, name: &str, removing: bool) -> R<Vec<NameAndId>> {
+        Game::game_profiles(self.game, ctx, name, removing.then_some("whitelist.remove"))
     }
 }

@@ -45,7 +45,7 @@ pub trait ProfilesHost: CommandHost {
     /// Adds `target` to the whitelist, or removes it: false when nothing changed.
     fn whitelist_apply(&mut self, add: bool, target: &NameAndId) -> bool;
     /// `GameProfileArgument.getGameProfiles` of the argument `name`.
-    fn game_profiles(&mut self, ctx: &Context, name: &str) -> R<Vec<NameAndId>>;
+    fn game_profiles(&mut self, ctx: &Context, name: &str, removing: bool) -> R<Vec<NameAndId>>;
 }
 
 /// StopCommand: the server loop ends after this tick.
@@ -179,7 +179,7 @@ pub fn whitelist(host: &mut dyn ProfilesHost, id: &str, ctx: &Context) -> R<i32>
         }
         _ => {
             let add = id == "whitelist.add";
-            let targets = host.game_profiles(ctx, "targets")?;
+            let targets = host.game_profiles(ctx, "targets", !add)?;
             let mut count = 0;
             for target in &targets {
                 if host.whitelist_apply(add, target) {

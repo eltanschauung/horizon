@@ -74,7 +74,7 @@ impl Game<'_> {
     /// `GameProfileArgument.getGameProfiles`: a selector's players
     /// (`SelectorResult.getNames`, no players is an error), else the name in
     /// the user cache.
-    pub(super) fn game_profiles(&mut self, ctx: &Context, name: &str) -> R<Vec<NameAndId>> {
+    pub(super) fn game_profiles(&mut self, ctx: &Context, name: &str, removal: Option<&str>) -> R<Vec<NameAndId>> {
         match ctx.get(name).cloned() {
             Some(Arg::Entity(s)) => {
                 let players: Vec<Target> = self
@@ -90,8 +90,8 @@ impl Game<'_> {
                     .filter_map(|t| self.target_profile(t))
                     .collect())
             }
-            Some(Arg::Str(text)) => self
-                .resolve_name(&text)
+            Some(Arg::Str(text)) => removal
+                .map_or_else(|| self.resolve_name(&text), |command| self.resolve_list_profile(command, &text))
                 .map(|p| vec![p])
                 .ok_or_else(|| err("argument.player.unknown", &[])),
             _ => Err(err("argument.player.unknown", &[])),
@@ -111,7 +111,8 @@ impl Game<'_> {
     /// `BanPlayerCommands.banPlayers` and `PardonCommand.pardonPlayers`.
     pub(super) fn cmd_profiles(&mut self, id: &str, ctx: &Context) -> R<i32> {
         let lists = self.dedicated_lists()?;
-        let players = self.game_profiles(ctx, "targets")?;
+        let removal = matches!(id, "pardon" | "deop").then_some(id);
+        let players = self.game_profiles(ctx, "targets", removal)?;
         let lit = |s: &str| Text::literal(s.to_owned());
         let mut count = 0;
         match id {

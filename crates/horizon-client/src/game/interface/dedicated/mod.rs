@@ -1833,10 +1833,47 @@ impl Game<'_> {
     fn resolve(&self, name: &str) -> Option<NameAndId> {
         let found = self.resolve_name(name);
         if found.is_none() {
-            let unknown = Text::translate("argument.player.unknown", &[]);
-            log("INFO", &format!("System chat: {}", unknown.plain()));
+            self.console_reply_unknown_profile();
         }
         found
+    }
+
+    /// Resolve removals against the list they operate on. Entries may predate
+    /// the character catalog, or hold an alias from a previous character.
+    pub(super) fn resolve_list_profile(&self, command: &str, name: &str) -> Option<NameAndId> {
+        let lists = self.server_lists.as_ref()?.lock().unwrap();
+        let profiles: Vec<_> = match command {
+            "pardon" => lists.bans.entries().into_iter().map(|e| e.user.clone()).collect(),
+            "deop" => lists.ops.entries().into_iter().map(|e| e.user.clone()).collect(),
+            "whitelist.remove" => lists.white.entries().into_iter().map(|e| e.user.clone()).collect(),
+            _ => return None,
+        };
+        drop(lists);
+        let matches = |candidate: &str| {
+            candidate.eq_ignore_ascii_case(name) || candidate.replace(' ', "_").eq_ignore_ascii_case(name)
+        };
+        let mut matching = profiles.into_iter().filter_map(|profile| {
+            let alias = self.command_player_alias(profile.id, &profile.name);
+            (matches(&alias) || matches(&profile.name)).then_some(NameAndId {
+                id: profile.id,
+                name: alias,
+            })
+        });
+        let profile = matching.next()?;
+        matching.next().is_none().then_some(profile)
+    }
+
+    fn resolve_removal(&self, command: &str, name: &str) -> Option<NameAndId> {
+        let found = self.resolve_list_profile(command, name);
+        if found.is_none() {
+            self.console_reply_unknown_profile();
+        }
+        found
+    }
+
+    fn console_reply_unknown_profile(&self) {
+        let unknown = Text::translate("argument.player.unknown", &[]);
+        log("INFO", &format!("System chat: {}", unknown.plain()));
     }
 
     /// `Services.nameToIdCache().get(name)`: the user cache, else the profile
@@ -2056,7 +2093,7 @@ impl Game<'_> {
                 ));
             }
             "op" | "deop" if !rest.is_empty() => {
-                let Some(user) = self.resolve(rest[0]) else {
+                let Some(user) = (if command == "deop" { self.resolve_removal("deop", &rest.join(" ")) } else { self.resolve(rest[0]) }) else {
                     return;
                 };
                 let level = state.op_level;
@@ -2193,7 +2230,7 @@ impl Game<'_> {
                 }
             }
             "pardon" if !rest.is_empty() => {
-                let Some(user) = self.resolve(rest[0]) else {
+                let Some(user) = self.resolve_removal("pardon", &rest.join(" ")) else {
                     return;
                 };
                 let removed = state.lists.lock().unwrap().bans.remove(&user);
@@ -2369,7 +2406,7 @@ impl Game<'_> {
                 self.kick_unlisted_players(&lists);
             }
             ["add", name] | ["remove", name] => {
-                let Some(user) = self.resolve(name) else {
+                let Some(user) = (if rest[0] == "remove" { self.resolve_removal("whitelist.remove", name) } else { self.resolve(name) }) else {
                     return;
                 };
                 let mut l = state.lists.lock().unwrap();
