@@ -39,18 +39,20 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// ServerCommonPacketListenerImpl.keepConnectionAlive: a keep-alive every 15 s,
-/// and a client that has not answered the last one by the next is dropped.
+/// Cadence for play keep-alives. Only one request is outstanding.
 const KEEP_ALIVE_EVERY: Duration = Duration::from_secs(15);
 /// ReadTimeoutHandler(30) in ServerConnectionListener: a connection that sends
 /// nothing for 30 s.
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
+/// Allow established sessions to recover from short network stalls. Login
+/// and configuration retain their own deadlines.
+const PLAY_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// How long the handshake, a status request and the login may wait for the client's next packet,
 /// where vanilla waits 30 s: a client answers these at once, and each connection holds a thread
 /// and one of the places the server keeps for connections, which a crowd of silent or slow
-/// sockets would otherwise take for 30 s each. Configuration and play keep [`READ_TIMEOUT`] (a
-/// resource pack downloads in configuration).
+/// sockets would otherwise take for 30 s each. Configuration keeps [`READ_TIMEOUT`] (a resource pack
+/// downloads in configuration).
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(10);
 /// Vanilla's server-side disconnect during login is a JSON component.
 fn login_disconnect(c: &mut Connection, reason: &horizon_core::nbt::Tag) {
@@ -2238,7 +2240,7 @@ fn play(
         return;
     }
     let (socket, reader, writer) = c.detach();
-    io_pool::adopt(socket, (reader, writer), outbox, session, READ_TIMEOUT);
+    io_pool::adopt(socket, (reader, writer), outbox, session, PLAY_TIMEOUT);
 }
 
 /// A player's play state on its network thread.
@@ -2321,7 +2323,8 @@ impl io_pool::Session for PlayConn {
                 if let Some((sent, at)) = self.sent_at
                     && k.id == sent
                 {
-                    self.watch.alive.store(k.id, Ordering::Relaxed);
+                    let answered = i64::try_from(self.watch.start.elapsed().as_millis()).unwrap_or(i64::MAX);
+                    self.watch.alive.store(answered, Ordering::Relaxed);
                     let ms = i32::try_from(at.elapsed().as_millis()).unwrap_or(i32::MAX);
                     let old = self.latency.load(Ordering::Relaxed);
                     self.latency.store((old * 3 + ms) / 4, Ordering::Relaxed);
@@ -2648,16 +2651,15 @@ pub(super) fn frame_body(
 struct KeepAliveWatch {
     /// What keep-alive ids count from: an id is its sending time in ms.
     start: Instant,
-    /// The id of the last keep-alive the client answered (-1: none yet).
+    /// When the last valid answer arrived, in milliseconds from `start` (-1 if none yet).
     alive: Arc<AtomicI64>,
 }
 impl KeepAliveWatch {
-    /// keepConnectionAlive sends a keep-alive 15 s after the last and drops
-    /// a client that has not answered it 15 s later: nothing answered of
-    /// what was sent in the last 30 s.
+    /// Measure silence from the last valid reply, rather than when its
+    /// request was sent. Slow replies must not eat into the next deadline.
     fn timed_out(&self) -> bool {
         let answered = u64::try_from(self.alive.load(Ordering::Relaxed)).unwrap_or(0);
-        self.start.elapsed() > Duration::from_millis(answered) + 2 * KEEP_ALIVE_EVERY
+        self.start.elapsed() > Duration::from_millis(answered) + PLAY_TIMEOUT
     }
 }
 
@@ -3995,11 +3997,11 @@ mod tests {
             start,
             alive: Arc::new(AtomicI64::new(answered)),
         };
-        assert!(!watch(ago(29), -1).timed_out());
-        assert!(watch(ago(31), -1).timed_out());
-        // Answered the keep-alive sent 15 s in: fine until 45 s.
-        assert!(!watch(ago(44), 15_000).timed_out());
-        assert!(watch(ago(46), 15_000).timed_out());
+        assert!(!watch(ago(59), -1).timed_out());
+        assert!(watch(ago(61), -1).timed_out());
+        // A valid reply arrived at 20 seconds: fine until 80 seconds.
+        assert!(!watch(ago(79), 20_000).timed_out());
+        assert!(watch(ago(81), 20_000).timed_out());
     }
 
     #[test]
@@ -4080,7 +4082,7 @@ mod tests {
         let mut c = conn(2, Some(7));
         assert!(matches!(answer(&mut c, 7), Verdict::Go));
         assert!(c.sent_at.is_none());
-        assert_eq!(c.watch.alive.load(Ordering::Relaxed), 7);
+        assert!(c.watch.alive.load(Ordering::Relaxed) >= 0);
         // Another id while one is pending: kicked, and not counted as alive.
         let mut c = conn(2, Some(7));
         assert!(matches!(answer(&mut c, 8), Verdict::Kick(..)));
