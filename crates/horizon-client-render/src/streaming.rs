@@ -4852,7 +4852,7 @@ mod tests {
         use crate::chunk::{Chunk, LevelShape};
         use crate::light::{
             LightChanges, relight,
-            tests::{TORCH, tables},
+            tests::{STONE, TORCH, tables},
         };
         use horizon_world::registry::BlockStateId;
 
@@ -4868,6 +4868,7 @@ mod tests {
         tall.set(15, 352, 8, TORCH);
         let mut short = Chunk::empty(1, 0);
         short.lit = true;
+        short.set(0, 300, 8, STONE);
         world.chunks.insert((0, 0), Arc::new(tall));
         world.chunks.insert((1, 0), Arc::new(short));
 
@@ -4876,7 +4877,7 @@ mod tests {
             &mut world,
             &tables(),
             true,
-            &[(15, 304, 8), (15, 352, 8)],
+            &[(15, 304, 8), (15, 352, 8), (16, 299, 8)],
             false,
             &mut changed,
         );
@@ -4884,6 +4885,8 @@ mod tests {
         let short = &world.chunks[&(1, 0)];
         assert_eq!(short.layout().sections(), 24);
         assert_eq!(short.light(0, 304, 8) & 15, 13);
+        assert_eq!(short.light(0, 301, 8) >> 4, 15);
+        assert!(short.light(0, 299, 8) >> 4 < 15);
         assert_eq!(short.light(0, -16, 8) & 15, 0);
         assert!(changed.sections().any(|section| section == (1, 43, 0)));
         assert!(!changed.sections().any(|(x, s, _)| x == 1 && s >= 44));

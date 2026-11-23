@@ -361,8 +361,8 @@ impl<'a> IntoIterator for &'a ChunkMap {
     }
 }
 impl crate::light::LightWorld for ChunkMap {
-    fn section(&self, cx: i32, y: i32, cz: i32) -> Option<&Arc<crate::chunk::Section>> {
-        self.columns.section(cx, y, cz)
+    fn column(&self, cx: i32, cz: i32) -> Option<&Chunk> {
+        self.columns.column(cx, cz)
     }
     fn set_section_light(&mut self, cx: i32, y: i32, cz: i32, light: crate::chunk::Light) {
         self.columns.set_section_light(cx, y, cz, light);

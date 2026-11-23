@@ -965,8 +965,13 @@ pub fn update_light_layers<L: AsRef<[u8]>>(
 
 /// Resident chunks the incremental relighter reads and writes.
 pub trait LightWorld {
-    /// Section at absolute block Y `y`, if the chunk is loaded, lit and holds that Y.
-    fn section(&self, cx: i32, y: i32, cz: i32) -> Option<&Arc<Section>>;
+    /// The resident column, if it is loaded and lit.
+    fn column(&self, cx: i32, cz: i32) -> Option<&Chunk>;
+    /// Section at absolute block Y `y`.
+    fn section(&self, cx: i32, y: i32, cz: i32) -> Option<&Arc<Section>> {
+        let chunk = self.column(cx, cz)?;
+        Some(&chunk.sections[chunk.section_index(y)?])
+    }
     /// Replace the light of a section `section` returned.
     fn set_section_light(&mut self, cx: i32, y: i32, cz: i32, light: Light);
     /// The column the world's chunks hold (its level's).
@@ -988,10 +993,8 @@ impl<S: std::hash::BuildHasher> LightWorld for HashMap<(i32, i32), Arc<Chunk>, S
             .get(&chunk.dynamic_cell(x, y, z)?)
             .copied()
     }
-    fn section(&self, cx: i32, y: i32, cz: i32) -> Option<&Arc<Section>> {
-        let chunk = self.get(&(cx, cz)).filter(|c| c.lit)?;
-        let section = chunk.section_index(y)?;
-        Some(&chunk.sections[section])
+    fn column(&self, cx: i32, cz: i32) -> Option<&Chunk> {
+        self.get(&(cx, cz)).filter(|c| c.lit).map(Arc::as_ref)
     }
     fn set_section_light(&mut self, cx: i32, y: i32, cz: i32, light: Light) {
         if let Some(chunk) = self.get_mut(&(cx, cz)).filter(|c| c.lit)
@@ -1010,8 +1013,8 @@ impl LightWorld for crate::world::World {
         self.chunks.dynamic_emission(x, y, z)
     }
 
-    fn section(&self, cx: i32, y: i32, cz: i32) -> Option<&Arc<Section>> {
-        self.chunks.section(cx, y, cz)
+    fn column(&self, cx: i32, cz: i32) -> Option<&Chunk> {
+        self.chunks.column(cx, cz)
     }
 
     fn set_section_light(&mut self, cx: i32, y: i32, cz: i32, light: Light) {
@@ -1046,6 +1049,13 @@ impl<'w> Region<'w> {
             last: ((i32::MIN, 0, 0), NONE),
         }
     }
+    fn sky_bounds(&self, x: i32, z: i32) -> Option<(i32, i32)> {
+        let chunk = self.world.column(x >> 4, z >> 4)?;
+        let bottom = self.layout.min_y().max(chunk.min_y());
+        let top = self.layout.max_y().min(chunk.max_y());
+        (bottom < top).then_some((bottom, top))
+    }
+
     #[inline(always)]
     fn slot(&mut self, x: i32, y: i32, z: i32) -> Option<usize> {
         self.layout.section_index(y)?;
@@ -1276,8 +1286,13 @@ fn set_level(world: &mut Region, sky: bool, p: Pos, value: u8) {
 }
 /// `ChunkSkyLightSources`: the Y of the upper block of the highest occluded
 /// edge in the column (every block at or above it is a sky source).
-fn lowest_sky_source(world: &mut Region, tables: &LightTables, x: i32, z: i32) -> i32 {
-    let (min_y, max_y) = (world.layout.min_y(), world.layout.max_y());
+fn lowest_sky_source(
+    world: &mut Region,
+    tables: &LightTables,
+    x: i32,
+    z: i32,
+    (min_y, max_y): (i32, i32),
+) -> i32 {
     let mut y = max_y - 1;
     let Some(mut top) = world.state(x, y, z) else {
         return min_y;
@@ -1367,7 +1382,6 @@ fn relight_region(
         relight_layer(world, tables, false, positions, force, scratch, changed)
     });
     if sky_light {
-        let (min_y, max_y) = (world.layout.min_y(), world.layout.max_y());
         let mut seeds = positions.to_vec();
         let mut columns: FxHashMap<(i32, i32), i32> = FxHashMap::default();
         crate::spans::time("lt_columns", || {
@@ -1375,7 +1389,10 @@ fn relight_region(
                 if columns.contains_key(&(x, z)) {
                     continue;
                 }
-                let source = lowest_sky_source(world, tables, x, z);
+                let Some(bounds @ (min_y, max_y)) = world.sky_bounds(x, z) else {
+                    continue;
+                };
+                let source = lowest_sky_source(world, tables, x, z, bounds);
                 columns.insert((x, z), source);
                 // Cells whose source status changed: non-15 at or above the new
                 // lowest source, and old 15s (sources) below it.
@@ -1481,9 +1498,11 @@ fn relight_layer(
                 let lowest = if (p.0, p.2) == last_xz {
                     last_lowest
                 } else {
-                    let lowest = *sources
-                        .entry((p.0, p.2))
-                        .or_insert_with(|| lowest_sky_source(world, tables, p.0, p.2));
+                    let lowest = *sources.entry((p.0, p.2)).or_insert_with(|| {
+                        world.sky_bounds(p.0, p.2).map_or(i32::MAX, |bounds| {
+                            lowest_sky_source(world, tables, p.0, p.2, bounds)
+                        })
+                    });
                     last_xz = (p.0, p.2);
                     last_lowest = lowest;
                     lowest
@@ -1554,7 +1573,7 @@ pub(crate) mod tests {
     }
 
     pub(crate) const AIR: u32 = 0;
-    const STONE: u32 = 1;
+    pub(crate) const STONE: u32 = 1;
     pub(crate) const TORCH: u32 = 2;
     const SLAB: u32 = 3;
     /// Air, stone, torch and a bottom slab (full bottom face, half sides,
