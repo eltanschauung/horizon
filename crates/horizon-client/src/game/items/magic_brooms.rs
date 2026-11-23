@@ -465,6 +465,14 @@ impl Game<'_> {
             });
     }
 
+    pub(super) fn has_broom_night_vision(&self) -> bool {
+        self.mount_index()
+            .map(|index| &self.mobs[index])
+            .is_some_and(|broom| {
+                broom.alive() && Variant::of(&broom.kind.id).is_some_and(|variant| variant.upgraded)
+            })
+    }
+
     pub(super) fn magic_broom_passives(&mut self, index: usize) {
         let broom = &self.mobs[index];
         let Some(variant) = Variant::of(&broom.kind.id) else {
@@ -472,11 +480,6 @@ impl Game<'_> {
         };
         let tick = self.world.game_time;
         if tick % 20 == 0 {
-            if variant.upgraded && !broom.on_ground {
-                self.add_player_effect(
-                    EffectInstance::new("night_vision", 45, 0).with_flags(false, false),
-                );
-            }
             if variant.family == Family::Tide {
                 self.add_player_effect(
                     EffectInstance::new("water_breathing", 45, 0).with_flags(false, false),

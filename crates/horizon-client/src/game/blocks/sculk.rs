@@ -1609,17 +1609,26 @@ impl Game<'_> {
         (modifier, pulse.max(0.0) * scale)
     }
 
-    /// `LightmapRenderStateExtractor`: the night vision effect's intensity
-    /// (`GameRenderer.nightVisionScale`), or conduit power's water vision.
+    /// The night vision used by both the lightmap and the fog. Broom vision
+    /// follows the synchronized mount and never changes a player's potion.
+    pub(super) fn night_vision_effect_intensity(&self, partial: f32) -> Option<f32> {
+        if self.has_broom_night_vision() {
+            return Some(1.0);
+        }
+        let effect = self.potions.effects.get("night_vision")?;
+        Some(if effect.ends_within(200) {
+            0.7 + ((effect.duration as f32 - partial) * std::f32::consts::PI * 0.2).sin() * 0.3
+        } else {
+            1.0
+        })
+    }
+
+    /// `LightmapRenderStateExtractor`: the night vision effect's intensity,
+    /// or conduit power's water vision.
     pub(super) fn night_vision_intensity(&self, partial: f32) -> f32 {
         use mod_api::client::fog::FogType;
-        if let Some(e) = self.potions.effects.get("night_vision") {
-            // MobEffectInstance.endsWithin(200); -1 is infinite.
-            return if e.duration < 0 || e.duration > 200 {
-                1.0
-            } else {
-                0.7 + ((e.duration as f32 - partial) * std::f32::consts::PI * 0.2).sin() * 0.3
-            };
+        if let Some(intensity) = self.night_vision_effect_intensity(partial) {
+            return intensity;
         }
         if self.potions.effects.get("conduit_power").is_some()
             && let Some(eye) = self.eye_position()
