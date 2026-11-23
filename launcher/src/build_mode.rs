@@ -205,7 +205,7 @@ impl Launcher {
         if let Some(check) = self.mod_preview.update.clone() {
             return Some(self.update_panel(check, "nightly-2026-11-10", String::new(), pal, cx));
         }
-        if self.native_step.is_some() || self.settings.native_mods_allowed_at.is_none() {
+        if self.native_step.is_some() || !self.settings.native_mods_allowed() {
             return None;
         }
         let plays = self.version_of(instance)?.clone();
@@ -394,7 +394,7 @@ impl Launcher {
     ) -> Div {
         let t = self.theme;
         // Before permission the rows say "Needs permission": the header says the same.
-        let allowed = self.settings.native_mods_allowed_at.is_some();
+        let allowed = self.settings.native_mods_allowed();
         let needs = match state {
             State::NoMods | State::UpToDate => None,
             _ if !allowed => Some(tr("Needs permission")),
@@ -428,10 +428,7 @@ impl Launcher {
         }
         if can_build && self.native_step.is_none() {
             // Build is where permission is asked for, so it says so until it was given.
-            let label = match self.settings.native_mods_allowed_at {
-                Some(_) => tr("Build"),
-                None => tr("Allow and build"),
-            };
+            let label = if allowed { tr("Build") } else { tr("Allow and build") };
             // Under a failure with its own way on, that is the main action: Build steps back.
             let kind = match remedy {
                 true => Kind::Secondary,
@@ -440,7 +437,7 @@ impl Launcher {
             right = right.child(
                 button("native-build", label, kind, &t).on_click(cx.listener(
                     |this, _: &ClickEvent, _, cx| {
-                        if this.settings.native_mods_allowed_at.is_some() {
+                        if this.settings.native_mods_allowed() {
                             this.build_native();
                         } else {
                             this.request_native_build_consent();
@@ -766,7 +763,7 @@ impl Launcher {
         let key = format!(
             "{}{:?}",
             native_status::fingerprint(&home, base.as_deref()),
-            self.settings.native_mods_allowed_at
+            self.settings.native_mods_allowed()
         );
         let mut memo = self.mods.native_routes.borrow_mut();
         if let Some(previous) = memo.as_ref() {
@@ -999,7 +996,7 @@ impl Launcher {
                 return;
             }
             this.mods.route_open = None;
-            if this.settings.native_mods_allowed_at.is_some() {
+            if this.settings.native_mods_allowed() {
                 this.build_native();
             } else {
                 this.request_native_build_consent();
@@ -1025,7 +1022,7 @@ impl Launcher {
         };
         // Native mods run as real code: until the player allows them, the menu offers the
         // trust notice (the glass rows have no button of their own for it).
-        let allow = (t.glass && self.settings.native_mods_allowed_at.is_none()).then(|| {
+        let allow = (t.glass && !self.settings.native_mods_allowed()).then(|| {
             let id = id.clone();
             ui::menu_item(
                 "route-allow",

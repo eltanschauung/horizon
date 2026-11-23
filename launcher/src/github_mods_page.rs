@@ -162,7 +162,7 @@ impl Launcher {
 
     /// Downloads and checks what the player agreed to; installs it unless there is a choice.
     pub(super) fn github_install(&mut self, found: Resolved, only: Option<String>) {
-        if self.settings.native_mods_allowed_at.is_none() {
+        if !self.settings.native_mods_allowed() {
             self.pending_consent = Some(PendingConsent::Github(found, only));
             return;
         }
@@ -491,7 +491,7 @@ impl Launcher {
                 self.with_reason(disabled(flip), reason)
             } else {
                 flip.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                    if native && !on && this.settings.native_mods_allowed_at.is_none() {
+                    if native && !on && !this.settings.native_mods_allowed() {
                         this.pending_consent = Some(PendingConsent::Local(id.clone()));
                         cx.notify();
                         return;
@@ -517,7 +517,7 @@ impl Launcher {
             right = right.child(blocks::badge(tr("NATIVE"), t.muted, &t));
         }
         // Canceling its prompt turns `mod.<id>` off: only a row that may switch it asks.
-        if native && row.switch && self.settings.native_mods_allowed_at.is_none() {
+        if native && row.switch && !self.settings.native_mods_allowed() {
             let id = row.id.clone();
             right = right
                 .child(blocks::badge(tr("Needs permission"), t.muted, &t))

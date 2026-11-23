@@ -351,7 +351,7 @@ impl Launcher {
                 (tr("Building"), ui::color(self.look.accent))
             }
             // Native mods run as real code: nothing builds until the player allows them.
-            Some(_) if self.settings.native_mods_allowed_at.is_none() => {
+            Some(_) if !self.settings.native_mods_allowed() => {
                 (tr("Needs permission"), ui::warn())
             }
             Some(id)
@@ -436,7 +436,7 @@ impl Launcher {
 
     /// A local file's switch, with the native consent step for a native one.
     fn switch_native_mod(&mut self, native: &native_status::Installed, on: bool) {
-        if native.native() && !on && self.settings.native_mods_allowed_at.is_none() {
+        if native.native() && !on && !self.settings.native_mods_allowed() {
             self.pending_consent = Some(PendingConsent::Local(native.id.clone()));
             return;
         }

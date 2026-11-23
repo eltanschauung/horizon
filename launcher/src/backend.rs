@@ -4580,6 +4580,11 @@ pub struct Settings {
 }
 
 impl Settings {
+    /// Windows enables native builds without a separate launcher approval.
+    pub fn native_mods_allowed(&self) -> bool {
+        cfg!(windows) || self.native_mods_allowed_at.is_some()
+    }
+
     /// Remember an explicit approval; merely finding an installed toolchain never grants it.
     pub fn allow_native_mods(&mut self) -> Result<(), String> {
         self.native_mods_allowed_at = Some(

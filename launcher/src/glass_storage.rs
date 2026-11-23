@@ -193,7 +193,10 @@ impl Launcher {
                 ),
             ));
         }
-        let breakdown = card;
+        let cards = div().flex().flex_col().gap(px(12.)).child(summary).child(card);
+        if cfg!(windows) {
+            return cards;
+        }
         let mut card = crate::glass::plate(horizon_theme::glass::radius::PANEL).p(px(8.));
         if self.settings.native_mods_allowed_at.is_some() {
             // Turn off asks first: it switches mods off in every instance, and each comes back
@@ -300,13 +303,7 @@ impl Launcher {
                 None,
             ));
         }
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(12.))
-            .child(summary)
-            .child(breakdown)
-            .child(card)
+        cards.child(card)
     }
 
     /// Counts the switched-on native mods and the instances holding them, on a worker, then

@@ -1770,7 +1770,7 @@ impl From<Failed> for String {
 
 /// Refuse before staging, fetching a prebuilt game or downloading a compiler.
 pub fn require_consent() -> Result<(), Failed> {
-    if backend::Settings::load().native_mods_allowed_at.is_some() {
+    if backend::Settings::load().native_mods_allowed() {
         Ok(())
     } else {
         Err(Failed::NoConsent)
@@ -4326,6 +4326,14 @@ mod tests {
         original.save().unwrap();
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn windows_native_builds_need_no_saved_approval() {
+        assert!(backend::Settings::default().native_mods_allowed());
+        require_consent().unwrap();
+    }
+
+    #[cfg(not(windows))]
     #[test]
     fn missing_consent_blocks_all_build_routes_before_http_or_staging() {
         use std::net::TcpListener;
@@ -4543,6 +4551,7 @@ mod tests {
 
     /// #18669: native mods turned off in Storage while a build waits for the last cleanup stop
     /// that build once it takes its turn, before any build step.
+    #[cfg(not(windows))]
     #[test]
     fn a_waiting_build_checks_consent_again_once_it_takes_its_turn() {
         let _guard = scratch_state();

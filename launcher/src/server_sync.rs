@@ -251,7 +251,7 @@ fn replace(from: &Path, to: &Path) -> Result<(), String> {
 fn replace(from: &Path, to: &Path) -> Result<(), String> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::{
-        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
     };
     let from: Vec<u16> = from.as_os_str().encode_wide().chain(Some(0)).collect();
     let to: Vec<u16> = to.as_os_str().encode_wide().chain(Some(0)).collect();
@@ -303,10 +303,49 @@ fn check_package(path: &Path, entry: &Package, revision: &str) -> Result<(), Str
     }
     Ok(())
 }
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+enum Original {
+    Moved { moved: PathBuf },
+    Copied(Option<PathBuf>),
+}
+
+impl Original {
+    fn saved(&self) -> Option<&Path> {
+        match self {
+            Self::Moved { moved } => Some(moved),
+            Self::Copied(path) => path.as_deref(),
+        }
+    }
+}
+
+/// Move an obsolete package aside without changing its permissions. Windows scanners and
+/// the closing game may hold the file briefly. A persistent lock leaves the update retryable.
+fn archive_mod(from: &Path, to: &Path) -> Result<(), String> {
+    for attempt in 0..=5 {
+        match fs::rename(from, to) {
+            Ok(()) => return Ok(()),
+            Err(error)
+                if cfg!(windows)
+                    && attempt < 5
+                    && matches!(error.raw_os_error(), Some(32 | 33)) =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(150));
+            }
+            Err(error) => return Err(format!("Could not archive {}: {error}", from.display())),
+        }
+    }
+    unreachable!("last archive attempt returns")
+}
+
 /// Recover only paths recorded by our own bounded transaction, never worlds,
 /// account files, or arbitrary paths supplied by a downloaded manifest.
 fn recover(home: &Path, runtime: &Path) -> Result<(), String> {
-    let backup = home.join(".horizon-server-sync/rollback");
+    let sync_dir = home.join(".horizon-server-sync");
+    let backup = sync_dir.join("rollback");
+    if sync_dir.is_symlink() || backup.is_symlink() {
+        return Err("Refusing a symlink rollback directory".into());
+    }
     if !backup.exists() {
         return Ok(());
     }
@@ -315,7 +354,7 @@ fn recover(home: &Path, runtime: &Path) -> Result<(), String> {
         fs::remove_dir_all(&backup).map_err(err)?;
         return Ok(());
     }
-    let touched: BTreeMap<PathBuf, Option<PathBuf>> =
+    let touched: BTreeMap<PathBuf, Original> =
         serde_json::from_slice(&fs::read(journal).map_err(err)?).map_err(err)?;
     if touched.len() > 1024 {
         return Err("Invalid recovery journal".into());
@@ -329,14 +368,25 @@ fn recover(home: &Path, runtime: &Path) -> Result<(), String> {
             || dest == &runtime.join("OPUS-LICENSE.txt");
         if !allowed
             || src
-                .as_ref()
+                .saved()
                 .is_some_and(|p| p.parent() != Some(backup.as_path()))
+            || (matches!(src, Original::Moved { .. })
+                && !["horizon-mods", "horizon-native-mods"]
+                    .iter()
+                    .any(|folder| dest.parent() == Some(home.join(folder).as_path())))
         {
             return Err("Invalid recovery path".into());
         }
         match src {
-            Some(p) => atomic_copy(p, dest)?,
-            None => {
+            Original::Moved { moved } => {
+                if moved.exists() {
+                    replace(moved, dest)?;
+                } else if !dest.exists() {
+                    return Err(format!("Missing archived package for {}", dest.display()));
+                }
+            }
+            Original::Copied(Some(p)) => atomic_copy(p, dest)?,
+            Original::Copied(None) => {
                 if dest.exists() {
                     fs::remove_file(dest).map_err(err)?;
                 }
@@ -359,7 +409,7 @@ fn apply(
     m: &Manifest,
     files: &Path,
     runtime: &Path,
-    build: impl FnOnce() -> Result<String, String>,
+    build: impl FnOnce(&str) -> Result<String, String>,
 ) -> Result<String, String> {
     m.validate()?;
     recover(home, runtime)?;
@@ -373,27 +423,39 @@ fn apply(
             check_package(&file, p, &m.game_revision)?;
         }
     }
+    // Compile and verify the candidate while the active packages are still in place.
+    let mut settings = horizon_platform::mod_package::selections::load(home);
+    for p in m.packages.iter().filter(|p| p.kind != Kind::Runtime) {
+        let key = format!("mod.{}", p.id);
+        let matches = |line: &str| line.split_once(':').is_some_and(|(k, _)| k.trim() == key);
+        if p.required || !settings.lines().any(matches) {
+            let mut kept: Vec<_> = settings.lines().filter(|line| !matches(line)).collect();
+            let enabled = format!("{key}:true");
+            kept.push(&enabled);
+            settings = kept.join("\n") + "\n";
+        }
+    }
     let backup = home.join(".horizon-server-sync/rollback");
     fs::create_dir_all(&backup).map_err(err)?;
-    POLICY
-        .get_or_init(Default::default)
-        .lock()
-        .unwrap()
-        .insert(home.to_owned(), Some(m.clone()));
-    let mut touched: BTreeMap<PathBuf, Option<PathBuf>> = BTreeMap::new();
-    let mut remember = |dest: &Path| -> Result<(), String> {
+    let mut touched: BTreeMap<PathBuf, Original> = BTreeMap::new();
+    let mut remember = |dest: &Path, archive: bool| -> Result<(), String> {
         if touched.contains_key(dest) {
             return Ok(());
         }
-        if dest.is_symlink() {
-            return Err("Refusing a symlink update destination".into());
+        if dest.is_symlink() || (dest.exists() && !dest.is_file()) {
+            return Err("Refusing a non-file update destination".into());
         }
-        let original = if dest.exists() {
-            let p = backup.join(touched.len().to_string());
-            fs::copy(dest, &p).map_err(err)?;
-            Some(p)
+        let saved = backup.join(touched.len().to_string());
+        let move_existing = archive && dest.exists();
+        let original = if move_existing {
+            Original::Moved {
+                moved: saved.clone(),
+            }
+        } else if dest.exists() {
+            fs::copy(dest, &saved).map_err(err)?;
+            Original::Copied(Some(saved.clone()))
         } else {
-            None
+            Original::Copied(None)
         };
         touched.insert(dest.to_owned(), original);
         let journal = backup.join("journal.json");
@@ -406,13 +468,33 @@ fn apply(
             .sync_all()
             .map_err(err)?;
         replace(&temp, &journal)?;
+        if move_existing {
+            archive_mod(dest, &saved)?;
+        }
         Ok(())
     };
     let result = (|| {
-        remember(&home.join("horizon-mods.txt"))?;
-        remember(&home.join(RECORD))?;
-        // Replace duplicate filenames for a managed id, but preserve the originals
-        // in the rollback transaction until the replacement compiled successfully.
+        // The build carries the Windows runtime files from its prepared base.
+        for package in m
+            .packages
+            .iter()
+            .filter(|p| p.applies() && p.kind == Kind::Runtime)
+        {
+            let dest = runtime.join(package.relative());
+            if hash(&dest).as_deref() != Ok(package.sha256.as_str()) {
+                remember(&dest, false)?;
+                atomic_copy(&files.join(&package.sha256), &dest)?;
+            }
+        }
+        let version = build(&settings)?;
+        remember(&home.join("horizon-mods.txt"), false)?;
+        remember(&home.join(RECORD), false)?;
+        POLICY
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap()
+            .insert(home.to_owned(), Some(m.clone()));
+        // Move superseded packages out of Horizon's scan paths after the build succeeds.
         let previous = read_record(home);
         for (folder, kind) in [
             ("horizon-native-mods", Kind::Native),
@@ -431,8 +513,7 @@ fn apply(
                             || (extension == Some("hmod")
                                 && crate::native_status::legacy_format(&path)))
                     {
-                        remember(&path)?;
-                        fs::remove_file(&path).map_err(err)?;
+                        remember(&path, true)?;
                         continue;
                     }
                     if extension != Some("hmod") {
@@ -450,41 +531,26 @@ fn apply(
                         if wanted.is_some_and(|p| home.join(p.relative()) != path)
                             || (wanted.is_none() && obsolete)
                         {
-                            remember(&path)?;
-                            fs::remove_file(path).map_err(err)?;
+                            remember(&path, true)?;
                         }
                     }
                 }
             }
         }
-        for p in m.packages.iter().filter(|p| p.applies()) {
-            let dest = if p.kind == Kind::Runtime {
-                runtime.join(p.relative())
-            } else {
-                home.join(p.relative())
-            };
+        for p in m
+            .packages
+            .iter()
+            .filter(|p| p.applies() && p.kind != Kind::Runtime)
+        {
+            let dest = home.join(p.relative());
             if hash(&dest).as_deref() != Ok(p.sha256.as_str()) {
-                remember(&dest)?;
+                remember(&dest, true)?;
                 atomic_copy(&files.join(&p.sha256), &dest)?;
-            }
-        }
-        // The caller holds the home lock. Apply the managed choices and journal
-        // them in the same transaction as the package changes.
-        let mut settings = horizon_platform::mod_package::selections::load(home);
-        for p in m.packages.iter().filter(|p| p.kind != Kind::Runtime) {
-            let key = format!("mod.{}", p.id);
-            let matches = |line: &str| line.split_once(':').is_some_and(|(k, _)| k.trim() == key);
-            if p.required || !settings.lines().any(matches) {
-                let mut kept: Vec<_> = settings.lines().filter(|line| !matches(line)).collect();
-                let enabled = format!("{key}:true");
-                kept.push(&enabled);
-                settings = kept.join("\n") + "\n";
             }
         }
         let choices = backup.join("choices-new");
         fs::write(&choices, settings).map_err(err)?;
         atomic_copy(&choices, &home.join("horizon-mods.txt"))?;
-        let version = build()?;
         let bytes = serde_json::to_vec_pretty(m).map_err(err)?;
         let tmp = backup.join("manifest-new");
         fs::write(&tmp, bytes).map_err(err)?;
@@ -493,23 +559,15 @@ fn apply(
     })();
     drop(remember);
     if result.is_err() {
-        for (dest, src) in &touched {
-            match src {
-                Some(p) => atomic_copy(p, dest)?,
-                None => {
-                    if dest.exists() {
-                        fs::remove_file(dest).map_err(err)?;
-                    }
-                }
-            }
-        }
+        recover(home, runtime)?;
+        return result;
     }
     // Identical repeat checks share a backup, but later player edits at the
     // same channel generation must never overwrite or discard earlier originals.
     let mut original_hash = Sha256::new();
     for (dest, src) in &touched {
         original_hash.update(dest.to_string_lossy().as_bytes());
-        if let Some(src) = src {
+        if let Some(src) = src.saved() {
             original_hash.update(hash(src)?.as_bytes());
         }
     }
@@ -578,17 +636,6 @@ pub fn sync(
     let m = fetch_manifest()?;
     let files = cache.join("files");
     fs::create_dir_all(&files).map_err(err)?;
-    let keep: BTreeSet<_> = m.packages.iter().map(|p| p.sha256.as_str()).collect();
-    for entry in fs::read_dir(&files).map_err(err)? {
-        let entry = entry.map_err(err)?;
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if entry.file_type().map_err(err)?.is_file()
-            && hex(&name, 64)
-            && !keep.contains(name.as_str())
-        {
-            fs::remove_file(entry.path()).map_err(err)?;
-        }
-    }
     for p in m.packages.iter().filter(|p| p.applies()) {
         let dest = files.join(&p.sha256);
         if hash(&dest).as_deref() == Ok(p.sha256.as_str()) {
@@ -614,7 +661,7 @@ pub fn sync(
     }
     let runtime = backend::version_dir(&base);
     let _lock = browser::lock_home(&instance.home).map_err(err)?;
-    let version = apply(&instance.home, &m, &files, &runtime, || {
+    let version = apply(&instance.home, &m, &files, &runtime, |choices| {
         // Only the signed inputs enter staging, including content mods with WASM listeners.
         let approved = tempfile::tempdir_in(&cache).map_err(err)?;
         for p in m
@@ -624,11 +671,7 @@ pub fn sync(
         {
             atomic_copy(&files.join(&p.sha256), &approved.path().join(p.relative()))?;
         }
-        fs::copy(
-            instance.home.join("horizon-mods.txt"),
-            approved.path().join("horizon-mods.txt"),
-        )
-        .map_err(err)?;
+        fs::write(approved.path().join("horizon-mods.txt"), choices).map_err(err)?;
         if let Some(current) = current.filter(|v| {
             native_mods::about(v)
                 .is_some_and(|a| a.horizon == m.game_revision && a.left_out.is_empty())
@@ -757,12 +800,10 @@ mod tests {
         let (m, files, home) = fixture(&t.0, true);
         fs::write(files.join(&m.packages[0].sha256), b"corrupt").unwrap();
         fs::write(home.join("horizon-mods.txt"), "mod.test_mod:false\n").unwrap();
-        assert!(
-            apply(&home, &m, &files, &t.0.join("runtime"), || panic!(
-                "must not build"
-            ))
-            .is_err()
-        );
+        assert!(apply(&home, &m, &files, &t.0.join("runtime"), |_| panic!(
+            "must not build"
+        ))
+        .is_err());
         assert_eq!(
             fs::read_to_string(home.join("horizon-mods.txt")).unwrap(),
             "mod.test_mod:false\n"
@@ -784,12 +825,10 @@ mod tests {
             "mod.test_mod:false\nmod.custom:true\n",
         )
         .unwrap();
-        assert!(
-            apply(&home, &m, &files, &t.0.join("runtime"), || Err(
-                "compiler failed".into()
-            ))
-            .is_err()
-        );
+        assert!(apply(&home, &m, &files, &t.0.join("runtime"), |_| Err(
+            "compiler failed".into()
+        ))
+        .is_err());
         assert_eq!(
             fs::read(home.join("horizon-native-mods/test_mod.hmod")).unwrap(),
             b"old package"
@@ -813,19 +852,17 @@ mod tests {
         fs::write(&old, b"legacy package").unwrap();
         fs::write(&choices, "mod.custom:false\n").unwrap();
 
-        assert!(
-            apply(&home, &m, &files, &runtime, || {
-                assert!(!old.exists());
-                Err("Registry dependency compilation was not approved".into())
-            })
-            .is_err()
-        );
+        assert!(apply(&home, &m, &files, &runtime, |_| {
+            assert!(old.exists());
+            Err("Registry dependency compilation was not approved".into())
+        })
+        .is_err());
         assert_eq!(fs::read(&old).unwrap(), b"legacy package");
         assert_eq!(fs::read_to_string(&choices).unwrap(), "mod.custom:false\n");
 
-        apply(&home, &m, &files, &runtime, || {
-            assert!(!old.exists());
-            assert!(folder.join("test_mod.hmod").is_file());
+        apply(&home, &m, &files, &runtime, |_| {
+            assert!(old.exists());
+            assert!(!folder.join("test_mod.hmod").exists());
             Ok("built".into())
         })
         .unwrap();
@@ -834,14 +871,10 @@ mod tests {
             .unwrap()
             .any(|path| {
                 let dir = path.unwrap().path();
-                let journal: BTreeMap<PathBuf, Option<PathBuf>> =
+                let journal: BTreeMap<PathBuf, Original> =
                     serde_json::from_slice(&fs::read(dir.join("journal.json")).unwrap()).unwrap();
-                journal
-                    .get(&old)
-                    .and_then(Option::as_ref)
-                    .is_some_and(|saved| {
-                        fs::read(dir.join(saved.file_name().unwrap())).unwrap() == b"legacy package"
-                    })
+                matches!(journal.get(&old), Some(Original::Moved { moved })
+                    if fs::read(dir.join(moved.file_name().unwrap())).unwrap() == b"legacy package")
             });
         assert!(archived);
         assert!(!browser::java::is_enabled(&home, "custom"));
@@ -857,7 +890,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            apply(&home, &m, &files, &t.0.join("runtime"), || Ok(
+            apply(&home, &m, &files, &t.0.join("runtime"), |_| Ok(
                 "built".into()
             ))
             .unwrap(),
@@ -873,7 +906,7 @@ mod tests {
         let t = Temp::new();
         let (m, files, home) = fixture(&t.0, false);
         fs::write(home.join("horizon-mods.txt"), "mod.test_mod:false\n").unwrap();
-        apply(&home, &m, &files, &t.0.join("runtime"), || {
+        apply(&home, &m, &files, &t.0.join("runtime"), |_| {
             Ok("built".into())
         })
         .unwrap();
@@ -885,7 +918,7 @@ mod tests {
     fn later_player_edits_are_backed_up_even_at_the_same_channel_generation() {
         let t = Temp::new();
         let (m, files, home) = fixture(&t.0, true);
-        apply(&home, &m, &files, &t.0.join("runtime"), || {
+        apply(&home, &m, &files, &t.0.join("runtime"), |_| {
             Ok("built".into())
         })
         .unwrap();
@@ -894,7 +927,7 @@ mod tests {
             b"player edited package",
         )
         .unwrap();
-        apply(&home, &m, &files, &t.0.join("runtime"), || {
+        apply(&home, &m, &files, &t.0.join("runtime"), |_| {
             Ok("built".into())
         })
         .unwrap();
@@ -907,6 +940,65 @@ mod tests {
             });
         assert!(preserved);
     }
+    #[cfg(windows)]
+    #[test]
+    fn a_locked_package_leaves_the_previous_set_active() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let t = Temp::new();
+        let (m, files, home) = fixture(&t.0, true);
+        let old = home.join("horizon-native-mods/test_mod.hmod");
+        fs::create_dir_all(old.parent().unwrap()).unwrap();
+        fs::write(&old, b"previous package").unwrap();
+        let choices = home.join("horizon-mods.txt");
+        fs::write(&choices, "mod.test_mod:false\n").unwrap();
+        let locked = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(&old)
+            .unwrap();
+
+        let result = apply(&home, &m, &files, &t.0.join("runtime"), |_| {
+            Ok("built".into())
+        });
+        assert!(result.unwrap_err().contains("Could not archive"));
+        drop(locked);
+        assert_eq!(fs::read(&old).unwrap(), b"previous package");
+        assert_eq!(
+            fs::read_to_string(&choices).unwrap(),
+            "mod.test_mod:false\n"
+        );
+        assert!(!home.join(RECORD).exists());
+        assert!(!home.join(".horizon-server-sync/rollback").exists());
+    }
+
+    #[test]
+    fn interrupted_archive_recovers_on_both_sides_of_the_move() {
+        for moved in [false, true] {
+            let t = Temp::new();
+            let home = t.0.join("home");
+            let dest = home.join("horizon-native-mods/test_mod.hmod");
+            let rollback = home.join(".horizon-server-sync/rollback");
+            fs::create_dir_all(dest.parent().unwrap()).unwrap();
+            fs::create_dir_all(&rollback).unwrap();
+            let saved = rollback.join("0");
+            fs::write(&dest, if moved { b"partial!" } else { b"original" }).unwrap();
+            if moved {
+                fs::write(&saved, b"original").unwrap();
+            }
+            let journal = BTreeMap::from([(dest.clone(), Original::Moved { moved: saved })]);
+            fs::write(
+                rollback.join("journal.json"),
+                serde_json::to_vec(&journal).unwrap(),
+            )
+            .unwrap();
+
+            recover(&home, &t.0.join("runtime")).unwrap();
+            assert_eq!(fs::read(&dest).unwrap(), b"original");
+            assert!(!rollback.exists());
+        }
+    }
+
     #[test]
     fn interrupted_transaction_recovers_before_next_update() {
         let t = Temp::new();

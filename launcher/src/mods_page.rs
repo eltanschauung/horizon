@@ -663,7 +663,7 @@ impl Launcher {
         let on = !java::is_enabled(&home, id);
         if on
             && native_status::is_native_file(&e.file)
-            && self.settings.native_mods_allowed_at.is_none()
+            && !self.settings.native_mods_allowed()
         {
             self.pending_consent = Some(PendingConsent::Toggle(e.clone()));
             return;
@@ -855,7 +855,7 @@ impl Launcher {
         if self.mods.busy.is_some() {
             return;
         }
-        if self.settings.native_mods_allowed_at.is_none() {
+        if !self.settings.native_mods_allowed() {
             self.mods_install(SourceId::Horizon, id, None);
             return;
         }
@@ -889,7 +889,7 @@ impl Launcher {
         }
         // The first native mod: the trust notice, before anything is installed.
         let first_native = source == SourceId::Horizon
-            && self.settings.native_mods_allowed_at.is_none()
+            && !self.settings.native_mods_allowed()
             && horizon::is_native_mod(&id);
         if first_native {
             self.pending_consent = Some(PendingConsent::Install(source, id, known));
@@ -1638,7 +1638,7 @@ impl Launcher {
             if is_native {
                 right = right.child(blocks::badge(tr("NATIVE"), t.muted, &t));
             }
-            if is_native && self.settings.native_mods_allowed_at.is_none() {
+            if is_native && !self.settings.native_mods_allowed() {
                 let entry = e.clone();
                 right = right
                     .child(blocks::badge(tr("Needs permission"), t.muted, &t))

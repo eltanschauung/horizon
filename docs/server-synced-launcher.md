@@ -71,3 +71,8 @@ horizon-launcher server-sync --json
 ```
 
 Use temporary launcher/game/XDG homes for tests, never a live player's profile.
+
+On Windows, server sync and native compilation run without separate launcher approval.
+Server sync builds the candidate mod set first, then moves replaced packages into
+`.horizon-server-sync/backups/` in the instance folder. Horizon only scans the active
+mod folders. A blocked archive move preserves the previous set for retry.

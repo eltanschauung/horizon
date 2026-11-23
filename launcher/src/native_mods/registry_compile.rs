@@ -419,7 +419,7 @@ pub(super) fn compile(
     }
     super::crates::check_game_graph_names(out, &super::read_lock(out)?, &game_names)?;
     let inventory = metadata.inventory(&super::registry_lock::RegistryLock::default(), links)?;
-    if inventory.added_crates > 0 && !options.consent.is_some_and(|ask| ask(&inventory)) {
+    if inventory.added_crates > 0 && !cfg!(windows) && !options.consent.is_some_and(|ask| ask(&inventory)) {
         return Err(crate::i18n::tr("Registry dependency compilation was not approved").into());
     }
     let mut externs = prebuilt::wrapper_externs(&deps)?;

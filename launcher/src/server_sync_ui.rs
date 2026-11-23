@@ -79,7 +79,7 @@ impl Launcher {
         {
             return;
         }
-        if self.settings.native_mods_allowed_at.is_none() {
+        if !self.settings.native_mods_allowed() {
             if play_after && self.pending_consent.is_none() {
                 self.pending_consent = Some(crate::native_consent::PendingConsent::ServerSync);
             }

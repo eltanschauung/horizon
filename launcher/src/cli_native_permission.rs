@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) fn native_permission(trust: bool) -> Result<(), String> {
-    if trust {
+    if trust && !cfg!(windows) {
         backend::Settings::load().allow_native_mods()?;
     }
     native_mods::require_consent().map_err(String::from)
