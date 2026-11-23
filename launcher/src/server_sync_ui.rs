@@ -16,7 +16,7 @@ struct Run {
     id: String,
     phase: Phase,
     started: Instant,
-    elapsed: [Duration; 2],
+    elapsed: [Duration; 3],
     shown: u64,
     detail: String,
 }
@@ -24,6 +24,7 @@ fn index(p: Phase) -> usize {
     match p {
         Phase::Downloading => 0,
         Phase::Building => 1,
+        Phase::Checking => 2,
     }
 }
 impl Run {
@@ -39,6 +40,9 @@ impl Run {
         self.detail = detail;
     }
     fn label(&self) -> String {
+        if self.phase == Phase::Checking {
+            return self.phase.label().into();
+        }
         let t = self.elapsed().as_secs();
         format!("{} {}:{:02}", self.phase.label(), t / 60, t % 60)
     }
@@ -92,9 +96,9 @@ impl Launcher {
         self.server_sync.play_after = play_after;
         self.server_sync.running = Some(Run {
             id: id.clone(),
-            phase: Phase::Downloading,
+            phase: Phase::Checking,
             started: Instant::now(),
-            elapsed: [Duration::ZERO; 2],
+            elapsed: [Duration::ZERO; 3],
             shown: 0,
             detail: String::new(),
         });
@@ -230,12 +234,16 @@ mod tests {
     fn phase_clocks_accumulate_separately_when_downloads_resume_during_build() {
         let mut r = Run {
             id: "test".into(),
-            phase: Phase::Downloading,
+            phase: Phase::Checking,
             started: Instant::now() - Duration::from_secs(3),
-            elapsed: [Duration::ZERO; 2],
+            elapsed: [Duration::ZERO; 3],
             shown: 0,
             detail: String::new(),
         };
+        assert_eq!(r.label(), "Loading...");
+        r.progress(Phase::Downloading, "mod package".into());
+        assert!(r.label().starts_with("Downloading Updates... 0:00"));
+        r.started = Instant::now() - Duration::from_secs(3);
         r.progress(Phase::Building, "compiler".into());
         assert!(r.elapsed[0] >= Duration::from_secs(3));
         r.started = Instant::now() - Duration::from_secs(2);

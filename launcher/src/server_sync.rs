@@ -55,12 +55,14 @@ pub enum Outcome {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Phase {
+    Checking,
     Downloading,
     Building,
 }
 impl Phase {
     pub fn label(self) -> &'static str {
         match self {
+            Self::Checking => "Loading...",
             Self::Downloading => "Downloading Updates...",
             Self::Building => "Building...",
         }
@@ -620,7 +622,7 @@ pub fn sync(
         return Err("This instance is not server-managed".into());
     }
     progress(
-        Phase::Downloading,
+        Phase::Checking,
         "Checking the dedicated server's updates".into(),
     );
     let cache = backend::data_dir().join("server-sync");
@@ -648,6 +650,7 @@ pub fn sync(
         backend::download(&p.url, p.size, &p.sha256, &dest, &|_| {})?;
     }
     if !backend::installed().contains(&m.base) {
+        progress(Phase::Downloading, format!("Downloading {}", m.base));
         backend::install_tag(&m.base, false, |_| {})?;
     }
     let base = m.base.clone();
