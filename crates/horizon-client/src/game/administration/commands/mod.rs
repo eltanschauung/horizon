@@ -3756,6 +3756,26 @@ impl Game<'_> {
         ));
         Ok(distance)
     }
+    /// The nearest matching biome in the level in place, using the same
+    /// scanner for the command and native callers.
+    pub(in crate::game) fn nearest_biome(
+        &self,
+        biome: &str,
+        origin: [i32; 3],
+    ) -> Option<(String, [i32; 3])> {
+        let allowed = |name: &str| self.biome_matches(biome, name);
+        let search = horizon_world::worldgen::generator::BiomeSearch {
+            allowed: &allowed,
+            origin,
+            radius: 6400,
+            horizontal: 32,
+            vertical: 64,
+            min_y: self.world.bottom_y(),
+            max_y: self.world.top_y() - 1,
+        };
+        self.end.locator()?.find_closest_biome(&search)
+    }
+
     fn cmd_locate(&mut self, id: &str, ctx: &Context) -> R<i32> {
         let origin = self.source_position();
         if id == "locate.biome" {
@@ -3765,21 +3785,7 @@ impl Game<'_> {
             // LocateCommand.locateBiome: BiomeSource.findClosestBiome3d with
             // a 6400-block radius, 32-block columns and 64-block layers.
             let from = origin.map(|v| v.floor() as i32);
-            let allowed = |name: &str| self.biome_matches(&biome, name);
-            let search = horizon_world::worldgen::generator::BiomeSearch {
-                allowed: &allowed,
-                origin: from,
-                radius: 6400,
-                horizontal: 32,
-                vertical: 64,
-                min_y: self.world.bottom_y(),
-                max_y: self.world.top_y() - 1,
-            };
-            let found = self
-                .end
-                .locator()
-                .and_then(|t| t.find_closest_biome(&search));
-            let Some((name, p)) = found else {
+            let Some((name, p)) = self.nearest_biome(&biome, from) else {
                 return Err(CommandError::new(Text::tr(
                     "commands.locate.biome.not_found",
                     &[&biome],
