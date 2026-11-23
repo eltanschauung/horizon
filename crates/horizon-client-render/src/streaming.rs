@@ -2376,7 +2376,7 @@ impl Streaming {
         }
         let mut changed = LightChanges::default();
         crate::light::relight(
-            &mut world.chunks,
+            world,
             &self.light_tables,
             self.sky_light,
             &positions,
@@ -2425,7 +2425,7 @@ impl Streaming {
         if !positions.is_empty() {
             let mut changed = LightChanges::default();
             crate::light::relight(
-                &mut world.chunks,
+                world,
                 &self.light_tables,
                 self.sky_light,
                 &positions,
@@ -4847,6 +4847,48 @@ mod tests {
     /// An edit's light change in a neighbouring column marks that column
     /// unsaved too, or a column saved before the edit keeps its old light on
     /// disk.
+    #[test]
+    fn relights_mixed_height_columns_by_absolute_y() {
+        use crate::chunk::{Chunk, LevelShape};
+        use crate::light::{
+            LightChanges, relight,
+            tests::{TORCH, tables},
+        };
+        use horizon_world::registry::BlockStateId;
+
+        let mut world = World::new(BlockStateId(0), 0);
+        world.shape = LevelShape {
+            min_y: -384,
+            height: 768,
+            ..LevelShape::OVERWORLD
+        };
+        let mut tall = Chunk::with_layout(0, 0, world.layout());
+        tall.lit = true;
+        tall.set(15, 304, 8, TORCH);
+        tall.set(15, 352, 8, TORCH);
+        let mut short = Chunk::empty(1, 0);
+        short.lit = true;
+        world.chunks.insert((0, 0), Arc::new(tall));
+        world.chunks.insert((1, 0), Arc::new(short));
+
+        let mut changed = LightChanges::default();
+        relight(
+            &mut world,
+            &tables(),
+            true,
+            &[(15, 304, 8), (15, 352, 8)],
+            false,
+            &mut changed,
+        );
+
+        let short = &world.chunks[&(1, 0)];
+        assert_eq!(short.layout().sections(), 24);
+        assert_eq!(short.light(0, 304, 8) & 15, 13);
+        assert_eq!(short.light(0, -16, 8) & 15, 0);
+        assert!(changed.sections().any(|section| section == (1, 43, 0)));
+        assert!(!changed.sections().any(|(x, s, _)| x == 1 && s >= 44));
+    }
+
     #[test]
     fn light_spilling_into_a_saved_neighbour_marks_it_unsaved() {
         use crate::light::tests::{AIR, TORCH, tables, world};

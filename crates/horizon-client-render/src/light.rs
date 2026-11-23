@@ -965,10 +965,10 @@ pub fn update_light_layers<L: AsRef<[u8]>>(
 
 /// Resident chunks the incremental relighter reads and writes.
 pub trait LightWorld {
-    /// Section `s` of chunk (cx, cz), None unless the chunk is loaded and lit.
-    fn section(&self, cx: i32, s: usize, cz: i32) -> Option<&Arc<Section>>;
+    /// Section at absolute block Y `y`, if the chunk is loaded, lit and holds that Y.
+    fn section(&self, cx: i32, y: i32, cz: i32) -> Option<&Arc<Section>>;
     /// Replace the light of a section `section` returned.
-    fn set_section_light(&mut self, cx: i32, s: usize, cz: i32, light: Light);
+    fn set_section_light(&mut self, cx: i32, y: i32, cz: i32, light: Light);
     /// The column the world's chunks hold (its level's).
     fn layout(&self) -> ColumnLayout;
     /// What a part answered for the `dynamic_light` cell at (x, y, z), if its chunk holds an
@@ -988,15 +988,34 @@ impl<S: std::hash::BuildHasher> LightWorld for HashMap<(i32, i32), Arc<Chunk>, S
             .get(&chunk.dynamic_cell(x, y, z)?)
             .copied()
     }
-    fn section(&self, cx: i32, s: usize, cz: i32) -> Option<&Arc<Section>> {
-        self.get(&(cx, cz))
-            .filter(|c| c.lit)
-            .map(|c| &c.sections[s])
+    fn section(&self, cx: i32, y: i32, cz: i32) -> Option<&Arc<Section>> {
+        let chunk = self.get(&(cx, cz)).filter(|c| c.lit)?;
+        let section = chunk.section_index(y)?;
+        Some(&chunk.sections[section])
     }
-    fn set_section_light(&mut self, cx: i32, s: usize, cz: i32, light: Light) {
-        if let Some(chunk) = self.get_mut(&(cx, cz)) {
-            Arc::make_mut(&mut Arc::make_mut(chunk).sections[s]).light = light;
+    fn set_section_light(&mut self, cx: i32, y: i32, cz: i32, light: Light) {
+        if let Some(chunk) = self.get_mut(&(cx, cz)).filter(|c| c.lit)
+            && let Some(section) = chunk.section_index(y)
+        {
+            Arc::make_mut(&mut Arc::make_mut(chunk).sections[section]).light = light;
         }
+    }
+}
+impl LightWorld for crate::world::World {
+    fn layout(&self) -> ColumnLayout {
+        self.layout()
+    }
+
+    fn dynamic_emission(&self, x: i32, y: i32, z: i32) -> Option<u8> {
+        self.chunks.dynamic_emission(x, y, z)
+    }
+
+    fn section(&self, cx: i32, y: i32, cz: i32) -> Option<&Arc<Section>> {
+        self.chunks.section(cx, y, cz)
+    }
+
+    fn set_section_light(&mut self, cx: i32, y: i32, cz: i32, light: Light) {
+        self.chunks.set_section_light(cx, y, cz, light);
     }
 }
 /// The sections one relight touches, held for the whole flood fill so each
@@ -1006,7 +1025,7 @@ struct Region<'w> {
     world: &'w mut dyn LightWorld,
     layout: ColumnLayout,
     slots: Vec<Slot>,
-    /// Section key (cx, s, cz) to slot, `NONE` where the chunk isn't lit.
+    /// Section key (cx, absolute section Y, cz) to slot, `NONE` where the chunk isn't lit.
     index: FxHashMap<Pos, u32>,
     last: (Pos, u32),
 }
@@ -1029,8 +1048,8 @@ impl<'w> Region<'w> {
     }
     #[inline(always)]
     fn slot(&mut self, x: i32, y: i32, z: i32) -> Option<usize> {
-        let s = self.layout.section_index(y)?;
-        let key = (x >> 4, s as i32, z >> 4);
+        self.layout.section_index(y)?;
+        let key = (x >> 4, y >> 4, z >> 4);
         if self.last.0 != key {
             self.last = (key, self.load(key));
         }
@@ -1040,7 +1059,7 @@ impl<'w> Region<'w> {
         if let Some(&slot) = self.index.get(&key) {
             return slot;
         }
-        let slot = match self.world.section(key.0, key.1 as usize, key.2) {
+        let slot = match self.world.section(key.0, key.1 << 4, key.2) {
             Some(section) => {
                 self.slots.push(Slot {
                     key,
@@ -1124,7 +1143,7 @@ impl<'w> Region<'w> {
             drop(slot.section);
             let (cx, s, cz) = slot.key;
             self.world
-                .set_section_light(cx, s as usize, cz, Light::packed(light));
+                .set_section_light(cx, s << 4, cz, Light::packed(light));
         }
     }
 }
