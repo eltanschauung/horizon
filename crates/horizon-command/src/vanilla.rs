@@ -611,6 +611,7 @@ pub fn session_dispatcher(registry: &RuleRegistry, features: &[String]) -> Dispa
         features.iter().any(|f| f == MINECART_IMPROVEMENTS),
         registry,
     );
+    fork_commands(&mut tree);
     if horizon {
         horizon_commands(&mut tree, 0);
     }
@@ -651,20 +652,24 @@ pub(crate) fn game_tree(dev: bool, horizon: bool, dedicated: bool) -> &'static D
     TREES[usize::from(dev) | usize::from(horizon) << 1 | usize::from(dedicated) << 2].get_or_init(
         || {
             let mut d = build_for(dev, dedicated);
-            // Fork command: available on integrated and dedicated servers, without
-            // changing the vanilla-only trees used by parity harnesses.
-            let spawn = d.literal(0, "worldspawn");
-            d.requires(spawn, GAMEMASTERS);
-            d.executes(spawn, "worldspawn");
-            let feedback = d.literal(0, "feedback");
-            let message = d.argument(feedback, "message", ArgType::Greedy);
-            d.executes(message, "feedback");
+            fork_commands(&mut d);
             if horizon {
                 horizon_commands(&mut d, 0);
             }
             d
         },
     )
+}
+
+/// Commands shared by the fallback and per-session fork dispatchers.
+fn fork_commands(d: &mut Dispatcher) {
+    let spawn = d.literal(0, "worldspawn");
+    d.requires(spawn, GAMEMASTERS);
+    d.executes(spawn, "worldspawn");
+
+    let feedback = d.literal(0, "feedback");
+    let message = d.argument(feedback, "message", ArgType::Greedy);
+    d.executes(message, "feedback");
 }
 
 /// Commands vanilla doesn't have, after its own: `/pregen`
