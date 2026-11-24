@@ -97,7 +97,10 @@ fn real_install_profiles_plan_their_client_steps() {
             "--input".into(),
             at(&root, "mc/versions/26.3/26.3.jar"),
             "--output".into(),
-            at(&root, "mc/libraries/net/neoforged/minecraft-client-patched/26.3.0.101/minecraft-client-patched-26.3.0.101.jar"),
+            at(
+                &root,
+                "mc/libraries/net/neoforged/minecraft-client-patched/26.3.0.101/minecraft-client-patched-26.3.0.101.jar"
+            ),
             "--extract-libraries-to".into(),
             format!("{}/libraries/", at(&root, "mc")),
             "--apply-patches".into(),
@@ -147,7 +150,10 @@ fn real_install_profiles_plan_their_client_steps() {
     );
     assert_eq!(
         steps[0].args[3],
-        at(&root, "mc/libraries/de/oceanlabs/mcp/mcp_config/1.20.1-20230612.114412/mcp_config-1.20.1-20230612.114412.zip")
+        at(
+            &root,
+            "mc/libraries/de/oceanlabs/mcp/mcp_config/1.20.1-20230612.114412/mcp_config-1.20.1-20230612.114412.zip"
+        )
     );
     assert_eq!(
         steps[1].args[..6],
@@ -160,7 +166,10 @@ fn real_install_profiles_plan_their_client_steps() {
             "client"
         ]
     );
-    let slim = at(&root, "mc/libraries/net/minecraft/client/1.20.1-20230612.114412/client-1.20.1-20230612.114412-slim.jar");
+    let slim = at(
+        &root,
+        "mc/libraries/net/minecraft/client/1.20.1-20230612.114412/client-1.20.1-20230612.114412-slim.jar",
+    );
     assert_eq!(steps[3].args[3], slim);
     assert_eq!(steps[4].args[1], slim);
     assert_eq!(
@@ -170,9 +179,11 @@ fn real_install_profiles_plan_their_client_steps() {
             "de86b035d2da0f78940796bb95c39a932ed84834".to_string()
         )
     );
-    assert!(steps[4]
-        .jar
-        .ends_with("ForgeAutoRenamingTool-0.1.22-all.jar"));
+    assert!(
+        steps[4]
+            .jar
+            .ends_with("ForgeAutoRenamingTool-0.1.22-all.jar")
+    );
     fs::remove_dir_all(&root).unwrap();
 }
 
@@ -335,9 +346,11 @@ fn an_installer_runs_its_processors_and_checks_what_they_make() {
         format!("{maven}/net/x/helper/1/helper-1.jar"),
         b"tampered".to_vec(),
     );
-    assert!(install_with(&tampered)
-        .unwrap_err()
-        .contains("helper-1.jar is not the one"));
+    assert!(
+        install_with(&tampered)
+            .unwrap_err()
+            .contains("helper-1.jar is not the one")
+    );
 
     // An installer for another game version is refused.
     let mut other = profile(&sha1_hex(&patched));
@@ -445,7 +458,7 @@ fn a_real_installer_installs() {
             .join(" ")
             .replace(&*dir.to_string_lossy(), "<dir>")
     );
-    let out = Command::new(&java)
+    let out = crate::process::command(&java)
         .arg("--dry-run")
         .args(&args[..at])
         .arg(main)

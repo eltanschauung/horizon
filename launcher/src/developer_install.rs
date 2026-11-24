@@ -146,7 +146,7 @@ pub fn install(checkout: &Path, program: &Path, trusted: bool) -> Result<String,
         .tempdir_in(&root)
         .map_err(|e| e.to_string())?;
     let package = staging.path().join("package");
-    let status = Command::new("cargo")
+    let status = crate::process::command("cargo")
         .current_dir(&checkout)
         .args(["run", "--locked", "-p", "xtask", "--", "package"])
         .arg(&program)
@@ -181,7 +181,7 @@ pub fn install(checkout: &Path, program: &Path, trusted: bool) -> Result<String,
 }
 
 pub(crate) fn committed_snapshot(checkout: &Path) -> Result<(String, Vec<u8>), String> {
-    let revision = Command::new("git")
+    let revision = crate::process::command("git")
         .current_dir(checkout)
         .args(["rev-parse", "HEAD"])
         .output()
@@ -193,7 +193,7 @@ pub(crate) fn committed_snapshot(checkout: &Path) -> Result<(String, Vec<u8>), S
         .map_err(|e| e.to_string())?
         .trim()
         .to_owned();
-    let clean = Command::new("git")
+    let clean = crate::process::command("git")
         .current_dir(checkout)
         .args(["status", "--porcelain", "--untracked-files=no"])
         .output()
@@ -201,7 +201,7 @@ pub(crate) fn committed_snapshot(checkout: &Path) -> Result<(String, Vec<u8>), S
     if !clean.status.success() || !clean.stdout.is_empty() {
         return Err(tr("The developer checkout has dirty tracked inputs. Commit your changes first, then rebuild the game and retry.").into());
     }
-    let snapshot = Command::new("git")
+    let snapshot = crate::process::command("git")
         .current_dir(checkout)
         .args([
             "-c",
@@ -232,12 +232,14 @@ mod tests {
     fn dirty_tracked_checkout_is_refused_but_local_commit_is_snapshotted() {
         let folder = tempfile::tempdir().unwrap();
         let git = |args: &[&str]| {
-            assert!(Command::new("git")
-                .current_dir(folder.path())
-                .args(args)
-                .status()
-                .unwrap()
-                .success());
+            assert!(
+                Command::new("git")
+                    .current_dir(folder.path())
+                    .args(args)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
         };
         git(&["init", "-q"]);
         fs::write(folder.path().join("input"), "committed").unwrap();
@@ -262,9 +264,11 @@ mod tests {
             "committed"
         );
         fs::write(folder.path().join("input"), "dirty").unwrap();
-        assert!(committed_snapshot(folder.path())
-            .unwrap_err()
-            .contains("Commit your changes first"));
+        assert!(
+            committed_snapshot(folder.path())
+                .unwrap_err()
+                .contains("Commit your changes first")
+        );
     }
     /// A checkout with the exporters manifest, and a game program beside the given companions.
     fn packaging_inputs(
