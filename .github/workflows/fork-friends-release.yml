@@ -182,8 +182,8 @@ jobs:
     env:
       SOURCE_REVISION: ${{ inputs.bootstrap_commit }}
       HORIZON_VERSION: 0.3.7
-      HORIZON_LAUNCHER_VERSION: 0.3.13
-      HORIZON_LAUNCHER_TAG: launcher@0.3.13
+      HORIZON_LAUNCHER_VERSION: 0.3.14
+      HORIZON_LAUNCHER_TAG: launcher@0.3.14
       HORIZON_MSA_CLIENT_ID: 331e08f8-172d-43b9-835a-3108c2fcdbf3
       HORIZON_TELEMETRY_URL: off
       RUSTFLAGS: ${{ matrix.flags }}
@@ -240,6 +240,7 @@ jobs:
           cargo test --locked --profile fast --manifest-path launcher/Cargo.toml --lib server_sync::tests
           if [[ "$RUNNER_OS" == Windows ]]; then
             cargo test --locked --profile fast --manifest-path launcher/Cargo.toml --lib windows_native_builds_need_no_saved_approval
+            cargo test --locked --profile fast --manifest-path launcher/Cargo.toml --test hidden_processes registry_compiler_keeps_its_streams_without_a_console
           fi
           cargo build --locked --profile fast --manifest-path launcher/Cargo.toml --bin horizon-launcher
           mkdir -p dist

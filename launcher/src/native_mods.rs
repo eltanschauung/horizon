@@ -1395,7 +1395,7 @@ fn kill_tree(pid: u32) {
         libc::kill(-(pid as i32), libc::SIGTERM);
     }
     #[cfg(windows)]
-    let _ = Command::new("taskkill")
+    let _ = crate::process::command("taskkill")
         .args(["/T", "/F", "/PID", &pid.to_string()])
         .status();
 }

@@ -72,6 +72,39 @@ fn exporters_write_to_their_log_file_without_a_console() {
 }
 
 #[test]
+fn registry_compiler_keeps_its_streams_without_a_console() {
+    let root = tempfile::tempdir().unwrap();
+    let plan = root.path().join("plan.json");
+    let compiler = probe();
+    fs::write(
+        &plan,
+        serde_json::to_vec(&serde_json::json!({
+            "rustc": compiler,
+            "target": "fixture-target",
+            "cache_wrapper": null,
+            "workspace_wrapper": null,
+            "search": [],
+            "native": root.path(),
+            "crates": {},
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let output = process::command(env!("CARGO_BIN_EXE_horizon-launcher"))
+        .env("HORIZON_NATIVE_REGISTRY_RUSTC_PLAN", plan)
+        .args([compiler.as_os_str(), "--fail".as_ref()])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(7));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("console_window_visible=false"), "{stdout}");
+    assert!(stdout.contains("stdout is captured"), "{stdout}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("stderr is captured"), "{stderr}");
+}
+
+#[test]
 fn cli_keeps_redirected_stdout_and_stderr() {
     let executable = env!("CARGO_BIN_EXE_horizon-launcher");
     let version = process::command(executable)

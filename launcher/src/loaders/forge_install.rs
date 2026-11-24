@@ -20,7 +20,6 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// The repository's name of `version` (as players name it: `47.3.0`) for `minecraft`:
 /// `1.20.1-47.3.0` where versions carry the game's in front.
@@ -300,7 +299,7 @@ fn run_processors(
             .chain(&step.classpath)
             .map(|p| p.to_string_lossy().into_owned())
             .collect();
-        let out = Command::new(java)
+        let out = crate::process::command(java)
             .arg("-cp")
             .arg(classpath.join(separator))
             .arg(main_class(&step.jar)?)

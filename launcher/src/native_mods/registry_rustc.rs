@@ -119,7 +119,7 @@ pub(super) fn wrapper() -> Option<i32> {
             path.parent()
                 .ok_or("rustc adapter: the plan has no folder")?,
         )?;
-        let status = Command::new(program)
+        let status = crate::process::command(program)
             .args(args)
             .env_remove(PLAN)
             .status()
