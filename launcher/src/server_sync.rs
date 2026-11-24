@@ -214,7 +214,34 @@ fn fetch_manifest() -> Result<Manifest, String> {
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(err)?
         .as_millis();
-    let response = backend::get(&format!("{CHANNEL}?check={now}"))?;
+    #[derive(Deserialize)]
+    struct BranchRef {
+        object: Commit,
+    }
+    #[derive(Deserialize)]
+    struct Commit {
+        sha: String,
+    }
+    let branch: BranchRef = serde_json::from_reader(
+        backend::get(&format!(
+            "https://api.github.com/repos/{}/git/ref/heads/server-sync?check={now}",
+            backend::REPO
+        ))?
+        .into_reader()
+        .take(4096),
+    )
+    .map_err(err)?;
+    if !hex(&branch.object.sha, 40) {
+        return Err("Invalid server update reference".into());
+    }
+    // Cache immutable data by commit. The manifest and signature cannot come
+    // from different promotions, even when the branch moves during this fetch.
+    let manifest_url = format!(
+        "https://raw.githubusercontent.com/{}/{}/manifest.json",
+        backend::REPO,
+        branch.object.sha
+    );
+    let response = backend::get(&manifest_url)?;
     let mut bytes = Vec::new();
     response
         .into_reader()
@@ -224,7 +251,7 @@ fn fetch_manifest() -> Result<Manifest, String> {
     if bytes.len() > LIMIT as usize {
         return Err("Server manifest is too large".into());
     }
-    let signature = backend::get(&format!("{CHANNEL}.sig?check={now}"))?;
+    let signature = backend::get(&format!("{manifest_url}.sig"))?;
     let mut text = String::new();
     signature
         .into_reader()

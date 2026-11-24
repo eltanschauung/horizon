@@ -182,8 +182,8 @@ jobs:
     env:
       SOURCE_REVISION: ${{ inputs.bootstrap_commit }}
       HORIZON_VERSION: 0.3.7
-      HORIZON_LAUNCHER_VERSION: 0.3.14
-      HORIZON_LAUNCHER_TAG: launcher@0.3.14
+      HORIZON_LAUNCHER_VERSION: 0.3.15
+      HORIZON_LAUNCHER_TAG: launcher@0.3.15
       HORIZON_MSA_CLIENT_ID: 331e08f8-172d-43b9-835a-3108c2fcdbf3
       HORIZON_TELEMETRY_URL: off
       RUSTFLAGS: ${{ matrix.flags }}
