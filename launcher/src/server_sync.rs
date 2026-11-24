@@ -223,7 +223,7 @@ fn fetch_manifest() -> Result<Manifest, String> {
         sha: String,
     }
     let branch: BranchRef = serde_json::from_reader(
-        backend::get(&format!(
+        backend::get_uncached(&format!(
             "https://api.github.com/repos/{}/git/ref/heads/server-sync?check={now}",
             backend::REPO
         ))?

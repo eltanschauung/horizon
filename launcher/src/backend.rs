@@ -496,7 +496,18 @@ pub(crate) fn get(url: &str) -> Result<ureq::Response, String> {
 
 /// [`get`], with `None` when the server answers 404: a file that may not exist (a prebuilt game).
 pub(crate) fn get_unless_missing(url: &str) -> Result<Option<ureq::Response>, String> {
+    get_response(url, false)
+}
+
+pub(crate) fn get_uncached(url: &str) -> Result<ureq::Response, String> {
+    get_response(url, true)?.ok_or_else(|| format!("{url} answered 404"))
+}
+
+fn get_response(url: &str, uncached: bool) -> Result<Option<ureq::Response>, String> {
     let mut request = agent(url).get(url);
+    if uncached {
+        request = request.set("Cache-Control", "no-cache, no-store, max-age=0");
+    }
     // CI runners share addresses and hit GitHub's anonymous rate limit; they pass their own token.
     if let Some(token) = std::env::var("HORIZON_GITHUB_TOKEN")
         .ok()
