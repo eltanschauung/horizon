@@ -1057,7 +1057,11 @@ fn authenticate(
                 "INFO",
                 &format!("UUID of player {name} is {}", uuid_string(profile.uuid)),
             );
-            Ok(Ok((profile.uuid, profile.properties)))
+            let uuid = match recovered_player_uuid(profile.uuid, shared, name, address) {
+                Ok(uuid) => uuid,
+                Err(reason) => return Ok(Err(refuse(c, shared, &thread, user, &reason))),
+            };
+            Ok(Ok((uuid, profile.properties)))
         }
         Ok(None) => {
             let text = refuse(
@@ -1089,6 +1093,46 @@ fn authenticate(
         }
     }
 }
+
+// Account recovery is configured by the server operator and runs only after verification by
+// the session service. The portable proof path already returns above, with its original UUID.
+fn recovered_player_uuid(
+    uuid: u128,
+    shared: &Shared,
+    name: &str,
+    address: std::net::SocketAddr,
+) -> Result<u128, horizon_core::nbt::Tag> {
+    let path = crate::logging::player_dir().join("authenticated-player-aliases.txt");
+    let aliases = match std::fs::read_to_string(path) {
+        Ok(aliases) => aliases,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(uuid),
+        Err(error) => {
+            if let Some(log) = &shared.config.log {
+                (log.write)("Server thread", "ERROR", &format!("Reading player recovery mappings: {error}"));
+            }
+            return Err(translatable("multiplayer.disconnect.generic", &[]));
+        }
+    };
+    let target = match recovery_alias(&aliases, uuid) {
+        Ok(Some(target)) => target,
+        Ok(None) => return Ok(uuid),
+        Err(line) => {
+            if let Some(log) = &shared.config.log {
+                (log.write)("Server thread", "ERROR", &format!("Invalid or duplicate player recovery mapping at line {line}"));
+            }
+            return Err(translatable("multiplayer.disconnect.generic", &[]));
+        }
+    };
+    // Preserve admission rules on the authenticated account as well as the saved identity.
+    if let Some(gate) = &shared.config.gate
+        && let Some(reason) = gate(address, uuid, name)
+    {
+        return Err(reason);
+    }
+    Ok(target)
+}
+
+include!("recovery_alias.rs");
 
 fn portable_login(c: &mut Connection, hello: &login::ServerHello) -> Result<Option<u128>, String> {
     portable_login_bound(c, hello, &[])
