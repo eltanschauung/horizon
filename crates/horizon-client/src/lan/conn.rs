@@ -1102,7 +1102,8 @@ fn recovered_player_uuid(
     name: &str,
     address: std::net::SocketAddr,
 ) -> Result<u128, horizon_core::nbt::Tag> {
-    let path = crate::logging::player_dir().join("authenticated-player-aliases.txt");
+    let player_dir = crate::logging::player_dir();
+    let path = player_dir.join("authenticated-player-aliases.txt");
     let aliases = match std::fs::read_to_string(path) {
         Ok(aliases) => aliases,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(uuid),
@@ -1113,8 +1114,8 @@ fn recovered_player_uuid(
             return Err(translatable("multiplayer.disconnect.generic", &[]));
         }
     };
-    let target = match recovery_alias(&aliases, uuid) {
-        Ok(Some(target)) => target,
+    let alias = match recovery_alias(&aliases, uuid) {
+        Ok(Some(alias)) => alias,
         Ok(None) => return Ok(uuid),
         Err(line) => {
             if let Some(log) = &shared.config.log {
@@ -1129,7 +1130,28 @@ fn recovered_player_uuid(
     {
         return Err(reason);
     }
-    Ok(target)
+    match verify_recovery_address(
+        &player_dir.join("authenticated-player-aliases-verified"),
+        uuid,
+        alias,
+        address.ip(),
+    ) {
+        Ok(true) => Ok(alias.target),
+        Ok(false) => {
+            if let Some(log) = &shared.config.log {
+                (log.write)("Server thread", "WARN", "Player recovery IPv4 verification did not match");
+            }
+            Err(horizon_core::nbt::Tag::String(
+                "Account recovery needs verification. Contact a server operator to reach your saved player.".into(),
+            ))
+        }
+        Err(error) => {
+            if let Some(log) = &shared.config.log {
+                (log.write)("Server thread", "ERROR", &format!("Could not record player recovery verification: {error}"));
+            }
+            Err(translatable("multiplayer.disconnect.generic", &[]))
+        }
+    }
 }
 
 include!("recovery_alias.rs");
