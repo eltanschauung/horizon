@@ -2449,6 +2449,7 @@ pub fn session_for_game(
     offline_without_owner: bool,
 ) -> Result<GameSession, NoOwner> {
     let mut accounts = Accounts::load();
+    let requires_session = accounts.selected.is_some();
     if let Some(key) = accounts.selected.clone().filter(|s| s.starts_with("ely:")) {
         return ely::game_session(game_home, &mut accounts, &key)
             .map_err(|e| NoOwner { keyring: Some(e) });
@@ -2460,15 +2461,20 @@ pub fn session_for_game(
         &mut accounts,
         offline_without_owner,
     )?;
-    let env = split_sessions(
-        game_home,
-        &mut accounts,
-        pass.session.as_ref().map(|(a, _)| a.uuid.as_str()),
-    );
+    let playing = pass
+        .session
+        .as_ref()
+        .map(|(account, _)| account.uuid.clone());
+    let session = session_file(game_home, pass, requires_session).map(|mut session| {
+        session.env = split_sessions(game_home, &mut accounts, playing.as_deref());
+        session
+    });
     if let Err(e) = accounts.save_renewed() {
         eprintln!("Horizon: the accounts are not saved: {e}");
     }
-    Ok(session_file(game_home, pass, env))
+    session.map_err(|error| NoOwner {
+        keyring: Some(error),
+    })
 }
 
 /// [`session_for_game`] for one launch as `who` (`play --account`, a signed-in account): who
@@ -2492,16 +2498,16 @@ pub fn session_for_game_as(game_home: &Path, who: &Player) -> Result<GameSession
     if let Err(e) = accounts.save_renewed() {
         eprintln!("Horizon: the accounts are not saved: {e}");
     }
-    let pass = pass?;
-    let env = split_sessions(
-        game_home,
-        &mut accounts,
-        pass.session.as_ref().map(|(a, _)| a.uuid.as_str()),
-    );
+    let mut session = session_file(game_home, pass?, matches!(who, Player::Account(_)))?;
+    let playing = match who {
+        Player::Account(key) => Some(key.as_str()),
+        _ => None,
+    };
+    session.env = split_sessions(game_home, &mut accounts, playing);
     if let Err(e) = accounts.save_renewed() {
         eprintln!("Horizon: the accounts are not saved: {e}");
     }
-    Ok(session_file(game_home, pass, env))
+    Ok(session)
 }
 
 /// The owner gate as `who`, on `accounts`, which keeps its choice of player.
@@ -2529,9 +2535,12 @@ fn launch_as(
 }
 
 /// The game's session files for a launch that passed the gate.
-fn session_file(game_home: &Path, pass: Launch, env: Vec<(&'static str, String)>) -> GameSession {
+fn session_file(
+    game_home: &Path,
+    pass: Launch,
+    requires_session: bool,
+) -> Result<GameSession, String> {
     let mut out = GameSession {
-        env,
         offline: pass.offline,
         ..GameSession::default()
     };
@@ -2541,7 +2550,12 @@ fn session_file(game_home: &Path, pass: Launch, env: Vec<(&'static str, String)>
             Err(e) => out.offline = Some(e),
         }
     }
-    out
+    if requires_session && out.file.is_none() {
+        return Err(out.offline.unwrap_or_else(|| {
+            "Could not start the selected account. Sign in again before playing.".into()
+        }));
+    }
+    Ok(out)
 }
 
 fn split_sessions(

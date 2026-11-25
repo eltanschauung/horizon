@@ -2627,3 +2627,20 @@ fn a_launch_saving_late_keeps_sign_ins_and_outs_made_meanwhile() {
     assert_eq!(names, [std::ffi::OsString::from("accounts.json")]);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn selected_account_failure_cannot_start_a_portable_game() {
+    let store = MemoryStore::default();
+    let stale = Secrets {
+        minecraft_expires_at: 0,
+        ..secrets("old-token", true)
+    };
+    let mut accounts = signed_in(&store, &stale);
+    let home = std::env::temp_dir();
+    let pass = launch(&offline(), None, &store, &mut accounts).unwrap();
+    assert_eq!(session_file(&home, pass, true).unwrap_err(), NOT_CONFIGURED);
+    assert_eq!(accounts.player(), Player::Account(UUID.into()));
+
+    let pass = launch_as(&offline(), None, &store, &mut accounts, &Player::GameName).unwrap();
+    assert!(session_file(&home, pass, false).unwrap().file.is_none());
+}
