@@ -95,7 +95,7 @@ pub const CARGO_CRATES_IO_SOURCE: &str = "registry+https://github.com/rust-lang/
 
 /// The pinned horizon-mixins archive the launcher downloads for `[[native.mixin]]` builds.
 pub const HORIZON_MIXINS_SOURCE: &str =
-    "https://codeload.github.com/horizon-rust/horizon-mixins/tar.gz";
+    "https://codeload.github.com/YKKULTRA/horizon-mixins/tar.gz";
 
 /// Where the fork releases the prebuilt horizon-mixins tool; a release's tag and file follow.
 pub const MIXINS_TOOL_RELEASES: &str = "https://github.com/horizon-rust/horizon/releases/download";

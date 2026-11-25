@@ -57,7 +57,7 @@ const PREFIX: &str = "native-";
 // A staging change invalidates both installed builds and patched-source snapshots.
 const STAGING: &str = "area-aware-mixins-input-v1";
 /// horizon-mixins, for bundles that don't name the revision they were tested with.
-const MIXINS_GIT: &str = "https://github.com/horizon-rust/horizon-mixins";
+const MIXINS_GIT: &str = "https://github.com/YKKULTRA/horizon-mixins";
 pub const MIXINS_REV: &str = horizon_platform::mod_package::mixins_tool::REV;
 
 /// `native-build --mixins-from-source`: this process builds the horizon-mixins tool from its
@@ -2226,7 +2226,7 @@ fn pipeline(
         |b| Some(&b.native().mixins),
         || Ok(MIXINS_REV.into()),
         Some(MIXINS_REV),
-        |r| committed("horizon-rust/horizon-mixins", r),
+        |r| committed("YKKULTRA/horizon-mixins", r),
     )?;
     // Keep developer provenance distinct from a signed base at the same source commit.
     let developer_key = crate::developer_install::is_developer(origin)
