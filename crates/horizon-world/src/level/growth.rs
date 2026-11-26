@@ -502,6 +502,23 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         // behavior template, so a fir sapling never inherits oak geometry.
         let block_name = b.table.name(state);
         if let Some((namespace, path)) = block_name.split_once(':') {
+            let mega = format!("{namespace}:huge_saplings/{path}");
+            if self.feature_exists(&mega)
+                && let Some((dx, dz, around)) = self.two_by_two(state, pos)
+            {
+                let Some(feature) = self.grow_feature_event(pos, Some(&mega)) else {
+                    return;
+                };
+                for &(_, p) in &around {
+                    self.remove_sapling(p);
+                }
+                if !self.place_configured_feature(&feature, pos.offset(dx, 0, dz)) {
+                    for &(saved, p) in &around {
+                        self.set_block(p, saved, flags::UPDATE_NONE);
+                    }
+                }
+                return;
+            }
             let feature = format!("{namespace}:saplings/{path}");
             if self.feature_exists(&feature) {
                 self.remove_sapling(pos);
