@@ -2567,15 +2567,25 @@ impl Game<'_> {
     }
     /// `Hud.extractEffects`: icons at the measured top-right anchor, beneficial row then harmful row;
     /// every screen but the inventories keeps them.
+    /// Project the upgraded broom's mount-scoped grant into the normal effect
+    /// displays. The underlying potion keeps its own countdown on dismount.
+    pub(super) fn display_effects(&self) -> impl Iterator<Item = &EffectInstance> {
+        static BROOM_VISION: std::sync::LazyLock<EffectInstance> = std::sync::LazyLock::new(|| {
+            let mut effect = EffectInstance::new("night_vision", -1, 0);
+            effect.visible = false;
+            effect
+        });
+        let broom_vision = self.has_broom_night_vision();
+        self.potions.effects.list.iter()
+            .filter(move |effect| !broom_vision || effect.id != "night_vision")
+            .chain(broom_vision.then_some(&*BROOM_VISION))
+    }
+
     pub(super) fn draw_effect_icons(&self, batch: &mut HudBatch, top: i32) {
-        if self.potions.effects.list.is_empty() || self.screen_shows_active_effects(batch) {
+        if self.screen_shows_active_effects(batch) {
             return;
         }
-        let icons: Vec<hud_overlays::EffectIcon> = self
-            .potions
-            .effects
-            .list
-            .iter()
+        let icons: Vec<hud_overlays::EffectIcon> = self.display_effects()
             .map(hud_overlays::EffectIcon::from)
             .collect();
         let draws = hud_overlays::effects_at(batch.width as i32, top, false, &icons);
@@ -2658,7 +2668,7 @@ impl Game<'_> {
         inventory_effects::panels(
             space,
             layout,
-            &self.potions.effects.list,
+            self.display_effects(),
             self.clock.rate(),
             &|key| self.pack.names.display_get(key),
             &|text| self.gui.atlas.font.width(text).ceil() as i32,
@@ -2676,7 +2686,7 @@ impl Game<'_> {
         rect: [f32; 4],
     ) -> inventory_effects::EffectsLayout {
         let mut layout = inventory_effects::EffectsLayout::vanilla(space.available());
-        if self.potions.effects.list.is_empty()
+        if self.display_effects().next().is_none()
             || space.available() < 32
             || !mod_api::__private::listened(mod_api::HookId::ScreenRenderInventoryMobEffects)
         {

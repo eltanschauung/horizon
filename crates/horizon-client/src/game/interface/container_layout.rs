@@ -141,7 +141,7 @@ impl Game<'_> {
             effects_revision: {
                 use std::hash::{Hash, Hasher};
                 let mut hash = std::collections::hash_map::DefaultHasher::new();
-                for effect in &self.potions.effects.list {
+                for effect in self.display_effects() {
                     effect.id.hash(&mut hash);
                     effect.duration.hash(&mut hash);
                     effect.amplifier.hash(&mut hash);

@@ -69,24 +69,24 @@ impl EffectsLayout {
 pub fn panels<'a>(
     space: &EffectsSpace,
     layout: &EffectsLayout,
-    effects: &'a [EffectInstance],
+    effects: impl IntoIterator<Item = &'a EffectInstance>,
     tick_rate: f32,
     translate: &dyn Fn(&str) -> Option<String>,
     text_width: &dyn Fn(&str) -> i32,
 ) -> Vec<EffectPanel<'a>> {
     let available = space.available();
-    if effects.is_empty() || available < 32 || layout.hidden {
+    if available < 32 || layout.hidden {
         return Vec::new();
     }
     let x = space.left() + layout.offset;
     let origin = space.origin;
     let max_width = if layout.compact { 32 } else { available - 7 };
-    let spacing = if effects.len() > 5 {
-        132 / (effects.len() as i32 - 1)
+    let mut sorted: Vec<_> = effects.into_iter().map(|e| (e, EffectIcon::from(e))).collect();
+    let spacing = if sorted.len() > 5 {
+        132 / (sorted.len() as i32 - 1)
     } else {
         33
     };
-    let mut sorted: Vec<_> = effects.iter().map(|e| (e, EffectIcon::from(e))).collect();
     java_sort(&mut sorted, |a, b| compare_effects(&a.1, &b.1));
     sorted
         .into_iter()
