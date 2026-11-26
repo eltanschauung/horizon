@@ -109,6 +109,10 @@ impl Game<'_> {
         };
         Some((m.corner, m.size, view))
     }
+    /// The view of the texture currently displayed by the HUD.
+    pub(super) fn composed_minimap_view(&self) -> Option<View> {
+        self.extras.minimap.composed_view()
+    }
     /// The minimap shown: a native mod's (`native_minimap`).
     fn minimap_wanted(&self) -> Option<mod_api::Minimap> {
         self.native_minimap_now()

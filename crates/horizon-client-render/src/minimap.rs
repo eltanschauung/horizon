@@ -298,6 +298,17 @@ impl View {
         let (s, c) = f64::from(self.yaw).to_radians().sin_cos();
         ([-c, -s], [-s, c])
     }
+    /// World X/Z projected into GUI pixels relative to the displayed map centre.
+    pub fn project(&self, x: f64, z: f64, display_size: f32) -> (f32, f32) {
+        let (right, forward) = self.axes();
+        let dx = x - self.x;
+        let dz = z - self.z;
+        let scale = f64::from(display_size / self.blocks_per_pixel) / SIZE as f64;
+        (
+            ((dx * right[0] + dz * right[1]) * scale) as f32,
+            (-(dx * forward[0] + dz * forward[1]) * scale) as f32,
+        )
+    }
     /// Where north is on the map's rim, as a unit direction (x right, y down).
     pub fn north(&self) -> (f32, f32) {
         let (r, f) = self.axes();
@@ -504,6 +515,11 @@ impl Minimap {
         scanned
     }
     /// Recompose the image if the view or the tiles changed; true when it did.
+    /// The transform used by the uploaded texture.
+    pub fn composed_view(&self) -> Option<View> {
+        self.composed
+    }
+
     pub fn compose(&mut self, view: View) -> bool {
         if !self.changed
             && self.composed.is_some_and(|c| !view.differs(&c))
