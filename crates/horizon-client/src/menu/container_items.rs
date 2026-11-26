@@ -14,6 +14,9 @@ pub fn vanilla_fits_inside_container_items(stack: &ItemStack) -> bool {
 /// then the parts of the stack's item. An item with no such part keeps vanilla's answer at
 /// the cost of one table lookup. `context` is the loop the menu or the insert runs in.
 pub fn fits_inside_container_items(context: &LoopContext, stack: &ItemStack) -> bool {
+    if stack.enchantment_level("lunatic:soulbound") > 0 {
+        return false;
+    }
     let mut fits = vanilla_fits_inside_container_items(stack);
     crate::native_client_hooks::can_fit_inside_container_items(context, stack, &mut fits);
     fits

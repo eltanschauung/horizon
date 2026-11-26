@@ -513,6 +513,9 @@ impl Containers<'_> {
     /// stand's bottles) take one only when empty, a furnace's fuel slot no bucket onto a
     /// bucket, and a crafter fills its smallest stack first.
     fn can_place(&self, view: &View, slot: usize, stack: &ItemStack) -> bool {
+        if stack.enchantment_level("lunatic:soulbound") > 0 {
+            return false;
+        }
         if !self.accepts(view, slot, stack) {
             return false;
         }

@@ -1795,6 +1795,11 @@ impl Menu {
         own: bool,
         max: u32,
     ) -> (bool, u32) {
+        if self.state.slots[s].container != PLAYER
+            && stack.enchantment_level("lunatic:soulbound") > 0
+        {
+            return (false, 0);
+        }
         let Some(id) = self.registry_id() else {
             return (own, max.min(Self::max_stack(env, stack)));
         };

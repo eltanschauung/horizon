@@ -638,6 +638,11 @@ impl View<'_> {
             && !crate::menu::fits_inside_container_items(self.loop_context, stack))
     }
     fn slot_rules(&self, i: usize, stack: &ItemStack, rules: &dyn Rules) -> (bool, u32) {
+        if self.container.as_ref().is_some_and(|storage| i < storage.len())
+            && stack.enchantment_level("lunatic:soulbound") > 0
+        {
+            return (false, 0);
+        }
         let own = self.vanilla_may_place(i, stack, rules);
         let max = if self.container.is_none() && (5..=8).contains(&i) {
             1
