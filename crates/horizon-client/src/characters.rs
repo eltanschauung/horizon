@@ -39,13 +39,16 @@ pub struct StartingItem {
 fn one_count() -> u32 {
     1
 }
+fn is_false(value: &bool) -> bool {
+    !*value
+}
 fn default_size() -> f32 {
     1.0
 }
 fn character_size<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f32, D::Error> {
     let size = f32::deserialize(d)?;
     Ok(if size.is_finite() {
-        size.clamp(0.7, 1.2)
+        size.clamp(0.68, 1.2)
     } else {
         1.0
     })
@@ -120,6 +123,12 @@ pub struct Character {
     pub starting_items: Vec<StartingItem>,
     #[serde(default)]
     pub starting_spells: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spellbook: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spellbook_name: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub spell_sheen: bool,
     #[serde(default)]
     pub model: Model,
     #[serde(default)]
@@ -149,6 +158,12 @@ struct CharacterDefinition {
     starting_items: Vec<StartingItem>,
     #[serde(default)]
     starting_spells: Vec<String>,
+    #[serde(default)]
+    spellbook: Option<String>,
+    #[serde(default)]
+    spellbook_name: Option<String>,
+    #[serde(default)]
+    spell_sheen: bool,
     #[serde(default = "default_character_model")]
     model: Model,
     #[serde(default = "default_character_chat")]
@@ -186,6 +201,9 @@ impl From<CharacterDefinition> for Character {
             },
             starting_items: value.starting_items,
             starting_spells: value.starting_spells,
+            spellbook: value.spellbook,
+            spellbook_name: value.spellbook_name,
+            spell_sheen: value.spell_sheen,
             model: value.model,
             character_chat: value.character_chat,
             color: value.color,
@@ -194,6 +212,17 @@ impl From<CharacterDefinition> for Character {
 }
 
 impl Character {
+    /// The catalog stores the basename of an optional PNG under the mod's magic sprites.
+    pub fn spellbook_sprite(&self) -> Option<String> {
+        let name = self.spellbook.as_deref()?;
+        let name = name.strip_suffix(".png").unwrap_or(name);
+        if name.is_empty() || !name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"_-".contains(&b)) {
+            return None;
+        }
+        let (namespace, _) = self.id.split_once(':')?;
+        Some(format!("{namespace}:gui/sprites/magic/{name}"))
+    }
+
     /// Character renderers may replace a model while preserving its posed bones.
     #[horizon_mod_api_macros::replaceable]
     pub fn presentation_model(
@@ -436,7 +465,7 @@ mod tests {
         let c: Character = serde_json::from_value(base.clone()).unwrap();
         assert_eq!(c.size, 1.0);
         assert!(!c.has_race("fairy"));
-        for (size, expected) in [(0.1, 0.7), (1.0, 1.0), (9.0, 1.2)] {
+        for (size, expected) in [(0.1, 0.68), (0.68, 0.68), (1.0, 1.0), (9.0, 1.2)] {
             let mut data = base.clone();
             data["size"] = serde_json::json!(size);
             data["race"] = serde_json::json!("youkai, Fairy ,ice_fairy,");

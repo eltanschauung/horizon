@@ -33,6 +33,7 @@ pub struct Spell {
     pub name: String,
     #[serde(default)]
     pub description: String,
+    #[serde(default)]
     pub icon: String,
     pub color: u32,
     pub kind: Kind,
@@ -93,7 +94,7 @@ impl Spell {
     fn valid(&self, namespace: &str) -> bool {
         self.id.starts_with(&format!("{namespace}:"))
             && identifier(&self.id)
-            && identifier(&self.icon)
+            && (self.icon.is_empty() || identifier(&self.icon))
             && self.name.len() <= 80
             && !self.name.is_empty()
             && self.description.len() <= 2048

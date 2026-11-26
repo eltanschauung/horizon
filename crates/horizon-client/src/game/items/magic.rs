@@ -781,13 +781,15 @@ impl Game<'_> {
         );
         // Cover the vanilla book glyph while retaining its familiar button rim.
         batch.fill(atlas, bx + 2., by + 1., 16., 16., rgba(139, 139, 139, 255));
-        if let Some(rect) = atlas.sprites.get(&page.icon).copied() {
+        let book = self.character.as_ref().and_then(|c| c.spellbook_sprite());
+        if let Some(rect) = book.as_ref().and_then(|key| atlas.sprites.get(key))
+            .or_else(|| atlas.sprites.get(&page.icon)).copied() {
             batch.rect_uv(bx + 2., by + 1., 16., 16., rect, u32::MAX);
         }
         if hover {
             self.draw_tooltip_lines(
                 batch,
-                &[(page.title.clone(), rgb(page.color))],
+                &[(self.magic_book_name().to_owned(), rgb(page.color))],
                 self.cursor.0,
                 self.cursor.1,
             );
@@ -865,6 +867,34 @@ impl Game<'_> {
             .rposition(Option::is_some)
             .map_or(1, |i| (i + 1).div_ceil(magic::PAGE_SIZE))
     }
+    fn magic_book_name(&self) -> &str {
+        self.character.as_ref().and_then(|c| c.spellbook_name.as_deref()).unwrap_or("Magic")
+    }
+
+    fn draw_spell_icon(&self, batch: &mut HudBatch, spell: &Spell, x: f32, y: f32) {
+        let atlas = &self.gui.atlas;
+        let book = self.character.as_ref().and_then(|c| c.spellbook_sprite());
+        let Some(rect) = book.as_ref().and_then(|key| atlas.sprites.get(key))
+            .or_else(|| atlas.sprites.get(&spell.icon))
+            .or_else(|| self.pack.magic_catalog.page.as_ref().and_then(|page| atlas.sprites.get(&page.icon)))
+            .copied()
+        else { return };
+        batch.rect_uv(x, y, 16.0, 16.0, rect, u32::MAX);
+        if self.character.as_ref().is_some_and(|c| c.spell_sheen)
+            && let Some(glint) = self.glint_frame.glint(8.0)
+        {
+            use horizon_client::hud::Blend;
+            let start = batch.vertices.len();
+            batch.quad_glint(
+                [[x, y], [x + 16., y], [x + 16., y + 16.], [x, y + 16.]],
+                [[rect.u0 + 2., rect.v0], [rect.u1 + 2., rect.v0], [rect.u1 + 2., rect.v1], [rect.u0 + 2., rect.v1]],
+                [[0., 0.], [1., 0.], [1., 1.], [0., 1.]].map(|uv| glint.uv(uv)),
+                u32::MAX,
+            );
+            batch.blend_since(start, Blend::Additive);
+        }
+    }
+
     pub(super) fn draw_magic_page(&mut self, batch: &mut HudBatch, ox: f32, oy: f32) {
         let atlas = &self.gui.atlas;
         // Equipment, offhand, output and crafting are visible but disabled.
@@ -910,9 +940,8 @@ impl Game<'_> {
             }
             if let Some(id) = &self.magic.ui.inventory.ledger.slots[slot]
                 && let Some(spell) = self.pack.magic_catalog.spells.get(id)
-                && let Some(rect) = atlas.sprites.get(&spell.icon).copied()
             {
-                batch.rect_uv(ox + x, oy + y, 16., 16., rect, u32::MAX);
+                self.draw_spell_icon(batch, spell, ox + x, oy + y);
             }
         }
         let pages = self.magic_pages();
@@ -935,16 +964,8 @@ impl Game<'_> {
             if let Some(spell) = self.magic.ui.inventory.ledger.slots[*slot]
                 .as_ref()
                 .and_then(|id| self.pack.magic_catalog.spells.get(id))
-                && let Some(rect) = self.gui.atlas.sprites.get(&spell.icon).copied()
             {
-                batch.rect_uv(
-                    self.cursor.0 - 8.,
-                    self.cursor.1 - 8.,
-                    16.,
-                    16.,
-                    rect,
-                    u32::MAX,
-                );
+                self.draw_spell_icon(batch, spell, self.cursor.0 - 8., self.cursor.1 - 8.);
             }
         } else if let Some(spell) = hovered
             .and_then(|slot| self.magic.ui.inventory.ledger.slots[slot].as_ref())
