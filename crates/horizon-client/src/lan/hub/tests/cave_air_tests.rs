@@ -99,3 +99,18 @@ fn a_guest_hovering_in_cave_air_is_kicked_for_flying() {
         "the guest is kicked for flying"
     );
 }
+
+#[test]
+fn authorized_flight_resets_the_server_floating_counter() {
+    let (mut hub, _rx) = hub_with_a_guest();
+    let mut events = Vec::new();
+    hub.guests.update(0, |g| {
+        g.abilities.may_fly = true;
+        g.client_is_floating = true;
+        g.above_ground_ticks = maximum_flying_ticks(PLAYER_GRAVITY);
+    });
+    hub.tick_floating(0, &mut events);
+    assert!(events.is_empty());
+    assert!(hub.pending_kicks.is_empty());
+    assert_eq!(hub.guests[0].above_ground_ticks, 0);
+}
