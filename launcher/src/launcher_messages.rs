@@ -300,7 +300,7 @@ impl Launcher {
                 Msg::Updates(Ok(updates)) => {
                     self.update_error = None;
                     self.updates = *updates;
-                    if self.settings.auto_install() {
+                    if self.settings.auto_install() && self.managed_instance().is_none() {
                         self.install_update();
                     }
                     if let Some(release) = self.updates.launcher.clone() {

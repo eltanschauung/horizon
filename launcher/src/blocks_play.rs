@@ -4,6 +4,38 @@ use super::*;
 impl Launcher {
     pub(crate) fn play_page(&mut self, cx: &mut Context<Self>) -> Div {
         let t = self.theme;
+        if self.managed_instance().is_some() && self.selected().is_none() {
+            let status = self.server_sync_status();
+            let error = self.server_sync_error().map(str::to_owned);
+            let action = if let Some(status) = status {
+                centered(&status, &t).into_any_element()
+            } else if self.horizon_preparation_access() == Some(true)
+                || horizon_launcher::developer_offline::selected()
+            {
+                button("first-managed-play", "Play", Kind::Primary, &t)
+                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                        this.play();
+                        cx.notify();
+                    }))
+                    .into_any_element()
+            } else {
+                button("first-managed-sign-in", "Sign in to play", Kind::Primary, &t)
+                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                        this.sign_in_to_play();
+                        cx.notify();
+                    }))
+                    .into_any_element()
+            };
+            return div()
+                .flex()
+                .flex_col()
+                .gap(px(24.))
+                .pt(px(28.))
+                .child(page_header("Play", "Start the game, or run a server for others to join.", &t))
+                .children(error.map(|error| centered(&error, &t)))
+                .child(action)
+                .children(self.memory_row(cx));
+        }
         // A Java instance plays Mojang's game: no Horizon version, nothing of Horizon's to prepare.
         let java = self.selected_instance().and_then(|i| i.java.clone());
         let Some(tag) = self

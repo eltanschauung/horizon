@@ -48,7 +48,7 @@ impl Run {
     }
 }
 impl Launcher {
-    fn managed_instance(&self) -> Option<instances::Instance> {
+    pub(super) fn managed_instance(&self) -> Option<instances::Instance> {
         self.selected_instance()
             .filter(|i| server_sync::manages_instance(i))
             .cloned()
